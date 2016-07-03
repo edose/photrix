@@ -1,5 +1,5 @@
 {
-  "name": "Borea",
+  "name": "Instrument_test1",
   "description": "C14 on MX+ with Atlas & SBIG 6303E, first light Sept 2015",
   "min_altitude": 25,
   "twilight_sun_alt": -9,
@@ -22,8 +22,8 @@
     "model": "SBIG STXL 6303E",
     "pixels_x": 3072,
     "pixels_y": 2048,
-    "pixel_microns": 9,
-    "shortest_exposure": 0.5,
+    "microns_per_pixel": 9,
+    "shortest_exposure": 0.6,
     "saturation_adu": 54000
   },
 

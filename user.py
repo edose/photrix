@@ -1,4 +1,5 @@
 import json
+import os
 from util import hex_degrees_as_degrees
 
 __author__ = "Eric Dose :: Bois d'Arc Observatory, Kansas"
@@ -7,15 +8,15 @@ __author__ = "Eric Dose :: Bois d'Arc Observatory, Kansas"
 class Site:
     """
     Object: holds site info (no instrument or AN info).
-    Usage: site = site("BDO_Kansas")
+    Usage: site = Site("BDO_Kansas")
     """
-    def __init__(self, site_filename):
-        site_relpath = "site/" + site_filename + ".json"
-        with open(site_relpath) as data_file:
+    def __init__(self, site_name):
+        site_fullpath = os.path.dirname(__file__) + "/site/" + site_name + ".json"
+        with open(site_fullpath) as data_file:
             data = json.load(data_file)
 
-        self.filename = site_filename
-        self.name = data.get("name", site_filename)
+        self.name = data.get("name", site_name)
+        self.filename = site_name + ".json"
         self.description = data.get("description", "")
         self.longitude = data.get("longitude", None)  # West longitude is negative.
         if self.longitude is not None:
@@ -44,12 +45,14 @@ class Instrument:
     Object: holds instrument info (no site or AN info).
     Usage: inst = Instrument("Borea")
     """
-    def __init__(self, instrument_filename):
-        instrument_relpath = "instrument/" + instrument_filename + ".json"
-        with open(instrument_relpath) as data_file:
+    def __init__(self, instrument_name):
+        instrument_fullpath = os.path.dirname(__file__) + "/instrument/" + instrument_name + ".json"
+        # print (">>>" + instrument_fullpath + "<<<")
+        with open(instrument_fullpath) as data_file:
             data = json.load(data_file)
-        self.filename = instrument_filename
-        self.name = data.get("name", instrument_filename)
+
+        self.name = data.get("name", instrument_name)
+        self.filename = instrument_name + ".json"
         self.description = data.get("description", "")
         self.min_altitude = data.get("min_altitude", 0)
         self.twilight_sun_alt = data.get("twilight_sun_alt", -10)
@@ -65,22 +68,21 @@ class Instrument:
 
         ota = data.get("ota")
         ota["model"] = ota.get("model", "")
-        ota["focal_length_mm"] = ota.get("focal_length_mm", None)
+        ota["focal_length_mm"] = ota.get("focal_length_mm", 0)
         self.ota = ota
 
         camera = data.get("camera")
         camera["model"] = camera.get("model", "")
-        camera["pixels_x"] = camera.get("pixels_x", None)
-        camera["pixels_y"] = camera.get("pixels_y", None)
-        camera["pixels_microns"] = camera.get("pixels_microns", None)
-        camera["shortest_exposure"] = camera.get("shortest_exposure", None)
+        camera["pixels_x"] = camera.get("pixels_x", 0)
+        camera["pixels_y"] = camera.get("pixels_y", 0)
+        camera["microns_per_pixel"] = camera.get("microns_per_pixel", 0)
+        camera["shortest_exposure"] = camera.get("shortest_exposure", 0)
         camera["saturation_adu"] = camera.get("saturation_adu", 64000)
         self.camera = camera
 
         self.filters = data.get("filters")
 
         is_valid = True  # default to be falsified if any error.
-
 
         self.is_valid = is_valid
 
