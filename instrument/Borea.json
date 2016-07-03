@@ -1,0 +1,56 @@
+{
+  "name": "Borea",
+  "description": "C14 on MX+ with Atlas & SBIG 6303E, first light Sept 2015",
+  "min_altitude": 25,
+  "twilight_sun_alt": -9,
+  "min_distance_full_moon": 50,
+
+  "mount": {
+    "model": "Paramount MX+ on tripod",
+    "slew_rate_ra": 4,
+    "slew_rate_dec": 4,
+    "sec_to_speed_ra": 1,
+    "sec_to_speed_dec": 1
+  },
+
+  "ota": {
+    "model": "Celestron C14 Edge HD",
+    "focal_length_mm": 2710
+  },
+
+  "camera": {
+    "model": "SBIG STXL 6303E",
+    "pixels_x": 3072,
+    "pixels_y": 2048,
+    "pixel_microns": 9,
+    "shortest_exposure": 0.5,
+    "saturation_adu": "54000"
+  },
+
+  "filters": {
+    "V": {
+      "reference_exposure_mag10": 22,
+      "transforms: {
+        "V-I": 0.02,
+        "B-V": 0,
+        "V-R": 0
+      }
+    },
+    "R": {
+      "reference_exposure_mag10": 30,
+      "transform: {
+        "V-I": 0.02,
+        "B-V": 0,
+        "V-R": 0
+      }
+    },
+    "I": {
+      "reference_exposure_mag10": 70,
+      "transform": {
+        "V-I": 0.02,
+        "B-V": 0,
+        "V-R": 0
+      }
+    }
+  }
+}
