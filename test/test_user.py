@@ -1,12 +1,13 @@
-from user import *
-from util import hex_degrees_as_degrees
+from photrix import user                 # call: user.fn() & user.Class()
+
+from photrix.util import hex_degrees_as_degrees
 
 __author__ = "Eric Dose :: Bois d'Arc Observatory, Kansas"
 
 
 def test_Site():
     site_name = "Site_test1"
-    s = Site(site_name)
+    s = user.Site(site_name)
     assert s.is_valid
     assert s.name == site_name
     assert s.filename == s.name + ".json"
@@ -19,7 +20,7 @@ def test_Site():
 
 def test_Instrument():
     instrument_name = "Instrument_test1"
-    i = Instrument(instrument_name)
+    i = user.Instrument(instrument_name)
     assert i.is_valid
     assert i.name == instrument_name
     assert i.filename == i.name + ".json"
@@ -47,7 +48,7 @@ def test_Instrument():
     assert i.filters["I"]["transform"]["V-I"] == 0.025
 
     instrument_name = "Instrument_test2"
-    i = Instrument(instrument_name)
+    i = user.Instrument(instrument_name)
     assert i.is_valid
     assert i.name == "XXX"
     assert i.filename == instrument_name + ".json"

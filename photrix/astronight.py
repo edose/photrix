@@ -1,6 +1,7 @@
 import ephem
-from util import Timespan
 from user import Instrument
+
+from photrix.util import Timespan
 
 __author__ = "Eric Dose :: Bois d'Arc Observatory, Kansas"
 

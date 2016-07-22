@@ -1,5 +1,6 @@
-from web_aavso import *
 import pytest   # so we can have the @pytest... decorator
+
+from photrix.web_aavso import *
 
 __author__ = "Eric Dose :: Bois d'Arc Observatory, Kansas"
 

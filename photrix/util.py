@@ -79,19 +79,6 @@ def dec_as_degrees(dec_string):
         Returns: float of Declination in degrees, required to be -90 to +90, inclusive.
     """
     dec_degrees = hex_degrees_as_degrees(dec_string)
-    # dec_list = dec_string.split(":")
-    # dec_list = [dec.strip() for dec in dec_list]
-    # if dec_list[0].startswith("-"):
-    #     sign = -1
-    # else:
-    #     sign = 1
-    # if len(dec_list) == 1:
-    #     dec_degrees = float(dec_list[0])  # input assumed to be in degrees.
-    # elif len(dec_list) == 2:
-    #     dec_degrees = sign * (abs(float(dec_list[0])) + float(dec_list[1])/60.0)  # input is hex.
-    # else:
-    #     dec_degrees = sign * (abs(float(dec_list[0])) + float(dec_list[1]) / 60.0 +
-    #                           float(dec_list[2])/3600.0)  # input is hex.
     if (dec_degrees < -90) | (dec_degrees > +90):
         dec_degrees = None
     return dec_degrees
@@ -134,10 +121,27 @@ def dec_as_hex(dec_degrees):
     return dec_str
 
 
-# ---------------------------------------------------------------------
-
-if __name__ == '__main__':
-    print(dec_as_hex(0.0))
-    print(dec_as_hex(20.0))
-    print(dec_as_hex(-69.125))
+def weighted_mean(values, weights, return_stdev=False):
+    """
+    Returns weighted mean, and optionally the weighted std deviation of the *mean*.
+    :param values: list (or other iterable) of values to be averaged
+    :param weights: list (or other iterable) of weights; length must = length of values
+    :param return_stdev: True-> return tuple (w_mean, w_stdev); False-> return w_mean only (float).
+    :return: return_stdev==True-> return tuple (w_mean, w_stdev); False-> return w_mean only.
+    """
+    if (len(values) != len(weights)) or len(values) == 0 or len(weights) == 0:
+        raise ValueError('lengths of values & weights must be equal & non-zero.')
+    if sum(weights) <= 0:
+        raise ValueError('sum of weights must be positive.')
+    w_range = range(len(weights))
+    norm_weights = [weights[i]/sum(weights) for i in w_range]
+    w_mean = sum([norm_weights[i]*values[i] for i in w_range])
+    if not return_stdev:
+        return w_mean
+    if len(values) == 1:
+        w_stdev = 0
+    else:
+        v2 = sum([norm_weights[i]**2 for i in w_range])
+        w_stdev = v2 * sum([norm_weights[i]*(values[i]-w_mean)**2 for i in w_range])
+    return w_mean, w_stdev
 

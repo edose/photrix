@@ -1,9 +1,9 @@
 import json
 import os
-from util import hex_degrees_as_degrees
+
+from photrix.util import hex_degrees_as_degrees
 
 __author__ = "Eric Dose :: Bois d'Arc Observatory, Kansas"
-
 
 class Site:
     """
@@ -11,7 +11,8 @@ class Site:
     Usage: site = Site("BDO_Kansas")
     """
     def __init__(self, site_name):
-        site_fullpath = os.path.dirname(__file__) + "/site/" + site_name + ".json"
+        photrix_root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        site_fullpath = os.path.join(photrix_root_dir, "site", (site_name + ".json"))
         with open(site_fullpath) as data_file:
             data = json.load(data_file)
 
@@ -46,8 +47,9 @@ class Instrument:
     Usage: inst = Instrument("Borea")
     """
     def __init__(self, instrument_name):
-        instrument_fullpath = os.path.dirname(__file__) + "/instrument/" + instrument_name + ".json"
-        # print (">>>" + instrument_fullpath + "<<<")
+        photrix_root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        instrument_fullpath = os.path.join(photrix_root_dir, "instrument", \
+                                           (instrument_name + ".json"))
         with open(instrument_fullpath) as data_file:
             data = json.load(data_file)
 
@@ -57,7 +59,6 @@ class Instrument:
         self.min_altitude = data.get("min_altitude", 0)
         self.twilight_sun_alt = data.get("twilight_sun_alt", -10)
         self.min_distance_full_moon = data.get("min_distance_full_moon", 60)  # degrees
-
         mount = data.get("mount")
         mount["model"] = mount.get("model", "")
         mount["slew_rate_ra"] = mount.get("slew_rate_ra", 4)

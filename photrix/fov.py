@@ -1,4 +1,4 @@
-from util import *
+from photrix.util import *
 
 __author__ = "Eric Dose :: Bois d'Arc Observatory, Kansas"
 

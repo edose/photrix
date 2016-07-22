@@ -1,0 +1,61 @@
+<?xml version="1.0"?>
+<RTML xmlns:xs="http://www.w3.org/2001/XMLSchema-instance" version="2.3">
+	<Contact>
+		<User>Eric</User>
+		<Email>astro@ericdose.com</Email>
+		<Organization>Bois d'Arc Observatory, Kansas</Organization>
+	</Contact>
+	<Request>
+		<ID>First Request</ID>
+		<UserName>Eric</UserName>
+		<Description>Req.Description</Description>
+		<Reason>Req.Reason</Reason>
+		<Project>AN20160624-BOREA2</Project>
+		<Schedule>
+			<Airmass>2</Airmass>
+			<AirmassRange>
+				<Minimum>1.7</Minimum>
+				<Maximum>2.2</Maximum>
+			</AirmassRange>
+			<Horizon>28</Horizon>
+			<HourAngleRange>
+				<East>3</East>
+				<West>-3</West>
+			</HourAngleRange>
+			<SkyCondition>Fair</SkyCondition>
+			<Moon>
+				<Distance>50</Distance>
+				<Width>10</Width>
+			</Moon>
+			<TimeRange>
+				<Earliest>2016-08-03T10:45:00</Earliest> <!-- nb: ISO 8601 -->
+				<Latest>2016-08-03T15:45:00</Latest>
+			</TimeRange>
+			<Priority>4</Priority>
+		</Schedule>
+		<Telescope>BOREA</Telescope>
+		<Target count="23" autofocus='True'>
+			<ID>ST Tri</ID>
+			<Name>ST Tri</Name>
+			<Description>Second Target Description</Description>
+			<Coordinates>
+				<RightAscension>121.845</RightAscension>
+				<Declination>24.321</Declination>
+			</Coordinates>
+			<Picture count="3">
+				<Name>ST Tri :: V 120</Name>
+				<Description>ST Tri :: V 120</Description>
+				<ExposureTime>120</ExposureTime>
+				<Binning>1</Binning>
+				<Filter>V</Filter>
+			</Picture>
+			<Picture count="15">
+				<Name>ST Tri :: I 99</Name>
+				<Description>ST Tri :: I 99</Description>
+				<ExposureTime>99</ExposureTime>
+				<Binning>1</Binning>
+				<Filter>I</Filter>
+			</Picture>
+		</Target>
+	</Request>
+</RTML>
