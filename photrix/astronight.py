@@ -1,69 +1,88 @@
+from datetime import datetime, timedelta
 import ephem
-from user import Instrument
-
-from photrix.util import Timespan
+from photrix.user import Site
+from photrix.util import Timespan, RaDec
 
 __author__ = "Eric Dose :: Bois d'Arc Observatory, Kansas"
 
-# THIS MUST WAIT UNTIL module site IS SORTED OUT.
 
 class Astronight:
-    def __init__(self, an_date_string, instrument_name):
+    def __init__(self, an_date_string, site_name, offset_from_UTC):
         """
-        Object: relevant info specific to one observing night.
-        Usage: an = Astronight("20160102", "Borea")
+        Object: relevant info specific to one observing night at one site.
+        Usage: an = Astronight("20160102", "BDO_Kansas")
         """
         self.an_date_string = an_date_string
-        self.instrument_name = instrument_name
+        self.site_name = site_name
+        self.site = Site(site_name)
 
-        instrument = Instrument(instrument_name)  # instrument is of pyphot class instrument.
-        self.instrument = instrument
-
-        site = ephem.Observer()                   # site is an ephem-package object.
-        site.lat = str(instrument.latitude)
-        site.lon = str(instrument.longitude)
-        self.site = site
+        observer = ephem.Observer()  # observer is an ephem-package object.
+        observer.lat = str(self.site.latitude)
+        observer.lon = str(self.site.longitude)
+        observer.elevation = self.site.elevation
+        self.observer = observer
 
         # get local midnight for requested Astronight.
         an_year = int(an_date_string[0:4])
         an_month = int(an_date_string[4:6])
         an_day = int(an_date_string[6:8])
-        self.localMidnightUT = ephem.Date((an_year, an_month, an_day, 24, 0, 0)) \
-            - instrument.timezone * ephem.hour
+        self.localMidnightUT = datetime(an_year, an_month, an_day, 12, 0, 0) + \
+            timedelta(hours=12-offset_from_UTC)
         self.localMidnightJD = ephem.julian_date(self.localMidnightUT)
-        site.date = self.localMidnightUT
-        self.localMidnightLST = site.sidereal_time()
+        observer.date = self.localMidnightUT
+        self.localMidnightLST = observer.sidereal_time()  # in radians
 
-        # Prepare all solar system body objects.
-        self.sun = ephem.Sun()
-        self.moon = ephem.Moon()
-        self.jupiter = ephem.Jupiter()
-        self.saturn = ephem.Saturn()
-        self.venus = ephem.Venus()
+        # Prepare all solar system body objects, exposing RaDecs as of local midnight.
+        observer.date = self.localMidnightUT
+        sun = ephem.Sun(observer)
+        moon = ephem.Moon(observer)
+        self.moon_radec = RaDec(str(moon.ra), str(moon.dec))
+        self.moon_phase = moon.moon_phase
+        jupiter = ephem.Jupiter(observer)
+        self.jupiter_radec = RaDec(str(jupiter.ra), str(jupiter.dec))
+        saturn = ephem.Saturn(observer)
+        self.saturn_radec = RaDec(str(saturn.ra), str(saturn.dec))
+        venus = ephem.Venus(observer)
+        self.venus_radec = RaDec(str(venus.ra), str(venus.dec))
 
         # Prepare timespans for fully dark, this AN.
-        site.horizon = str(instrument.twilightSunAlt)
-        self.time_dark = Timespan(site.previous_setting(self.sun, self.localMidnightUT),
-                                  site.next_rising(self.sun, self.localMidnightUT))
+        observer.horizon = str(self.site.twilight_sun_alt)
+        twilight_dusk = observer.previous_setting(sun, self.localMidnightUT).datetime()
+        twilight_dawn = observer.next_rising(sun, self.localMidnightUT).datetime()
+        self.dark = Timespan(twilight_dusk, twilight_dawn)
 
-        # Prepare timespan for moon up, this AN.
-        site.horizon = '0'
-        site.date = self.localMidnightUT
-        self.moon.compute(site)
-        if self.moon.alt > 0:
-            self.moon_up_and_dark_timespan = Timespan(
-                site.previous_rising(self.moon, start=self.localMidnightUT),
-                site.next_setting(self.moon, start=self.localMidnightUT)).intersect(self.time_dark)
-
+        # Prepare timespan for moon above horizon, this AN & site.
+        observer.horizon = '0'
+        observer.date = self.localMidnightUT
+        moon.compute(observer)
+        if moon.alt > 0:
+            pr = observer.previous_rising(moon, start=self.localMidnightUT).datetime()
+            ns = observer.next_setting(moon, start=self.localMidnightUT).datetime()
+            moon_up = Timespan(pr, ns)
+            self.dark_and_moon_up = moon_up.intersect(self.dark)
+            #self.dark_and_moon_up = Timespan(
+            #    observer.previous_rising(moon, start=self.localMidnightUT).datetime(),
+            #    observer.next_setting(moon, start=self.localMidnightUT).datetime()) \
+            #    .intersect(self.dark)
         else:
-            moon_up_west_and_dark_timespan = Timespan(
-                self.time_dark.start, site.previous_setting(self.moon, start=self.localMidnightUT))
-            moon_up_east_and_dark_timespan = Timespan(
-                site.next_rising(self.moon, start=self.localMidnightUT), self.time_dark.end)
-            if moon_up_west_and_dark_timespan.seconds > moon_up_east_and_dark_timespan.seconds:
-                self.moon_up_and_dark_timespan = moon_up_west_and_dark_timespan
+            dark_and_moon_up_west = Timespan(
+                self.dark.start,
+                observer.previous_setting(moon, start=self.localMidnightUT))
+            dark_and_moon_up_east = Timespan(
+                observer.next_rising(moon, start=self.localMidnightUT),
+                self.dark.end)
+            # choose the longer in unlikely case: moon up at both twilights but not at midnight.
+            if dark_and_moon_up_west.seconds > dark_and_moon_up_east.seconds:
+                self.moon_up_and_dark = dark_and_moon_up_west
             else:
-                self.moon_up_and_dark_timespan = moon_up_east_and_dark_timespan
+                self.moon_up_and_dark = dark_and_moon_up_east
+
+    def available(self, site_long, site_lat, min_alt, ra, dec):
+        """
+        Returns Timespan object defining which  may be observed during this astronight.
+        Usage: ts = astronight.Astronight.available(site.long, site.lat, +28, fov.ra, fov.dec)
+        """
+        pass
 
     def __repr__(self):
         return "Astronight '" + self.an_date_string + "' at site '" + self.instrument.sitename + "'."

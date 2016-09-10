@@ -1,40 +1,68 @@
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
+import math
 
 __author__ = "Eric Dose :: Bois d'Arc Observatory, Kansas"
 
 
 class Timespan:
     """ Holds one (start, end) span of time. Immutable.
-        Input: 2 UTC datetimes, defining start and end of timespan.
+        Input: 2 python datetimes (in UTC), defining start and end of timespan.
     """
     def __init__(self, start_utc, end_utc):
-        if (not isinstance(start_utc, datetime)) or (not isinstance(end_utc, datetime)):
-            pass  # TODO: freak out here.
         self.start = start_utc
         self.end = max(start_utc, end_utc)
-        self.days = max(0, self.end - self.start)
-        self.seconds = 24 * 3600 * self.days
+        self.seconds = (self.end - self.start).seconds
+        self.midpoint = self.start + timedelta(seconds=self.seconds / 2)
 
     def intersect(self, timespan2):
         new_start = max(self.start, timespan2.start)
         new_end = min(self.end, timespan2.end)
         return Timespan(new_start, new_end)
 
-    def contains_time(self, time_ut):
-        return self.start < time_ut < self.end
-
-    def start(self):
-        return self.start_utc
-
-    def end(self):
-        return self.end_utc
-
-    def midpoint(self):
-        return (self.start_utc + self.end_utc) / 2
+    def contains_time(self, time_utc):
+        return self.start <= time_utc <= self.end
 
     def __str__(self):
         return "Timespan '" + str(self.start) + "' to '" + str(self.end) + "' = " + \
                str(self.seconds) + " seconds."
+
+
+class RaDec:
+    """
+    Holds one Right Ascension, Declination sky position (internally as degrees).
+    ra : (hours hex string, or degrees)
+    dec : (degrees hex string, or degrees)
+    """
+    def __init__(self, ra, dec):
+        if isinstance(ra, str):
+            self.ra = ra_as_degrees(ra)
+        else:
+            self.ra = ra
+        if isinstance(dec, str):
+            self.dec = dec_as_degrees(dec)
+        else:
+            self.dec = dec
+
+    def as_degrees(self):
+        return ra_as_degrees(self.ra), dec_as_degrees(self.dec)
+
+    def as_hex(self):
+        return ra_as_hours(self.ra), dec_as_hex(self.dec)
+
+    def alt_az(self, latitude, longitude, time_utc):
+        pass
+
+    def degrees_from(self, other_ra_dec):
+        pass
+
+    def farther_from(self, other_ra_dec, degrees_limit):
+        return self.degrees_from(other_ra_dec) > degrees_limit
+
+    def __str__(self):
+        ra_hex, dec_hex = self.as_hex()
+        return "RaDec object:  " + ra_hex + "  " + dec_hex
+
+
 
 
 def ra_as_degrees(ra_string):
@@ -144,4 +172,37 @@ def weighted_mean(values, weights, return_stdev=False):
         v2 = sum([norm_weights[i]**2 for i in w_range])
         w_stdev = v2 * sum([norm_weights[i]*(values[i]-w_mean)**2 for i in w_range])
     return w_mean, w_stdev
+
+
+DEFAULT_LADDER = [1.0, 1.25, 1.6, 2.0, 2.5, 3.2, 4.0, 5.0, 6.4, 8.0, 10.0]
+
+
+def ladder_round(raw_value, ladder=DEFAULT_LADDER, direction="nearest"):
+    """
+    Rounds to a near-log scale value. May be useful for familiar exposure times.
+    Can handle negative numbers, too. Zero returns zero.
+    :param raw_value: the value we want to round
+    :param ladder: ascending list of values from 1 to 10 to which to round.
+    :param direction: "nearest" or "down" or "up"
+    :return: raw_valued rounded to nearest ladder value, not counting powers of 10,
+    e.g., 32.5 -> 32, 111 -> 100, 6321 -> 6400, -126 -> -125
+    """
+    if raw_value == 0:
+        return 0
+    base = math.copysign(10**(math.floor(math.log10(math.fabs(raw_value)))), raw_value)
+    target = math.fabs(raw_value / base)
+    if target in ladder:
+        return raw_value
+    for i, val in enumerate(ladder[1:]):
+        if target < val:
+            ratio_below = target / ladder[i]
+            ratio_above = ladder[i+1] / target
+            if direction == "down":
+                return base * ladder[i]
+            if direction == "up":
+                return base * ladder[i+1]
+            if ratio_below <= ratio_above:  # default case "nearest"
+                return base * ladder[i]  # round downward
+            else:
+                return base * ladder[i+1]  # round upward
 

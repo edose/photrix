@@ -1,8 +1,6 @@
 {
   "name": "Borea",
   "description": "C14 on MX+ with Atlas & SBIG 6303E, first light Sept 2015",
-  "min_altitude": 25,
-  "twilight_sun_alt": -9,
   "min_distance_full_moon": 50,
 
   "mount": {

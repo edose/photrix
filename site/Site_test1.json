@@ -3,5 +3,7 @@
   "description": "Bois d'Arc Observatory, near Auburn Kansas, established Sept 2013",
   "longitude": "-95:53:18",
   "latitude": "+38:55:29",
-  "altitude": 350
+  "elevation": 350,
+  "min_altitude": 25,
+  "twilight_sun_alt": -9
 }

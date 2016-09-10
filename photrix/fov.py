@@ -1,83 +1,193 @@
 from photrix.util import *
+import os
 
 __author__ = "Eric Dose :: Bois d'Arc Observatory, Kansas"
 
-PHOTOMETRY_PATH = "C:/Dev/Photometry/FOV/"
+FOV_DIRECTORY = "C:/Dev/Photometry/FOV/"
+CURRENT_SCHEMA_VERSION = "1.3"
+
+
+class FOV_list:
+    def __init__(self, fov_name_list):
+        pass
 
 
 class FOV:
     """
     Object: holds info for one Field Of View (generally maps to one AAVSO sequence or chart).
+    For Schema 1.3 of Sept 2016 (as defined initially in R code "photometry").
+    Observation types must be one of: "Stare", "Monitor", "LPV", "Standard"
     Usage: fov = FOV("ST Tri")
     """
-    def __init__(self, fov_name):
-        self.name = fov_name
+    def __init__(self, fov_name, fov_directory=FOV_DIRECTORY):
+        fov_fullpath = os.path.join(fov_directory, fov_name + ".txt")
+        with open(fov_fullpath) as fov_file:
+            lines = fov_file.readlines()
+        lines = [line.split(";")[0] for line in lines]  # remove comments
 
-        # For now (20160413), let's stick with std/legacy R/text file format.
-        fov_relpath = PHOTOMETRY_PATH + fov_name + ".txt"
-        fov_f = open(fov_relpath, 'r')
-        lines = fov_f.readlines()
-        fov_f.close()
-
-        lines = [line.split(";")[0] for line in lines] # remove comments
-        directive_lines = []
-        for line in lines:
-            # line = line.split(";")[0].strip()  # remove comments
-            if line.startswith("#"):
-                directive_lines.append(line)
-
-        # Required directives here.
-        self.sequence = self._directive_values(lines, "#SEQUENCE", 1)
-        ra_str, dec_str = self._directive_values(lines, "#CENTER", 2)
+        # ---------- Header section.
+        self.fov_name = FOV._directive_value(lines, "#FOV_NAME")
+        self.format_version = FOV._directive_value(lines, "#FORMAT_VERSION")
+        if self.format_version != CURRENT_SCHEMA_VERSION:
+            raise FOV_Error
+        ra_str, dec_str = FOV._directive_words(lines, "#CENTER")[:2]
         self.ra = ra_as_degrees(ra_str)
         self.dec = dec_as_degrees(dec_str)
-        self.chart = self._directive_values(lines, "#CHART", 1)
-        self.fov_date = self._directive_values(lines, "#DATE", 1)
-        self.fov_type = self._directive_values(lines, "#TYPE", 1)
-        acp_string = self._directive_values(lines, "#ACP", 1)
-        if acp_string is not None:
-            acp_words = acp_string.split("|")
-            self.acp_comments = acp_words[len(acp_words) - 1]
-            self.acp_directives = acp_words[:len(acp_words)-1]
+        self.chart = FOV._directive_words(lines, "#CHART")[0]
+        self.fov_date = FOV._directive_words(lines, "#DATE")[0]
+
+        # ---------- Main-target section.
+        self.main_target = FOV._directive_value(lines, "#MAIN_TARGET")
+        self.target_type = FOV._directive_value(lines, "#TARGET_TYPE")
+        words = FOV._directive_words(lines, "#PERIOD")
+        if words is not None:
+            self.period = float(words[0])
         else:
-            self.acp_directives = self._directive_values(lines, "#ACP_DIRECTIVES", 1)
-            self.acp_comments = self._directive_values(lines, "#ACP_COMMENTS", 1)
+            self.period = None
+        # As of schema v 1.3, require both values for JD, Mag_V, Color_VI.
+        self.JD_bright, self.JD_faint = (None, None)  # default
+        words = FOV._directive_words(lines, "#JD")
+        if words is not None:
+            self.JD_bright = float(words[0])
+            self.JD_faint = float(words[1])
+        self.mag_V_bright, self.mag_V_faint = (None, None)  # default
+        words = FOV._directive_words(lines, "#MAG_V")
+        if words is not None:
+            self.mag_V_bright = float(words[0])
+            self.mag_V_faint = float(words[1])
+        self.color_VI_bright, self.color_VI_faint = (None, None)  # default
+        words = FOV._directive_words(lines, "#COLOR_VI")
+        if words is not None:
+            self.color_VI_bright = float(words[0])
+            self.color_VI_faint = float(words[1])
 
-        # Optional directives here: #PERIOD, #ACP_DIRECTIVES, #ACP_COMMENT, #STARE, #PUNCH.
-        self.period = self._directive_values(lines, "#PERIOD", 1)
-        self.stare = self._directive_values(lines, "#STAREFOR", 1)
-        self.punches = self._get_punch_values(lines)
+        # ---------- Observing section.
+        obs_style_words = FOV._directive_words(lines, "#OBSERVING_STYLE")
+        obs_style = obs_style_words[0]
+        obs_values = obs_style_words[1:]
+        if obs_style not in ["Stare", "Monitor", "LPV", "Standard"]:
+            raise ValueError("'" + obs_style + "' is not a valid Observing Style.")
 
-        # Get AAVSO star lines.
-        self.aavso_stars = self._get_aavso_star_lines(lines)
+        self.observing_style = obs_style
+        self.alert = None  # default
+        self.observing_list = []
+        for val in obs_values:
+            items = val.split("=")
+            tag = items[0]
+            # Handle non-filter entries on #OBSERVING_STYLE line.
+            if tag == "ALERT" and len(items) >= 2:
+                self.alert = float(items[1])
+                continue
+            # (here, insert any additional future non-filter values like "ALERT=n")
 
-    def _directive_values(self, lines, directive_string, n_values):
-        default_value = None  # if directive absent from FOV file.
+            # Handle filter entries on #OBSERVING_STYLE line.
+            this_filter = None
+            if len(items) == 1:  # cases without specified magnitude
+                bits = items[0].split("(")
+                if len(bits) == 1:  # case "V" for LPVs, one exposure
+                    this_filter = bits[0]
+                    this_mag = None
+                    this_count = 1
+                elif len(bits) == 2:  # case "V(2) for LPVs, 2 exposures, e.g.
+                    this_filter = bits[0]
+                    this_mag = None
+                    this_count = int(bits[1].replace(")", ""))
+            elif len(items) == 2:  # cases with specified magnitude
+                bits = items[1].split("(")
+                this_filter = items[0]
+                if len(bits) == 1:  # case "V=13.2" for monitors etc, one exposure
+                    this_mag = float(bits[0])
+                    this_count = 1
+                elif len(bits) == 2:  # case "V=13.2(2)" for stares
+                    this_mag = float(bits[0])
+                    this_count = int(bits[1].replace(")", ""))
+            self.observing_list.append((this_filter, this_mag, this_count))
+            if this_filter is None:
+                raise FOV_Error
+
+        stare_hours_words = FOV._directive_words(lines, "#STARE_HOURS")
+        if stare_hours_words is not None:
+            if len(stare_hours_words) >= 1:
+                if stare_hours_words[0] == "ANY":
+                    if len(stare_hours_words) >= 2:
+                        self.stare_reference = stare_hours_words[0]
+                        self.stare_start = 0
+                        self.stare_stop = float(stare_hours_words[1])
+                elif stare_hours_words[0] in ["MIN", "MAX"]:
+                    if len(stare_hours_words) >= 3:
+                        self.stare_reference = stare_hours_words[0]
+                        self.stare_start = float(stare_hours_words[1])
+                        self.stare_stop = float(stare_hours_words[2])
+        else:
+            self.stare_reference = None  # defaults
+            self.stare_start = None
+            self.stare_stop = None
+
+        max_exp_value = FOV._directive_value(lines, "#MAX_EXPOSURE")
+        if max_exp_value is not None:
+            self.max_exposure = float(max_exp_value)
+            if self.max_exposure <= 0:
+                self.max_exposure = None
+        else:
+            self.max_exposure = None
+
+        value = FOV._directive_value(lines, "#PRIORITY")
+        if value is not None:
+            self.priority = float(value)
+        else:
+            self.priority = None
+        value = FOV._directive_value(lines, "#GAP_SCORE_DAYS")
+        if value is not None:
+            gap_score_words = value.split()
+            if len(gap_score_words) >= 3:
+                self.gap_score_days = [float(word) for word in gap_score_words[:3]]
+            else:
+                self.gap_score_days = [self.period * fraction for fraction in [0.01, 0.02, 0.05]]
+        else:
+            self.gap_score_days = None
+        self.acp_directives = FOV._directive_value(lines, "#ACP_DIRECTIVES").split("|")
+        self.acp_comments = FOV._directive_value(lines, "#ACP_COMMENTS")
+
+    # ---------- AAVSO Sequence section.
+        self.punches = FOV._get_punch_values(lines)
+        self.aavso_stars = FOV._get_aavso_stars(lines)
+
+    # ---------- Diagnostics and messages before finalizing object.
+        if not self.fov_name.startswith("Std_"):
+            star_is_check = [star.star_type == "check" for star in self.aavso_stars]
+            if not any(star_is_check):
+                print(">>>>> WARNING: FOV file ", self.fov_name,
+                      " seems not to be a Standard FOV, but has NO CHECK STAR.")
+
+    @staticmethod
+    def _directive_value(lines, directive_string):
         for line in lines:
             if line.upper().startswith(directive_string):
-                value_string = line[len(directive_string):].strip()
-                if n_values == 1:
-                    return value_string
-                else:
-                    value_strings = value_string.split()
-                    if len(value_strings) >= n_values:
-                        return [s.strip() for s in value_strings]
-        return default_value
+                return line[len(directive_string):].strip()
+        return None  # if directive absent.
 
-    def _get_punch_values(self, lines):
+    @staticmethod
+    def _directive_words(lines, directive_string):
+        value = FOV._directive_value(lines, directive_string)
+        if value is None:
+            return None
+        return value.split()
+
+    @staticmethod
+    def _get_punch_values(lines):
         punch_values = []
         for line in lines:
             if line.upper().startswith("#PUNCH"):
                 value_string = line[len("#PUNCH"):].strip()
-                # colon delimiter, as star ID may contain spaces (e.g., "ST Tri")
                 star_id = (value_string.split(":")[0])
                 terms = (value_string.split(":")[1]).split()
                 if len(terms) == 2:
-                    punch_item = [star_id.strip(), terms[0].strip(), terms[1].strip()]
+                    punch_item = (star_id.strip(), float(terms[0]), float(terms[1]))  # tuple
                     punch_values.append(punch_item)
-        return punch_values
+        return punch_values  # list of tuples
 
-    def _get_aavso_star_lines(self, lines):
+    @staticmethod
+    def _get_aavso_stars(lines):
         aavso_stars = []
         stars_line_found = False
         for line in lines:
@@ -91,14 +201,11 @@ class FOV:
         return aavso_stars
 
     def __str__(self):
-        return "FOV '" + self.name + "' with " + str(len(self.aavso_stars)) + " sequence stars."
+        return "FOV '" + self.fov_name + "' with " + str(len(self.aavso_stars)) + " sequence stars."
 
-    def available(self, astronight):
-        """
-        Returns Timespan object defining which this FOV may be observed during this astronight.
-        Usage: ts = fov.available(astronight)
-        """
-        pass
+
+class FOV_Error:
+    pass
 
 
 class AavsoSequenceStar:

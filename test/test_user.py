@@ -1,5 +1,4 @@
 from photrix import user                 # call: user.fn() & user.Class()
-
 from photrix.util import hex_degrees_as_degrees
 
 __author__ = "Eric Dose :: Bois d'Arc Observatory, Kansas"
@@ -12,10 +11,12 @@ def test_Site():
     assert s.name == site_name
     assert s.filename == s.name + ".json"
     assert s.description.startswith("Bois d'Arc Obs")
-
     assert s.longitude == hex_degrees_as_degrees("-95:53:18")
     assert s.latitude == hex_degrees_as_degrees("+38:55:29")
-    assert s.altitude == 350
+    assert s.elevation == 350
+    assert s.min_altitude == 25
+    assert s.twilight_sun_alt == -9
+
 
 
 def test_Instrument():
@@ -24,8 +25,6 @@ def test_Instrument():
     assert i.is_valid
     assert i.name == instrument_name
     assert i.filename == i.name + ".json"
-    assert i.min_altitude == 25
-    assert i.twilight_sun_alt == -9
     assert i.min_distance_full_moon == 50
     assert i.mount["model"].startswith("Paramount MX")
     assert i.mount["slew_rate_ra"] == 4
@@ -46,14 +45,13 @@ def test_Instrument():
     assert i.filters["V"]["transform"]["B-V"] == 0
     assert i.filters["V"]["transform"]["V-R"] == 0
     assert i.filters["I"]["transform"]["V-I"] == 0.025
+    assert set(i.filter_list()) == {"V", "R", "I"}  # set
 
     instrument_name = "Instrument_test2"
     i = user.Instrument(instrument_name)
     assert i.is_valid
     assert i.name == "XXX"
     assert i.filename == instrument_name + ".json"
-    assert i.min_altitude == 0  # absent -> default
-    assert i.twilight_sun_alt == -10  # absent -> default
     assert i.min_distance_full_moon == 60  # absent -> default
     assert i.mount["model"] == ""
     assert i.mount["slew_rate_ra"] == 7

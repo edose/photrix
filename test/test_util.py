@@ -1,6 +1,7 @@
+from datetime import datetime, timezone, timedelta
 import pytest
 
-##### Your choices for importing (at least in this test module):
+# Your choices for importing (at least in this test module):
 from photrix import util                  # call: util.ra_as_degrees()
 # from photrix.util import *              # call: ra_as_degrees()
 # from photrix.util import ra_as_degrees  # call: ra_as_degrees()
@@ -114,5 +115,68 @@ def test_weighted_mean():
     print('>>>' + str(e) + '<<<')
     assert util.weighted_mean([3], [7], True) == (3, 0)
     assert util.weighted_mean([1, 3, 8], [0, 3, 9], True) == (81/12, 2.9296875)
-    assert util.weighted_mean([1, 3, 8], [0, 3, 9], True) == util.weighted_mean([3, 8], [3, 9], True)
+    assert util.weighted_mean([1, 3, 8], [0, 3, 9], True) == \
+           util.weighted_mean([3, 8], [3, 9], True)
 
+
+def test_ladder_round():
+    assert util.ladder_round(0) == 0
+    assert util.ladder_round(0.12) == 0.125
+    assert util.ladder_round(45) == 50
+    assert util.ladder_round(10) == 10
+    assert util.ladder_round(100) == 100
+    assert util.ladder_round(64) == 64
+    assert util.ladder_round(99.7) == 100
+    assert util.ladder_round(-99.7) == -100
+    assert util.ladder_round(-45) == -50
+    assert util.ladder_round(-64) == -64
+
+
+def test_Timespan():
+    # Normal case.
+    dt1 = datetime(2016, 9, 10, 0, 0, 0, tzinfo=timezone.utc)
+    dt2 = dt1 + timedelta(hours=1.5)
+    ts1 = util.Timespan(dt1, dt2)
+    assert ts1.start == dt1
+    assert ts1.end == dt2
+    assert ts1.seconds == 1.5 * 3600
+    assert ts1.midpoint == dt1 + (dt2-dt1) / 2
+    assert ts1.contains_time(dt1)
+    assert ts1.contains_time(dt2)
+    assert ts1.contains_time(dt1 + timedelta(hours=0.5))
+    assert not ts1.contains_time(dt1 - timedelta(hours=0.5))
+    assert not ts1.contains_time(dt2 + timedelta(hours=0.5))
+    # Test .intersect():
+    ts1a = util.Timespan(dt1+timedelta(hours=0.5), dt2+timedelta(hours=3))
+    ts1a_int1 = ts1.intersect(ts1a)
+    assert ts1a_int1.start == ts1a.start
+    assert ts1a_int1.end == ts1.end
+    ts1a_int2 = ts1a.intersect(ts1)
+    assert ts1a_int1.start == ts1a_int2.start
+    assert ts1a_int1.end == ts1a_int2.end
+
+    # Case: input times equal
+    dt3 = dt1
+    ts2 = util.Timespan(dt1, dt3)
+    assert ts2.start == dt1
+    assert ts2.end == dt3
+    assert ts2.seconds == 0
+    assert ts2.midpoint == dt1 == dt3
+    assert ts2.contains_time(dt1)
+    assert ts2.contains_time(dt3)
+    assert not ts2.contains_time(dt1 + timedelta(hours=0.5))
+    assert not ts2.contains_time(dt1 - timedelta(hours=0.5))
+    assert not ts2.contains_time(dt3 + timedelta(hours=0.5))
+
+    # Case: input times inverted
+    ts3 = util.Timespan(dt2, dt1)
+    assert ts3.start == dt2
+    assert ts3.end == dt2
+    assert ts3.seconds == 0
+    assert ts3.midpoint == dt2
+    assert ts3.contains_time(dt2)  # but not necessarily dt1 which is ~ invalid
+    assert not ts3.contains_time(dt2 + timedelta(hours=0.5))
+    assert not ts3.contains_time(dt2 - timedelta(hours=0.5))
+    assert not ts3.contains_time(dt1 + timedelta(hours=0.5))
+
+# TODO write test for class RaDec
