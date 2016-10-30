@@ -1,4 +1,4 @@
-from datetime import datetime, timezone, timedelta
+from datetime import timedelta
 import math
 
 __author__ = "Eric Dose :: Bois d'Arc Observatory, Kansas"
@@ -22,6 +22,9 @@ class Timespan:
     def contains_time(self, time_utc):
         return self.start <= time_utc <= self.end
 
+    def contains_timespan(self, other):
+        return (self.start <= other.start) & (self.end >= other.end)
+
     def __str__(self):
         return "Timespan '" + str(self.start) + "' to '" + str(self.end) + "' = " + \
                str(self.seconds) + " seconds."
@@ -44,7 +47,7 @@ class RaDec:
             self.dec = dec
 
     def as_degrees(self):
-        return ra_as_degrees(self.ra), dec_as_degrees(self.dec)
+        return self.ra, self.dec  # because stored internally as degrees
 
     def as_hex(self):
         return ra_as_hours(self.ra), dec_as_hex(self.dec)
@@ -61,8 +64,6 @@ class RaDec:
     def __str__(self):
         ra_hex, dec_hex = self.as_hex()
         return "RaDec object:  " + ra_hex + "  " + dec_hex
-
-
 
 
 def ra_as_degrees(ra_string):

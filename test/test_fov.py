@@ -10,10 +10,10 @@ TEST_FOV_DIRECTORY = os.path.join(PHOTRIX_ROOT_DIRECTORY, "test", "$fovs_for_tes
 # For Schema 1.3 of Sept 2016 (as defined initially in R code "photometry").
 
 
-def test_FOV_eclipser():
+def test_FOV_init_eclipser():
     """ Exhaustive test, #STARS section coverage (which is needed only this once)."""
     fov_name = "ST Tri"
-    f = fov.FOV("ST Tri", TEST_FOV_DIRECTORY)
+    f = fov.Fov("ST Tri", TEST_FOV_DIRECTORY)
     assert f.fov_name == fov_name
     assert f.format_version == "1.3"
     assert f.ra == util.ra_as_degrees("02:42:00.0")
@@ -79,10 +79,10 @@ def test_FOV_eclipser():
            ("V0680 Per", 40.42055, 35.71548, "target", None, None, None, None, None)
 
 
-def test_FOV_mira():
+def test_FOV_init_mira():
     """ NB: #STARS section covered not here, but in test_FOV_eclipser()."""
     fov_name = "AU Aur"
-    f = fov.FOV("AU Aur", TEST_FOV_DIRECTORY)
+    f = fov.Fov("AU Aur", TEST_FOV_DIRECTORY)
     assert f.fov_name == fov_name
     assert f.format_version == "1.3"
     assert f.ra == util.ra_as_degrees("04:54:15.0")
@@ -117,10 +117,10 @@ def test_FOV_mira():
            ['117', 'AU Aur', '141', '154', '132', '146', '124', '118', '155', '107', '112']
 
 
-def test_FOV_mira_multi_exposure():
+def test_FOV_mira_init_multi_exposure():
     """ NB: #STARS section covered not here, but in test_FOV_eclipser()."""
     fov_name = "AU Aur Modified"
-    f = fov.FOV("AU Aur Modified", TEST_FOV_DIRECTORY)
+    f = fov.Fov("AU Aur Modified", TEST_FOV_DIRECTORY)
     assert f.fov_name == fov_name
     assert f.format_version == "1.3"
     assert f.observing_style == "LPV"
@@ -129,10 +129,10 @@ def test_FOV_mira_multi_exposure():
     assert f.observing_list == [("V", None, 5), ("I", None, 2)]
 
 
-def test_FOV_delta_scuti():
+def test_FOV_init_delta_scuti():
     """ NB: #STARS section covered not here, but in test_FOV_eclipser()."""
     fov_name = "ASAS J162540_19123"
-    f = fov.FOV("ASAS J162540_19123", TEST_FOV_DIRECTORY)
+    f = fov.Fov("ASAS J162540_19123", TEST_FOV_DIRECTORY)
     assert f.fov_name == fov_name
     assert f.format_version == "1.3"
     assert f.ra == util.ra_as_degrees("16:25:39.0")
@@ -167,10 +167,10 @@ def test_FOV_delta_scuti():
            ['94', '110_1', '110', 'ASAS J162540+1912.3', 'U Her', '70', '114', '132']
 
 
-def test_FOV_Z_Cam():
+def test_FOV_init_Z_Cam():
     """ NB: #STARS section covered not here, but in test_FOV_eclipser()."""
     fov_name = "NSV 14581"
-    f = fov.FOV("NSV 14581", TEST_FOV_DIRECTORY)
+    f = fov.Fov("NSV 14581", TEST_FOV_DIRECTORY)
     assert f.fov_name == fov_name
     assert f.format_version == "1.3"
     assert f.ra == util.ra_as_degrees("23:26:50.3")
@@ -205,10 +205,10 @@ def test_FOV_Z_Cam():
            ['157', 'NSV 14581', '136', '148', '145', '151', '110',
             '142', '155', '134', '140', '153', '112']
 
-def test_FOV_exoplanet():
+def test_FOV_init_exoplanet():
     """ NB: #STARS section covered not here, but in test_FOV_eclipser()."""
     fov_name = "HAT_P_3"
-    f = fov.FOV("HAT_P_3", TEST_FOV_DIRECTORY)
+    f = fov.Fov("HAT_P_3", TEST_FOV_DIRECTORY)
     assert f.fov_name == fov_name
     assert f.format_version == "1.3"
     assert f.main_target == "HAT-P-3"
@@ -232,10 +232,10 @@ def test_FOV_exoplanet():
            ['125', '127', 'HAT-P-3', '131', '128', '140', '123', '133', '112', '107']
 
 
-def test_FOV_standard():
+def test_FOV_init_standard():
     """ NB: #STARS section covered not here, but in test_FOV_eclipser()."""
     fov_name = "Std_SA100"
-    f = fov.FOV("Std_SA100", TEST_FOV_DIRECTORY)
+    f = fov.Fov("Std_SA100", TEST_FOV_DIRECTORY)
     assert f.fov_name == fov_name
     assert f.format_version == "1.3"
     assert f.ra == util.ra_as_degrees("08:53:14.3")
@@ -268,3 +268,55 @@ def test_FOV_standard():
     assert all([star.is_valid for star in f.aavso_stars])
     assert [star.star_id for star in f.aavso_stars] == \
            ['118', '130', '101', '114', '124', '92']
+
+
+def test_calc_gap_score():
+    fov_name = "ST Tri"
+    f = fov.Fov("ST Tri", TEST_FOV_DIRECTORY)
+    assert f.fov_name == fov_name
+    assert f.format_version == "1.3"
+    gsd = f.gap_score_days
+    print(str(gsd))
+    assert f.calc_gap_score(0) == 0
+    assert f.calc_gap_score(gsd[0] / 2.0) == 0
+    assert f.calc_gap_score(gsd[0]) == 0
+    assert f.calc_gap_score((gsd[0] + gsd[1]) / 2.0) == 0.5
+    assert f.calc_gap_score(gsd[1]) == 1
+    assert f.calc_gap_score((gsd[1] + gsd[2]) / 2.0) == 1.5
+    assert f.calc_gap_score(gsd[2]) == 2
+    assert f.calc_gap_score(1.5 * gsd[2]) == 2
+    assert f.calc_gap_score(10 * gsd[2]) == 2
+
+
+def test_estimate_mira_mags():
+    fov_name = "AU Aur"
+    f = fov.Fov("AU Aur", TEST_FOV_DIRECTORY)
+    assert f.fov_name == fov_name
+    assert f.format_version == "1.3"
+    mag = f.estimate_mira_mags(f.JD_bright)
+    assert mag['V'] == f.mag_V_bright
+    assert mag['I'] == f.mag_V_bright + f.color_VI_bright
+    mag = f.estimate_mira_mags(f.JD_faint)
+    assert mag['V'] == f.mag_V_faint
+    assert mag['I'] == f.mag_V_faint + f.color_VI_faint
+    #  TODO fill out this test with (1) 'R' mags, and (2) more JD examples.
+
+
+def test_all_fov_names():
+    all_names = fov.all_fov_names(fov_directory=TEST_FOV_DIRECTORY)
+    assert isinstance(all_names, list)
+    assert isinstance(all_names[0], str)
+    assert len(all_names) == 7
+
+
+def test_FovDict_init():
+    fov_dict = fov.FovDict(fov_directory=TEST_FOV_DIRECTORY)
+    inner_dict = fov_dict.fov_dict
+    assert isinstance(fov_dict, fov.FovDict)
+    assert fov_dict.count() == 7
+    assert isinstance(inner_dict, dict)
+    assert isinstance(list(inner_dict.keys())[0], str)
+    assert isinstance(list(inner_dict.values())[0], fov.Fov)
+    assert len(inner_dict) == 7
+    non_zero = fov_dict.no_zero_priority()
+    assert non_zero.count() == 6

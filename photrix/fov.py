@@ -1,18 +1,21 @@
 from photrix.util import *
+from photrix.user import Astronight
 import os
+import pandas as pd
+from collections import defaultdict
 
 __author__ = "Eric Dose :: Bois d'Arc Observatory, Kansas"
 
 FOV_DIRECTORY = "C:/Dev/Photometry/FOV/"
+FOV_OBSERVING_STYLES = ["Standard", "Stare", "Monitor", "LPV"]
 CURRENT_SCHEMA_VERSION = "1.3"
+SINE_FRACTION = 0.5
+VR_FRACTION_OF_VI = 0.5
+MIN_AVAILABLE_SECONDS = 900
+FITS_DIRECTORY = "J:/Astro/Images"
 
 
-class FOV_list:
-    def __init__(self, fov_name_list):
-        pass
-
-
-class FOV:
+class Fov:
     """
     Object: holds info for one Field Of View (generally maps to one AAVSO sequence or chart).
     For Schema 1.3 of Sept 2016 (as defined initially in R code "photometry").
@@ -26,43 +29,43 @@ class FOV:
         lines = [line.split(";")[0] for line in lines]  # remove comments
 
         # ---------- Header section.
-        self.fov_name = FOV._directive_value(lines, "#FOV_NAME")
-        self.format_version = FOV._directive_value(lines, "#FORMAT_VERSION")
+        self.fov_name = Fov._directive_value(lines, "#FOV_NAME")
+        self.format_version = Fov._directive_value(lines, "#FORMAT_VERSION")
         if self.format_version != CURRENT_SCHEMA_VERSION:
-            raise FOV_Error
-        ra_str, dec_str = FOV._directive_words(lines, "#CENTER")[:2]
+            raise FovError
+        ra_str, dec_str = Fov._directive_words(lines, "#CENTER")[:2]
         self.ra = ra_as_degrees(ra_str)
         self.dec = dec_as_degrees(dec_str)
-        self.chart = FOV._directive_words(lines, "#CHART")[0]
-        self.fov_date = FOV._directive_words(lines, "#DATE")[0]
+        self.chart = Fov._directive_words(lines, "#CHART")[0]
+        self.fov_date = Fov._directive_words(lines, "#DATE")[0]
 
         # ---------- Main-target section.
-        self.main_target = FOV._directive_value(lines, "#MAIN_TARGET")
-        self.target_type = FOV._directive_value(lines, "#TARGET_TYPE")
-        words = FOV._directive_words(lines, "#PERIOD")
+        self.main_target = Fov._directive_value(lines, "#MAIN_TARGET")
+        self.target_type = Fov._directive_value(lines, "#TARGET_TYPE")
+        words = Fov._directive_words(lines, "#PERIOD")
         if words is not None:
             self.period = float(words[0])
         else:
             self.period = None
         # As of schema v 1.3, require both values for JD, Mag_V, Color_VI.
         self.JD_bright, self.JD_faint = (None, None)  # default
-        words = FOV._directive_words(lines, "#JD")
+        words = Fov._directive_words(lines, "#JD")
         if words is not None:
             self.JD_bright = float(words[0])
             self.JD_faint = float(words[1])
         self.mag_V_bright, self.mag_V_faint = (None, None)  # default
-        words = FOV._directive_words(lines, "#MAG_V")
+        words = Fov._directive_words(lines, "#MAG_V")
         if words is not None:
             self.mag_V_bright = float(words[0])
             self.mag_V_faint = float(words[1])
         self.color_VI_bright, self.color_VI_faint = (None, None)  # default
-        words = FOV._directive_words(lines, "#COLOR_VI")
+        words = Fov._directive_words(lines, "#COLOR_VI")
         if words is not None:
             self.color_VI_bright = float(words[0])
             self.color_VI_faint = float(words[1])
 
         # ---------- Observing section.
-        obs_style_words = FOV._directive_words(lines, "#OBSERVING_STYLE")
+        obs_style_words = Fov._directive_words(lines, "#OBSERVING_STYLE")
         obs_style = obs_style_words[0]
         obs_values = obs_style_words[1:]
         if obs_style not in ["Stare", "Monitor", "LPV", "Standard"]:
@@ -81,7 +84,7 @@ class FOV:
             # (here, insert any additional future non-filter values like "ALERT=n")
 
             # Handle filter entries on #OBSERVING_STYLE line.
-            this_filter = None
+            this_filter, this_mag, this_count = None, None, None
             if len(items) == 1:  # cases without specified magnitude
                 bits = items[0].split("(")
                 if len(bits) == 1:  # case "V" for LPVs, one exposure
@@ -103,9 +106,9 @@ class FOV:
                     this_count = int(bits[1].replace(")", ""))
             self.observing_list.append((this_filter, this_mag, this_count))
             if this_filter is None:
-                raise FOV_Error
+                raise FovError
 
-        stare_hours_words = FOV._directive_words(lines, "#STARE_HOURS")
+        stare_hours_words = Fov._directive_words(lines, "#STARE_HOURS")
         if stare_hours_words is not None:
             if len(stare_hours_words) >= 1:
                 if stare_hours_words[0] == "ANY":
@@ -123,7 +126,7 @@ class FOV:
             self.stare_start = None
             self.stare_stop = None
 
-        max_exp_value = FOV._directive_value(lines, "#MAX_EXPOSURE")
+        max_exp_value = Fov._directive_value(lines, "#MAX_EXPOSURE")
         if max_exp_value is not None:
             self.max_exposure = float(max_exp_value)
             if self.max_exposure <= 0:
@@ -131,12 +134,12 @@ class FOV:
         else:
             self.max_exposure = None
 
-        value = FOV._directive_value(lines, "#PRIORITY")
+        value = Fov._directive_value(lines, "#PRIORITY")
         if value is not None:
             self.priority = float(value)
         else:
             self.priority = None
-        value = FOV._directive_value(lines, "#GAP_SCORE_DAYS")
+        value = Fov._directive_value(lines, "#GAP_SCORE_DAYS")
         if value is not None:
             gap_score_words = value.split()
             if len(gap_score_words) >= 3:
@@ -145,12 +148,12 @@ class FOV:
                 self.gap_score_days = [self.period * fraction for fraction in [0.01, 0.02, 0.05]]
         else:
             self.gap_score_days = None
-        self.acp_directives = FOV._directive_value(lines, "#ACP_DIRECTIVES").split("|")
-        self.acp_comments = FOV._directive_value(lines, "#ACP_COMMENTS")
+        self.acp_directives = Fov._directive_value(lines, "#ACP_DIRECTIVES").split("|")
+        self.acp_comments = Fov._directive_value(lines, "#ACP_COMMENTS")
 
     # ---------- AAVSO Sequence section.
-        self.punches = FOV._get_punch_values(lines)
-        self.aavso_stars = FOV._get_aavso_stars(lines)
+        self.punches = Fov._get_punch_values(lines)
+        self.aavso_stars = Fov._get_aavso_stars(lines)
 
     # ---------- Diagnostics and messages before finalizing object.
         if not self.fov_name.startswith("Std_"):
@@ -168,7 +171,7 @@ class FOV:
 
     @staticmethod
     def _directive_words(lines, directive_string):
-        value = FOV._directive_value(lines, directive_string)
+        value = Fov._directive_value(lines, directive_string)
         if value is None:
             return None
         return value.split()
@@ -200,12 +203,63 @@ class FOV:
                         aavso_stars.append(aavso_star)
         return aavso_stars
 
+    def calc_gap_score(self, days):
+        if days < self.gap_score_days[0]:
+            return 0
+        elif days < self.gap_score_days[1]:
+            return (days - self.gap_score_days[0]) / \
+                   (self.gap_score_days[1] - self.gap_score_days[0])
+        elif days < self.gap_score_days[2]:
+            return 1 + (days - self.gap_score_days[1]) / \
+                   (self.gap_score_days[2] - self.gap_score_days[1])
+        else:
+            return 2
+
+    def calc_priority_score(self, days):
+        return self.priority * self.calc_gap_score(days)
+
+    def estimate_mira_mags(self, jd):
+        if self.period <= 0 or self.mag_V_bright >= self.mag_V_faint:
+            return None
+        jd_bright, jd_faint = self.JD_bright, self.JD_faint
+        v_bright, v_faint = self.mag_V_bright, self.mag_V_faint
+        color_bright, color_faint = self.color_VI_bright, self.color_VI_faint
+        period = self.period
+        # First, determine whether brightness is increasing or decreasing at jd.
+        # phases must be in [0,1], where phase = 0 means max brightness.
+        phase_jd = math.modf((jd - jd_bright) / period)[0]  # fractional part
+        if phase_jd < 0:
+            phase_jd += 1
+        phase_faint = math.modf((jd_faint - jd_bright) / period)[0]
+        if phase_faint < 0:
+            phase_faint += 1
+        if 0 <= phase_jd <= phase_faint:  # brightness decreasing at jd
+            time_fract = phase_jd / phase_faint
+            v_start = v_bright
+            color_start = color_bright
+            v_diff = v_faint - v_bright
+            color_diff = color_faint - color_bright
+        elif phase_faint <= phase_jd <= 1:  # brightness increasing at jd
+            time_fract = (phase_jd - phase_faint) / (1 - phase_faint)
+            v_start = v_faint
+            color_start = v_faint
+            v_diff = v_bright - v_faint
+            color_diff = color_bright - color_faint
+        else:
+            return None  # phase_jd must be outside [0,1]
+        #  Now, calculate linear and sine components and blend them (each filter).
+        linear_mag_fract = time_fract
+        sine_mag_fract = (1.0 - math.cos(linear_mag_fract * math.pi)) / 2.0
+        mag_fract = SINE_FRACTION * sine_mag_fract + (1 - SINE_FRACTION) * linear_mag_fract
+        #  Render mag in each filter.
+        mags = dict()
+        mags['V'] = v_start + mag_fract * v_diff
+        mags['I'] = (v_start + color_start) + mag_fract * (v_diff + color_diff)
+        mags['R'] = mags['V'] + VR_FRACTION_OF_VI * (mags['I'] - mags['V'])
+        return mags
+
     def __str__(self):
         return "FOV '" + self.fov_name + "' with " + str(len(self.aavso_stars)) + " sequence stars."
-
-
-class FOV_Error:
-    pass
 
 
 class AavsoSequenceStar:
@@ -260,11 +314,109 @@ class AavsoSequenceStar:
         return "AAVSO Sequence Star '" + self.star_id + "', is_valid=" + self.is_valid
 
 
+class FovError(Exception):
+    pass
+
+
+def all_fov_names(fov_directory=FOV_DIRECTORY):
+    fov_names = [fname[:-4] for fname in os.listdir(fov_directory)
+                 if (fname.endswith(".txt")) and (not fname.startswith("$"))]
+    return fov_names
+
+
+def make_fov_dict(fov_directory=FOV_DIRECTORY, fov_names_selected=None):
+    fov_all_names = all_fov_names(fov_directory)
+    if fov_names_selected is None:
+        fov_names = fov_all_names
+    else:
+        fov_names = list(set(fov_all_names) & set(fov_names_selected))
+    fov_dict = {fov_name: Fov(fov_name, fov_directory) for fov_name in fov_names}
+    return fov_dict
+
+
+def make_monitor_df(fov_directory=FOV_DIRECTORY, fov_names_selected=None,
+                    an_string="20160101", site_name="BDO_Kansas"):
+    fov_dict = make_fov_dict(fov_directory=fov_directory, fov_names_selected=fov_names_selected)
+
+    # Keep only Monitor and LPV fovs.
+    fov_dict = {name: fov for (name, fov) in fov_dict.items()
+                if fov.observing_style.lower() in ['monitor', 'lpv']}
+
+    # Keep only those fovs available this night.
+    an = Astronight(an_string, site_name)
+    site = an.site
+    available_dict = {name: an.available(site.min_altitude, fov.ra, fov.dec).seconds
+                      for (name, fov) in fov_dict.items()}  # values are Timespan objects.
+    fov_dict = {name: fov for (name, fov) in fov_dict.items()
+                if available_dict[name] >= MIN_AVAILABLE_SECONDS}
+
+    # Eliminate fovs that are too recently observed by me.
+    max_days = max([fov.gap_score_days[2] for fov in fov_dict.keys()])
+    local_obs_age_dict = get_local_obs_age_dict(fov_dict=fov_dict, max_days=max_days)
+    fov_dict = {name: fov for (name, fov) in fov_dict.items()
+                if fov.calc_priority_score(local_obs_age_dict[name]) > 0}
+
+    # Eliminate fovs that are too recently observed by AAVSO.
+    aavso_obs_age_dict = get_aavso_obs_age_dict(fov_dict=fov_dict, max_days=max_days)
+    fov_dict = {name: fov for (name, fov) in fov_dict.items()
+                if fov.calc_priority_score(aavso_obs_age_dict[name]) > 0}
+
+    # Construct and return the data frame.
+    out_dict = dict()
+    for fov_name in fov_dict.keys():
+        avail = available_dict[fov_name]  # is a Timespan objectb
+        local_age = local_obs_age_dict[fov_name]
+        aavso_age = aavso_obs_age_dict[fov_name]
+        if local_age is None:
+            if aavso_age is None:
+                age = None
+            else:
+                age = aavso_age
+        else:
+            if aavso_age is None:
+                age = local_age
+            else:
+                age = max(local_age, aavso_age)
+        out_dict[fov_name] = (fov_name, avail.start, avail.end, avail.seconds, age)
+
+    fov_df = pd.DataFrame()
+
+    return fov_df
+
+
+def get_local_obs_age_dict(fov_dict=None, max_days=None):
+    # TODO: finish writing get_local_obs_age_dict()
+    fov_age_dict = defaultdict(lambda: None)
+    dir_list = ["a","b"]  # all FITS directories qualifying as recent enough
+    for an_dir in dir_list:
+        an_dict = defaultdict(lambda: None)
+        #  read AAVSO report, fill an_dict with target: latest JD
+        for fov_name, fov in fov_dict.items():
+            an_age = an_dict[fov.main_target]
+            if an_age is not None:
+                dict_age = fov_age_dict[fov_name]
+                if dict_age is not None:
+                    if an_age < dict_age:
+                        fov_age_dict[fov_name] = an_age
+                else:
+                    fov_age_dict[fov_name] = an_age
+    return fov_age_dict
+
+def get_aavso_obs_age_dict(fov_dict=None, max_days=None):
+    # TODO: finish writing get_aavso_obs_age_dict()
+    fov_age_dict = defaultdict(lambda: None)
+    for fov_name, fov in fov_dict.items():
+        # x is some function to get JD or age of most recent aavso observation
+        # may be more sophisticated, to weight visible, V, and other observations differently.
+        # watch out for age vs JD...must be some reference JD for any age calculations (AN middark?)
+        fov_age_dict[fov_name] = x(fov.main_target)
+    return fov_age_dict
+
 
 
 
 # ---------------------------------------------------------------------
 
 if __name__ == '__main__':
-    f = FOV("ST Cnc")
-    print(f.name, "\n", repr(f))
+    pass
+

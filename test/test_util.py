@@ -141,11 +141,22 @@ def test_Timespan():
     assert ts1.end == dt2
     assert ts1.seconds == 1.5 * 3600
     assert ts1.midpoint == dt1 + (dt2-dt1) / 2
+    # Test .contains_time():
     assert ts1.contains_time(dt1)
     assert ts1.contains_time(dt2)
     assert ts1.contains_time(dt1 + timedelta(hours=0.5))
     assert not ts1.contains_time(dt1 - timedelta(hours=0.5))
     assert not ts1.contains_time(dt2 + timedelta(hours=0.5))
+    # Test .contains_timespan():
+    ts_contained = util.Timespan(dt1+timedelta(hours=0.1), dt2+timedelta(hours=-0.1))
+    assert ts1.contains_timespan(ts_contained)
+    assert not ts_contained.contains_timespan(ts1)
+    ts_identical = util.Timespan(dt1+timedelta(hours=0), dt2+timedelta(hours=0))
+    assert ts1.contains_timespan(ts_identical)
+    assert ts_identical.contains_timespan(ts1)
+    ts_shift_later = util.Timespan(dt1+timedelta(hours=0.5), dt2+timedelta(hours=0.5))
+    assert not ts1.contains_timespan(ts_shift_later)
+    assert not ts_shift_later.contains_timespan(ts1)
     # Test .intersect():
     ts1a = util.Timespan(dt1+timedelta(hours=0.5), dt2+timedelta(hours=3))
     ts1a_int1 = ts1.intersect(ts1a)

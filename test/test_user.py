@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from photrix import user                 # call: user.fn() & user.Class()
 from photrix.util import hex_degrees_as_degrees
 
@@ -16,7 +17,6 @@ def test_Site():
     assert s.elevation == 350
     assert s.min_altitude == 25
     assert s.twilight_sun_alt == -9
-
 
 
 def test_Instrument():
@@ -68,3 +68,73 @@ def test_Instrument():
     assert i.camera["saturation_adu"] == 64000
     assert i.filters["V"]["reference_exposure_mag10"] == 22
     assert i.filters["V"]["transform"]["V-I"] == 0.02
+
+
+def test_Astronight():
+    # Case: moon up at midnight.
+    an_date_string = "20160910"
+    site_string = "BDO_Kansas"
+    an = user.Astronight(an_date_string, site_string, -5)
+    assert an.an_date_string == an_date_string
+    assert an.site_name == site_string  # the name
+    assert an.site.name == site_string  # the object (need to expose though Astronight()?)
+    assert an.localMidnightUT == datetime(2016, 9, 11, 5, 0, 0, tzinfo=timezone.utc)
+    assert abs(an.localMidnightJD - 2457642.708338) < 1 / 24 / 3600  # one sec tolerance
+    target_lst_seconds = 21*3600 + 59*60 + 3
+    an_lst_seconds = an.localMidnightLST * 240.0
+    assert abs(target_lst_seconds - an_lst_seconds) < 1  # one sec tolerance
+    assert abs(an.moon_radec.ra - 278.16825) < 1/3600
+    assert abs(an.moon_radec.dec - -19.1090833) < 1/3600
+    assert an.dark.start == datetime(2016, 9, 11, 1, 22, 54, 830573, tzinfo=timezone.utc)
+    assert an.dark.end == datetime(2016, 9, 11, 11, 17, 48, 383649, tzinfo=timezone.utc)
+
+    # Case: full moon, mid-winter.
+    an_date_string = "20161213"
+    site_string = "BDO_Kansas"
+    an = user.Astronight(an_date_string, site_string, -6)  # not daylight savings time
+    assert an.an_date_string == an_date_string
+    assert an.site_name == site_string  # the name
+    assert an.site.name == site_string  # the object (need to expose though Astronight()?)
+    assert an.localMidnightUT == datetime(2016, 12, 14, 6, 0, 0, tzinfo=timezone.utc)
+    assert abs(an.localMidnightJD - 2457736.75) < 1 / 24 / 3600  # one sec tolerance
+    target_lst_seconds = 5 * 3600 + 9 * 60 + 49
+    an_lst_seconds = an.localMidnightLST * 240.0
+    assert abs(target_lst_seconds - an_lst_seconds) < 1  # one sec tolerance
+    assert abs(an.moon_radec.ra - 86.071) < 1 / 3600
+    assert abs(an.moon_radec.dec - 18.297444) < 1 / 3600
+    assert an.dark.start == datetime(2016, 12, 13, 23, 50, 19, 965103, tzinfo=timezone.utc)
+    assert an.dark.end == datetime(2016, 12, 14, 12, 46, 22, 225678, tzinfo=timezone.utc)
+
+    # Case: full moon, mid-summer
+    an_date_string = "20160619"
+    site_string = "BDO_Kansas"
+    an = user.Astronight(an_date_string, site_string, -5)
+    assert an.an_date_string == an_date_string
+    assert an.site_name == site_string  # the name
+    assert an.site.name == site_string  # the object (need to expose though Astronight()?)
+    assert an.localMidnightUT == datetime(2016, 6, 20, 5, 0, tzinfo=timezone.utc)
+    assert abs(an.localMidnightJD - 2457559.7083333) < 1 / 24 / 3600  # one sec tolerance
+    target_lst_seconds = 16 * 3600 + 31 * 60 + 49
+    an_lst_seconds = an.localMidnightLST * 240.0
+    assert abs(target_lst_seconds - an_lst_seconds) < 1  # one sec tolerance
+    assert abs(an.moon_radec.ra - 266.443917) < 1 / 3600
+    assert abs(an.moon_radec.dec - -19.225917) < 1 / 3600
+    assert an.dark.start == datetime(2016, 6, 20, 2, 45, 38, 994307, tzinfo=timezone.utc)
+    assert an.dark.end == datetime(2016, 6, 20, 10, 4, 39, 440813, tzinfo=timezone.utc)
+
+    # Case: new moon.
+    an_date_string = "20160930"
+    site_string = "BDO_Kansas"
+    an = user.Astronight(an_date_string, site_string, -5)
+    assert an.an_date_string == an_date_string
+    assert an.site_name == site_string  # the name
+    assert an.site.name == site_string  # the object (need to expose though Astronight()?)
+    assert an.localMidnightUT == datetime(2016, 10, 1, 5, 0, 0, tzinfo=timezone.utc)
+    assert abs(an.localMidnightJD - 2457662.7083333) < 1 / 24 / 3600  # one sec tolerance
+    target_lst_seconds = 23 * 3600 + 17 * 60 + 54
+    an_lst_seconds = an.localMidnightLST * 240.0
+    assert abs(target_lst_seconds - an_lst_seconds) < 1  # one sec tolerance
+    assert abs(an.moon_radec.ra - 190.5197916) < 1 / 3600
+    assert abs(an.moon_radec.dec - -2.498417) < 1 / 3600
+    assert an.dark.start == datetime(2016, 10, 1, 0, 50, 14, 943153, tzinfo=timezone.utc)
+    assert an.dark.end == datetime(2016, 10, 1, 11, 36, 34, 354740, tzinfo=timezone.utc)
