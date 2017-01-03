@@ -1,6 +1,7 @@
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+from pytest import approx
 from photrix import user                 # call: user.fn() & user.Class()
-from photrix.util import hex_degrees_as_degrees
+from photrix.util import hex_degrees_as_degrees, ra_as_hours, dec_as_hex, RaDec
 
 __author__ = "Eric Dose :: Bois d'Arc Observatory, Kansas"
 
@@ -71,70 +72,190 @@ def test_Instrument():
 
 
 def test_Astronight():
-    # Case: moon up at midnight.
+    print()
+    # Test constructor, case = moon up at midnight. ----------------------------------------------
     an_date_string = "20160910"
     site_string = "BDO_Kansas"
-    an = user.Astronight(an_date_string, site_string, -5)
+    an = user.Astronight(an_date_string, site_string)
     assert an.an_date_string == an_date_string
     assert an.site_name == site_string  # the name
-    assert an.site.name == site_string  # the object (need to expose though Astronight()?)
-    assert an.localMidnightUT == datetime(2016, 9, 11, 5, 0, 0, tzinfo=timezone.utc)
-    assert abs(an.localMidnightJD - 2457642.708338) < 1 / 24 / 3600  # one sec tolerance
-    target_lst_seconds = 21*3600 + 59*60 + 3
-    an_lst_seconds = an.localMidnightLST * 240.0
-    assert abs(target_lst_seconds - an_lst_seconds) < 1  # one sec tolerance
-    assert abs(an.moon_radec.ra - 278.16825) < 1/3600
-    assert abs(an.moon_radec.dec - -19.1090833) < 1/3600
-    assert an.dark.start == datetime(2016, 9, 11, 1, 22, 54, 830573, tzinfo=timezone.utc)
-    assert an.dark.end == datetime(2016, 9, 11, 11, 17, 48, 383649, tzinfo=timezone.utc)
 
-    # Case: full moon, mid-winter.
+    assert abs((an.ts_dark.start -
+                datetime(2016, 9, 11, 1, 33, 30, 944563, tzinfo=timezone.utc)).total_seconds()) < 1
+    assert abs((an.ts_dark.end -
+                datetime(2016, 9, 11, 11, 7, 11, 687656, tzinfo=timezone.utc)).total_seconds()) < 1
+
+    target_local_middark_utc = datetime(2016, 9, 11, 6, 20, 21, tzinfo=timezone.utc)
+    assert abs((an.local_middark_utc - target_local_middark_utc).total_seconds()) <= 1
+    assert an.local_middark_jd == approx(2457642.764131, 1/(24*3600))  # one sec tolerance
+    target_lst_seconds = 23*3600 + 19*60 + 37
+    an_lst_seconds = an.local_middark_lst * 240.0
+    assert target_lst_seconds == approx(an_lst_seconds, abs=1)
+
+    target_moon_ra = (15/3600) * (18*3600+35*60+7.2)  # degrees
+    target_moon_dec = -(19+1/60+24/3600)  # degrees
+    assert an.moon_radec.ra == approx(target_moon_ra, abs=1/3600)  # tol = 1 arcsecond
+    assert an.moon_radec.dec == approx(target_moon_dec, abs=1/3600)  # tol = 1 arcsecond
+    assert an.moon_phase == approx(0.6722, abs=0.005)
+    assert abs((an.ts_dark_no_moon.start -
+                datetime(2016, 9, 11, 6, 36, 39, 829350, tzinfo=timezone.utc)).total_seconds()) < 1
+    assert abs((an.ts_dark_no_moon.end -
+                datetime(2016, 9, 11, 11, 7, 11, 687656, tzinfo=timezone.utc)).total_seconds()) < 1
+
+    # Test constructor, case = full moon, mid-winter. --------------------------------------------
     an_date_string = "20161213"
     site_string = "BDO_Kansas"
-    an = user.Astronight(an_date_string, site_string, -6)  # not daylight savings time
+    an = user.Astronight(an_date_string, site_string)
     assert an.an_date_string == an_date_string
     assert an.site_name == site_string  # the name
-    assert an.site.name == site_string  # the object (need to expose though Astronight()?)
-    assert an.localMidnightUT == datetime(2016, 12, 14, 6, 0, 0, tzinfo=timezone.utc)
-    assert abs(an.localMidnightJD - 2457736.75) < 1 / 24 / 3600  # one sec tolerance
-    target_lst_seconds = 5 * 3600 + 9 * 60 + 49
-    an_lst_seconds = an.localMidnightLST * 240.0
-    assert abs(target_lst_seconds - an_lst_seconds) < 1  # one sec tolerance
-    assert abs(an.moon_radec.ra - 86.071) < 1 / 3600
-    assert abs(an.moon_radec.dec - 18.297444) < 1 / 3600
-    assert an.dark.start == datetime(2016, 12, 13, 23, 50, 19, 965103, tzinfo=timezone.utc)
-    assert an.dark.end == datetime(2016, 12, 14, 12, 46, 22, 225678, tzinfo=timezone.utc)
 
-    # Case: full moon, mid-summer
+    assert abs((an.ts_dark.start -
+                datetime(2016, 12, 14, 0, 1, 23, 877599,
+                tzinfo=timezone.utc)).total_seconds()) < 1
+    assert abs((an.ts_dark.end -
+                datetime(2016, 12, 14, 12, 35, 17, 958638,
+                tzinfo=timezone.utc)).total_seconds()) < 1
+
+    target_local_middark_utc = datetime(2016, 12, 14, 6, 18, 20, 877599, tzinfo=timezone.utc)
+    assert abs((an.local_middark_utc - target_local_middark_utc).total_seconds()) <= 1
+    assert an.local_middark_jd == approx(2457736.762742, 1/(24*3600))  # one sec tolerance
+    target_lst_seconds = 5*3600 + 28*60 + 13
+    an_lst_seconds = an.local_middark_lst * 240.0
+    assert target_lst_seconds == approx(an_lst_seconds, abs=1)
+
+    target_moon_ra = (15/3600) * (5*3600+44*60+50)  # degrees
+    target_moon_dec = +(18+18/60+39/3600)  # degrees
+    assert an.moon_radec.ra == approx(target_moon_ra, abs=1/3600)  # tol = 1 arcsecond
+    assert an.moon_radec.dec == approx(target_moon_dec, abs=1/3600)  # tol = 1 arcsecond
+    assert an.moon_phase == approx(0.9973, abs=0.005)
+    assert an.ts_dark_no_moon.seconds == 0
+
+    # Test constructor, case = full moon, mid-summer ---------------------------------------------
     an_date_string = "20160619"
     site_string = "BDO_Kansas"
-    an = user.Astronight(an_date_string, site_string, -5)
+    an = user.Astronight(an_date_string, site_string)
     assert an.an_date_string == an_date_string
     assert an.site_name == site_string  # the name
-    assert an.site.name == site_string  # the object (need to expose though Astronight()?)
-    assert an.localMidnightUT == datetime(2016, 6, 20, 5, 0, tzinfo=timezone.utc)
-    assert abs(an.localMidnightJD - 2457559.7083333) < 1 / 24 / 3600  # one sec tolerance
-    target_lst_seconds = 16 * 3600 + 31 * 60 + 49
-    an_lst_seconds = an.localMidnightLST * 240.0
-    assert abs(target_lst_seconds - an_lst_seconds) < 1  # one sec tolerance
-    assert abs(an.moon_radec.ra - 266.443917) < 1 / 3600
-    assert abs(an.moon_radec.dec - -19.225917) < 1 / 3600
-    assert an.dark.start == datetime(2016, 6, 20, 2, 45, 38, 994307, tzinfo=timezone.utc)
-    assert an.dark.end == datetime(2016, 6, 20, 10, 4, 39, 440813, tzinfo=timezone.utc)
 
-    # Case: new moon.
+    assert abs((an.ts_dark.start -
+                datetime(2016, 6, 20, 2, 59, 26, 172446,
+                tzinfo=timezone.utc)).total_seconds()) < 1
+    assert abs((an.ts_dark.end -
+                datetime(2016, 6, 20, 9, 50, 52, 262724,
+                tzinfo=timezone.utc)).total_seconds()) < 1
+
+    target_local_middark_utc = datetime(2016, 6, 20, 6, 25, 9, 172446, tzinfo=timezone.utc)
+    assert abs((an.local_middark_utc - target_local_middark_utc).total_seconds()) <= 1
+    assert an.local_middark_jd == approx(2457559.767467, 1/(24*3600))  # one sec tolerance
+    target_lst_seconds = 17*3600 + 57*60 + 12
+    an_lst_seconds = an.local_middark_lst * 240.0
+    assert target_lst_seconds == approx(an_lst_seconds, abs=1)
+
+    target_moon_ra = (15/3600) * (17*3600+47*60+48)  # degrees
+    target_moon_dec = -(19+16/60+5.50/3600)  # degrees
+    assert an.moon_radec.ra == approx(target_moon_ra, abs=1/3600)  # tol = 1 arcsecond
+    assert an.moon_radec.dec == approx(target_moon_dec, abs=1/3600)  # tol = 1 arcsecond
+    assert an.moon_phase == approx(0.9978, abs=0.005)
+    assert an.ts_dark_no_moon.seconds == 0
+
+    # Test constructor, case = new moon. ---------------------------------------------------------
     an_date_string = "20160930"
     site_string = "BDO_Kansas"
-    an = user.Astronight(an_date_string, site_string, -5)
+    an = user.Astronight(an_date_string, site_string)
     assert an.an_date_string == an_date_string
     assert an.site_name == site_string  # the name
-    assert an.site.name == site_string  # the object (need to expose though Astronight()?)
-    assert an.localMidnightUT == datetime(2016, 10, 1, 5, 0, 0, tzinfo=timezone.utc)
-    assert abs(an.localMidnightJD - 2457662.7083333) < 1 / 24 / 3600  # one sec tolerance
-    target_lst_seconds = 23 * 3600 + 17 * 60 + 54
-    an_lst_seconds = an.localMidnightLST * 240.0
-    assert abs(target_lst_seconds - an_lst_seconds) < 1  # one sec tolerance
-    assert abs(an.moon_radec.ra - 190.5197916) < 1 / 3600
-    assert abs(an.moon_radec.dec - -2.498417) < 1 / 3600
-    assert an.dark.start == datetime(2016, 10, 1, 0, 50, 14, 943153, tzinfo=timezone.utc)
-    assert an.dark.end == datetime(2016, 10, 1, 11, 36, 34, 354740, tzinfo=timezone.utc)
+
+    assert abs((an.ts_dark.start -
+                datetime(2016, 10, 1, 1, 0, 32, 860858,
+                tzinfo=timezone.utc)).total_seconds()) < 1
+    assert abs((an.ts_dark.end -
+                datetime(2016, 10, 1, 11, 26, 15, 525660,
+                tzinfo=timezone.utc)).total_seconds()) < 1
+
+    target_local_middark_utc = datetime(2016, 10, 1, 6, 13, 23, 860858, tzinfo=timezone.utc)
+    assert abs((an.local_middark_utc - target_local_middark_utc).total_seconds()) <= 1
+    assert an.local_middark_jd == approx(2457662.759304, 1/(24*3600))  # one sec tolerance
+    target_lst_seconds = 0*3600 + 31*60 + 30
+    an_lst_seconds = an.local_middark_lst * 240.0
+    assert target_lst_seconds == approx(an_lst_seconds, abs=1)
+
+    target_moon_ra = (15/3600) * (12*3600+45*60+16.08)  # degrees
+    target_moon_dec = -(2+41/60+18.0/3600)  # degrees
+    assert an.moon_radec.ra == approx(target_moon_ra, abs=1/3600)  # tol = 1 arcsecond
+    assert an.moon_radec.dec == approx(target_moon_dec, abs=1/3600)  # tol = 1 arcsecond
+    assert an.moon_phase == approx(0.0011, abs=0.005)
+    assert an.ts_dark_no_moon == an.ts_dark
+
+    # Test ts_observable(), set up.  =============================================================
+    an_date_string = "20160919"
+    site_string = "BDO_Kansas"
+    an = user.Astronight(an_date_string, site_string)
+    hip_116928 = RaDec('23:42:02.662', '+01:46:45.557')
+
+    # Test ts_observable(), case = object farther than min dist from moon (common case).  --------
+    ts_obs = an.ts_observable(hip_116928, min_moon_dist=45)
+    print("a", ts_obs, "\n\n\n")
+    assert abs((ts_obs.start - datetime(2016, 9, 20, 2, 13, 12, 660671,
+                tzinfo=timezone.utc)).total_seconds()) <= 60
+    assert abs((ts_obs.end - datetime(2016, 9, 20, 10, 3, 11, 540779,
+                tzinfo=timezone.utc)).total_seconds()) <= 60
+
+    # Test ts_observable(), case = object closer than min dist from moon. ------------------------
+    ts_obs = an.ts_observable(hip_116928, min_moon_dist=90)
+    print("b", ts_obs, "\n\n\n")
+    assert abs((ts_obs.start - datetime(2016, 9, 20, 2, 13, 12, 660671,
+                tzinfo=timezone.utc)).total_seconds()) <= 60
+    assert abs((ts_obs.end - datetime(2016, 9, 20, 2, 38, 2, 264284,
+                tzinfo=timezone.utc)).total_seconds()) <= 60
+
+    # Test ts_observable(), case = ignore moon altogether (set min_moon_dist to 0). --------------
+    ts_obs = an.ts_observable(hip_116928, min_moon_dist=0)
+    print("c", ts_obs, "\n\n\n")
+    assert abs((ts_obs.start - datetime(2016, 9, 20, 2, 13, 12, 660671,
+                tzinfo=timezone.utc)).total_seconds()) <= 60
+    assert abs((ts_obs.end - datetime(2016, 9, 20, 10, 3, 11, 540779,
+                tzinfo=timezone.utc)).total_seconds()) <= 60
+
+    # Test ts_observable(), case = disable observing any time moon is up at all. -----------------
+    ts_obs = an.ts_observable(hip_116928, min_moon_dist=200)
+    print("d", ts_obs, "\n\n\n")
+    assert abs((ts_obs.start - datetime(2016, 9, 20, 2, 13, 12, 660671,
+                tzinfo=timezone.utc)).total_seconds()) <= 60
+    assert abs((ts_obs.end - datetime(2016, 9, 20, 2, 38, 2, 264284,
+                tzinfo=timezone.utc)).total_seconds()) <= 60
+
+    # Test ts_observable(), case = object farther than min dist from moon, higher min_alt. ------
+    ts_obs = an.ts_observable(hip_116928, min_moon_dist=45, min_alt=35)
+    print("e", ts_obs, "\n\n\n")
+    assert abs((ts_obs.start - datetime(2016, 9, 20, 3, 9, 53, 907299,
+                tzinfo=timezone.utc)).total_seconds()) <= 60
+    assert abs((ts_obs.end - datetime(2016, 9, 20, 9, 6, 30, 294148,
+                tzinfo=timezone.utc)).total_seconds()) <= 60
+
+    # Test ts_observable(), case = object closer than min dist from moon, higher min_alt. --------
+    ts_obs = an.ts_observable(hip_116928, min_moon_dist=90, min_alt=35)
+    print("f", ts_obs, "\n\n\n")
+    assert ts_obs.seconds == 0  # start and end times are unimportant (indeed they are undefined).
+
+    # For remaining tests, assume Astronight object's returned values are ok (as were tested above).
+    # Different objects (sky positions) to exercise all functions.
+    altais = RaDec('19:12:33.405', '+69:39:43.092')  # in NW sky
+    hip_22783 = RaDec('04:54:03.012', '+66:20:33.763')  # in NE sky
+    mira = RaDec('02:19:20.804', '-02:58:43.518')  # in SE sky
+    algedi = RaDec('20:18:03.324', '-12:32:41.419')  # in SW sky
+    ankaa = RaDec('00:26:17.310', '-42:18:27.446')  # too far south to observe
+    polaris = RaDec('02:31:49.133', '+89:15:50.598')  # circumpolar
+
+    ts_obs = an.ts_observable(altais, min_moon_dist=45, min_alt=25)
+    print("altais >> ", ts_obs, "\n\n\n")
+    ts_obs = an.ts_observable(hip_22783, min_moon_dist=45, min_alt=25)
+    print("hip_22783 >> ", ts_obs, "\n\n\n")
+    ts_obs = an.ts_observable(mira, min_moon_dist=45, min_alt=25)
+    print("mira >> ", ts_obs, "\n\n\n")
+    ts_obs = an.ts_observable(algedi, min_moon_dist=45, min_alt=25)
+    print("algedi >> ", ts_obs, "\n\n\n")
+    ts_obs = an.ts_observable(ankaa, min_moon_dist=45, min_alt=25)
+    print("ankaa >> ", ts_obs, "\n\n\n")
+    ts_obs = an.ts_observable(polaris, min_moon_dist=45, min_alt=25)
+    print("polaris >> ", ts_obs, "\n\n\n")
+

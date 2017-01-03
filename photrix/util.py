@@ -7,23 +7,84 @@ __author__ = "Eric Dose :: Bois d'Arc Observatory, Kansas"
 class Timespan:
     """ Holds one (start, end) span of time. Immutable.
         Input: 2 python datetimes (in UTC), defining start and end of timespan.
+        methods:
+        ts2 = ts.copy()
+        ts2 == ts  # only if both start and end are equal
+        ts2 = ts.delay_seconds(120)  # returns new Timespan, offset in both start and end
+        ts.intersect(other)  # returns True iff any overlap at all
+        ts2 = ts.subtract(other)  # returns new Timespan; longer of 2 possible spans if ambiguous.
+        ts.contains_time(t)  # returns True iff ts.start <= t <= ts.end
+        ts.contains_timespan(other)  # returns True iff ts wholly contains other
+        str(ts)  # returns string describing Timespan's start, end, and duration in seconds.
     """
     def __init__(self, start_utc, end_utc):
         self.start = start_utc
         self.end = max(start_utc, end_utc)
-        self.seconds = (self.end - self.start).seconds
+        self.seconds = (self.end-self.start).seconds
         self.midpoint = self.start + timedelta(seconds=self.seconds / 2)
 
-    def intersect(self, timespan2):
-        new_start = max(self.start, timespan2.start)
-        new_end = min(self.end, timespan2.end)
+    def copy(self):
+        return Timespan(self.start, self.end)
+
+    def __eq__(self, other):
+        return self.start == other.start and self.end == other.end
+
+    def delay_seconds(self, seconds):
+        delay = timedelta(seconds=seconds)
+        return Timespan(self.start+delay, self.end+delay)
+
+    def intersect(self, other):
+        new_start = max(self.start, other.start)
+        new_end = min(self.end, other.end)
         return Timespan(new_start, new_end)
+
+    def subtract(self, other):
+        if self.intersect(other).seconds == 0:  # case: no overlap/intersection.
+            return self
+        if other.contains_timespan(self):  # case: self entirely subtracted away.
+            return Timespan(self.start, self.start)
+        if self.contains_timespan(other):  # case: 2 timespans -> take the longer.
+            diff_early = Timespan(self.start, other.start)
+            diff_late = Timespan(other.end, self.end)
+            if diff_early.seconds >= diff_late.seconds:
+                return diff_early
+            else:
+                return diff_late
+        if self.start < other.start:  # remaining case: partial overlap.
+            return Timespan(self.start, other.start)
+        else:
+            return Timespan(other.end, self.end)
 
     def contains_time(self, time_utc):
         return self.start <= time_utc <= self.end
 
     def contains_timespan(self, other):
         return (self.start <= other.start) & (self.end >= other.end)
+
+    @staticmethod
+    def longer(ts1, ts2, if_tie="earlier"):
+        """
+        Returns Timespan with longer duration (larger .seconds).
+        If equal duration:
+            if_tie=="earlier", return earlier.
+            if_tie=="first", return ts1.
+            [TODO: add "random" option later to return randomly chosen ts1 or ts2.]
+        :param ts1: input Timespan object.
+        :param ts2: input Timespan object.
+        :param if_tie: "earlier" or "first". Other strings behave as "first".
+        :return: the Timespan object with longer duration.
+        """
+        if ts1.seconds > ts2.seconds:
+            return ts1
+        if ts2.seconds > ts1.seconds:
+            return ts2
+        # here: equal length cases. First, try to break duration tie with earlier midpoint.
+        if if_tie.lower() == "earlier" and ts1.midpoint != ts2.midpoint:
+            if ts1.midpoint < ts2.midpoint:
+                return ts1
+            return ts2
+        # here, tie-breaking has failed. So simply return first of 2 input Timespans.
+        return ts1
 
     def __str__(self):
         return "Timespan '" + str(self.start) + "' to '" + str(self.end) + "' = " + \
@@ -33,8 +94,11 @@ class Timespan:
 class RaDec:
     """
     Holds one Right Ascension, Declination sky position (internally as degrees).
-    ra : (hours hex string, or degrees)
-    dec : (degrees hex string, or degrees)
+    Parameters:
+        ra : (hours hex string, or degrees)
+        dec : (degrees hex string, or degrees)
+    Methods:
+
     """
     def __init__(self, ra, dec):
         if isinstance(ra, str):
@@ -45,25 +109,38 @@ class RaDec:
             self.dec = dec_as_degrees(dec)
         else:
             self.dec = dec
+        self.as_degrees = self.ra, self.dec  # stored internally as degrees
+        self.as_hex = ra_as_hours(self.ra), dec_as_hex(self.dec)
 
-    def as_degrees(self):
-        return self.ra, self.dec  # because stored internally as degrees
-
-    def as_hex(self):
-        return ra_as_hours(self.ra), dec_as_hex(self.dec)
-
-    def alt_az(self, latitude, longitude, time_utc):
-        pass
-
-    def degrees_from(self, other_ra_dec):
-        pass
+    def degrees_from(self, other):
+        deg_per_radian = 180.0 / math.pi
+        diff_ra = abs(self.ra - other.ra) / deg_per_radian
+        cos_dec_1 = math.cos(self.dec / deg_per_radian)
+        cos_dec_2 = math.cos(other.dec / deg_per_radian)
+        diff_dec = abs(self.dec - other.dec) / deg_per_radian
+        arg = math.sqrt(math.sin(diff_dec/2.0)**2 + cos_dec_1*cos_dec_2*math.sin(diff_ra/2.0)**2)
+        if arg > 0.001:
+            return deg_per_radian * (2.0 * math.asin(arg))  # haversine formula
+        else:
+            # spherical law of cosines
+            sin_dec_1 = math.sin(self.dec / deg_per_radian)
+            sin_dec_2 = math.sin(other.dec / deg_per_radian)
+            return deg_per_radian * \
+                math.acos(sin_dec_1*sin_dec_2 + cos_dec_1*cos_dec_2*math.cos(diff_ra))
 
     def farther_from(self, other_ra_dec, degrees_limit):
         return self.degrees_from(other_ra_dec) > degrees_limit
 
+    def __eq__(self, other):
+        return (self.ra == other.ra) and (self.dec == other.dec)
+
     def __str__(self):
-        ra_hex, dec_hex = self.as_hex()
+        ra_hex, dec_hex = self.as_hex
         return "RaDec object:  " + ra_hex + "  " + dec_hex
+
+    def __repr__(self):
+        ra_hex, dec_hex = self.as_hex
+        return "RaDec('" + ra_hex + "', '" + dec_hex + "')"
 
 
 def ra_as_degrees(ra_string):
@@ -206,4 +283,12 @@ def ladder_round(raw_value, ladder=DEFAULT_LADDER, direction="nearest"):
                 return base * ladder[i]  # round downward
             else:
                 return base * ladder[i+1]  # round upward
+
+
+def get_phase(jd, jd_epoch, period):
+    phase = math.modf((jd - jd_epoch) / period)[0]
+    if phase < 0:
+        phase += 1
+    return phase
+
 

@@ -1,5 +1,5 @@
 from math import pi
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import os
 import json
 import ephem
@@ -11,6 +11,7 @@ __author__ = "Eric Dose :: Bois d'Arc Observatory, Kansas"
 PHOTRIX_ROOT_DIRECTORY = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SITE_DIRECTORY = os.path.join(PHOTRIX_ROOT_DIRECTORY, "site")
 MOON_PHASE_NO_FACTOR = 0.05
+MIN_MOON_DIST = 45  # in degrees
 
 
 class Site:
@@ -144,80 +145,146 @@ class Astronight:
             .site_name : as "BDO_Kansas"
             .site : this site (Site object)
             ._observer : this site and this astronight (ephem.Observer object)
+            .ts_dark : Timespan(twilight_dusk, twilight_dawn) for this astronight.
             .local_middark_ut = local mid-dark time, this astronight, in UTC time (datetime object)
             .local_middark_jd = local mid-dark time, this astronight, in Julian date (float)
-            .local_middark_lst = local mid-dark time, this astronight, local sidercial time in degrees (float)
+            .local_middark_lst = local mid-dark time, this astronight, LST in degrees (float)
             .moon_radec = moon location at middark (RaDec object)
-            .moon_phase = moon phase at middark (float)
-            .dark = evening twilight and morning twilight (Timespan object)
-        """
+            .moon_phase = moon phase at middark (float, range 0-1)
+       """
         self.an_date_string = an_date_string
         self.site_name = site_name
         self.site = Site(site_name)
 
-        obs = ephem.Observer()  # for local use (within __init__()).
-        obs.lat, obs.lon = str(self.site.latitude), str(self.site.longitude)
-        obs.elevation = self.site.elevation
-        self._observer = obs  # for access by other methods in this class.
+        site_obs = ephem.Observer()  # for local use (within __init__()).
+        site_obs.lat, site_obs.lon = str(self.site.latitude), str(self.site.longitude)
+        site_obs.elevation = self.site.elevation
+        # self._observer = copy(site_obs)  # for access by other methods in this class.
 
         # get local middark times for requested Astronight.
         an_year = int(an_date_string[0:4])
         an_month = int(an_date_string[4:6])
         an_day = int(an_date_string[6:8])
-        approx_midnight_utc = datetime(an_year, an_month, an_day, 24, 0, 0) + \
-            timedelta(hours=-self.site.longitude / 15.0)
-        sun = ephem.Sun()
-        obs.horizon = str(self.site.twilight_sun_alt)
-        sun.compute(obs)
-        twilight_dusk = obs.previous_setting(sun, start=approx_midnight_utc)
-        twilight_dawn = obs.next_rising(sun, start=approx_midnight_utc)
-        self.dark = Timespan(twilight_dusk, twilight_dawn)
-        self.local_middark_utc = self.dark.midpoint
-        self.local_middark_jd = ephem.julian_date(self.local_middark_utc)
-        obs.date = self.local_middark_utc
-        self.local_middark_lst = obs.sidereal_time() * 180. / pi  # in degrees
+        approx_midnight_utc = datetime(an_year, an_month, an_day, 0, 0, 0) + \
+            timedelta(hours=-self.site.longitude / 15.0) + timedelta(hours=+24)
 
-        # Prep all other solar-system bodies, as RaDecs at local mid-dark.
+        sun = ephem.Sun()
+        site_obs.horizon = str(self.site.twilight_sun_alt)
+        sun.compute(site_obs)
+        twilight_dusk = site_obs.previous_setting(sun,
+            start=approx_midnight_utc).datetime().replace(tzinfo=timezone.utc)
+        twilight_dawn = site_obs.next_rising(sun,
+            start=approx_midnight_utc).datetime().replace(tzinfo=timezone.utc)
+        self.ts_dark = Timespan(twilight_dusk, twilight_dawn)
+        self.local_middark_utc = self.ts_dark.midpoint
+        self.local_middark_jd = ephem.julian_date(self.local_middark_utc)
+        site_obs.date = self.local_middark_utc
+        self.local_middark_lst = site_obs.sidereal_time() * 180. / pi  # in degrees
+
+        # Prep moon, using RaDec at local mid-dark.
         moon = ephem.Moon()
-        obs.date = self.local_middark_utc
-        moon.compute(obs)
+        site_obs.date = self.local_middark_utc
+        site_obs.horizon = "0"  # when moon is at all visible
+        site_obs.epoch = '2000'
+        moon.compute(site_obs)
         self.moon_radec = RaDec(str(moon.ra), str(moon.dec))
         self.moon_phase = moon.moon_phase
-        # jupiter = ephem.Jupiter(obs)
-        # self.jupiter_radec = RaDec(str(jupiter.ra), str(jupiter.dec))
-        # saturn = ephem.Saturn(obs)
-        # self.saturn_radec = RaDec(str(saturn.ra), str(saturn.dec))
-        # venus = ephem.Venus(obs)
-        # self.venus_radec = RaDec(str(venus.ra), str(venus.dec))
+        # get .ts_dark_no_moon (Timespan object) for this Astronight.
+        if self.moon_phase <= MOON_PHASE_NO_FACTOR:
+            self.ts_dark_no_moon = self.ts_dark
+        else:
+            moonrise_1 = site_obs.previous_rising(moon,
+                start=approx_midnight_utc).datetime().replace(tzinfo=timezone.utc)
+            moonset_1 = site_obs.next_setting(moon,
+                start=moonrise_1).datetime().replace(tzinfo=timezone.utc)
+            ts_moon_up_1 = Timespan(moonrise_1, moonset_1)
+            moonset_2 = site_obs.next_setting(moon,
+                start=approx_midnight_utc).datetime().replace(tzinfo=timezone.utc)
+            moonrise_2 = site_obs.previous_rising(moon,
+                start=moonset_2).datetime().replace(tzinfo=timezone.utc)
+            ts_moon_up_2 = Timespan(moonrise_2, moonset_2)
+            self.ts_dark_no_moon = self.ts_dark.subtract(ts_moon_up_1).subtract(ts_moon_up_2)
+        sss = 1  # dummy, just as a place to stop for debugging.
+    # TODO: Prep all other solar-system bodies, using their RaDecs at local mid-dark.
+    # jupiter = ephem.Jupiter(obs)
+    # self.jupiter_radec = RaDec(str(jupiter.ra), str(jupiter.dec))
+    # saturn = ephem.Saturn(obs)
+    # self.saturn_radec = RaDec(str(saturn.ra), str(saturn.dec))
+    # venus = ephem.Venus(obs)
+    # self.venus_radec = RaDec(str(venus.ra), str(venus.dec))
 
-    def available(self, min_alt, ra, dec):
+    def ts_observable(self, radec=RaDec('0', '+0'), min_alt=None, min_moon_dist=None):
         """
         Returns Timespan object defining when this RA,Dec may be observed during this astronight.
-        Site data are taken from stored ephem Observer object self._observer.
-        Usage: ts = an.available(+28, fov.ra, fov.dec)
+        Site data are taken from ephem Observer object self._observer stored in this object.
+        Usage: ts = an.observable(util.RaDec(fov.ra, fov.dec), +28, 45)
+        :param radec: required, a RaDec position for the object to be observed.
+        :param min_alt: min object altitude to observe, in degrees; default->use Site min alt.
+        :param min_moon_dist: min distance from moon to observe, enforced only when moon is up,
+           in degrees; default->use Site min moon distance.
+           Set to 0 to ignore moon.
+           Set to >=180 to ignore moon phase (moon must be down to observe at all).
+           [User may want to set this value by using a Lorentzian fn, as RTML does,
+              using (possibly auto-computed) distance and days-from-full-moon values.]
+        :return: Timespan object of start and end times (UT) that observing is allowed.
         """
-        obs = copy(self._observer)
+        if min_alt is None:
+            min_alt = self.site.min_altitude
+        if min_moon_dist is None:
+            min_moon_dist = MIN_MOON_DIST
+
+        obs = ephem.Observer()  # for local use.
+        obs.lat, obs.lon = str(self.site.latitude), str(self.site.longitude)
+        obs.elevation = self.site.elevation
         obs.horizon = str(min_alt)
-        b = ephem.FixedBody()
-        b._ra = str(ra)
-        b._dec = str(dec)
-        b._epoch = '2000'
-        b.compute(obs)
-        previous_transit_utc = self._observer.previous_rising(b, start=self.local_middark_utc)
-        next_transit_utc = self._observer.next_setting(b, start=self.local_middark_utc)
-        if next_transit_utc - self.local_middark_utc < self.local_middark_utc - previous_transit_utc:
-            nearest_transit_utc = next_transit_utc
+        obs.date = self.local_middark_utc
+        target = ephem.FixedBody()
+        target._epoch = '2000'
+        target._ra, target._dec = radec.as_hex
+        target.compute(obs)
+        print(target.a_epoch, target._epoch, "     horizon:", obs.horizon,
+              "   min_moon_dist:", min_moon_dist)
+        print(obs.date)
+        print(".ra.dec", target.ra, target.dec)
+        print("g", target.g_ra, target.g_dec)
+        print("a", target.a_ra, target.a_dec)
+        # Compute object-up Timespan, watching for exceptions (i.e., obj Never up or Always up).
+        try:
+            obj_rise_1 = obs.previous_rising(target,
+                start=self.local_middark_utc).datetime().replace(tzinfo=timezone.utc)
+        except ephem.NeverUpError:
+            obj_ts_1 = Timespan(self.local_middark_utc, self.local_middark_utc)
+            obj_ts_2 = obj_ts_1
+        except ephem.AlwaysUpError:
+            obj_ts_1 = self.ts_dark
+            obj_ts_2 = obj_ts_1
         else:
-            nearest_transit_utc = previous_transit_utc
-        obs.date = nearest_transit_utc
-        b.compute(obs)
-        if b.alt > min_alt * pi / 180.0:
-            start = obs.previous_rising(b, start=nearest_transit_utc)
-            end = obs.next_setting(b, start=nearest_transit_utc)
-            above_min_alt = Timespan(start, end)
+            obj_set_1 = obs.next_setting(target,
+                start=obj_rise_1).datetime().replace(tzinfo=timezone.utc)
+            obj_set_2 = obs.next_setting(target,
+                start=self.local_middark_utc).datetime().replace(tzinfo=timezone.utc)
+            obj_rise_2 = obs.previous_rising(target,
+                start=obj_set_2).datetime().replace(tzinfo=timezone.utc)
+            obj_ts_1 = Timespan(obj_rise_1, obj_set_1)
+            obj_ts_2 = Timespan(obj_rise_2, obj_set_2)
+        print("dark:", self.ts_dark)
+        print("dark_no_moon:", self.ts_dark_no_moon)
+        print("1:", obj_ts_1)
+        print("2:", obj_ts_2)
+        print("moon:", str(self.moon_radec.ra), str(self.moon_radec.dec))
+        moon_dist_deg = (180.0 / pi) * ephem.separation((self.moon_radec.ra, self.moon_radec.dec),
+                                                        (target.ra, target.dec))
+        print("moon dist deg:", moon_dist_deg, "dist-min:", moon_dist_deg-min_moon_dist)
+        if moon_dist_deg > min_moon_dist:
+            obj_avail_1 = obj_ts_1.intersect(self.ts_dark)
+            obj_avail_2 = obj_ts_2.intersect(self.ts_dark)
         else:
-            above_min_alt = Timespan(nearest_transit_utc, nearest_transit_utc)  # null Timespan
-        return self.dark.intersect(above_min_alt)
+            obj_avail_1 = obj_ts_1.intersect(self.ts_dark_no_moon)
+            obj_avail_2 = obj_ts_2.intersect(self.ts_dark_no_moon)
+        print("obj_avail_1", obj_avail_1)
+        print("obj_avail_2", obj_avail_2)
+        ts_obj_avail = Timespan.longer(obj_avail_1, obj_avail_2, if_tie="earlier")
+        return ts_obj_avail
 
     def __repr__(self):
         return "Astronight '" + self.an_date_string + "' at site '" + self.site_name + "'."
@@ -260,7 +327,7 @@ class Astronight:
         else:
             above_min_alt = Timespan(nearest_transit_utc.datetime(),
                                      nearest_transit_utc.datetime())  # null Timespan
-        return self.dark.intersect(above_min_alt)
+        return self.ts_dark.intersect(above_min_alt)
 
 
 
@@ -276,10 +343,10 @@ class Astronight:
         #                  str(self.moon.dec) + ")   rise/set=??? local" + "\n"
         return header_string
 
-    def when_FOV_observable(self, FOV):
+    def ts_FOV_observable(self, fov):
         """ Returns Timespan object containing when FOV is observable during this Astronight.
         Usage: ts = an.when_FOV_observable(FOV)
         """
-        pass  # probably uses same logic as for moon, just above at end of AN constructor.
+        pass  # probably just calls ts_observable using FOV's RA and Dec
 
 

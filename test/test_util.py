@@ -104,15 +104,15 @@ def test_weighted_mean():
     with pytest.raises(ValueError) as e:
         util.weighted_mean([], [])                 # zero-length
     assert 'lengths of values & weights must be equal & non-zero' in str(e)
-    print('>>>' + str(e) + '<<<')
+    # print('>>>' + str(e) + '<<<')
     with pytest.raises(ValueError) as e:
         util.weighted_mean([2, 3], [4, 5, 3])      # unequal lengths
     assert 'lengths of values & weights must be equal & non-zero' in str(e)
-    print('>>>' + str(e) + '<<<')
+    # print('>>>' + str(e) + '<<<')
     with pytest.raises(ValueError) as e:
         util.weighted_mean([2, 3, 4], [1, 4, -5])  # sum(weights)==0
     assert 'sum of weights must be positive' in str(e)
-    print('>>>' + str(e) + '<<<')
+    # print('>>>' + str(e) + '<<<')
     assert util.weighted_mean([3], [7], True) == (3, 0)
     assert util.weighted_mean([1, 3, 8], [0, 3, 9], True) == (81/12, 2.9296875)
     assert util.weighted_mean([1, 3, 8], [0, 3, 9], True) == \
@@ -133,14 +133,67 @@ def test_ladder_round():
 
 
 def test_Timespan():
-    # Normal case.
+    # Set up tests.
     dt1 = datetime(2016, 9, 10, 0, 0, 0, tzinfo=timezone.utc)
     dt2 = dt1 + timedelta(hours=1.5)
     ts1 = util.Timespan(dt1, dt2)
+    # Test fields:
     assert ts1.start == dt1
     assert ts1.end == dt2
     assert ts1.seconds == 1.5 * 3600
     assert ts1.midpoint == dt1 + (dt2-dt1) / 2
+    # Test copy():
+    tscopy = ts1.copy()
+    assert tscopy.start == ts1.start
+    assert tscopy.end == ts1.end
+    # Test equality:
+    ts1eq = util.Timespan(dt1,dt2)
+    assert ts1eq == ts1
+    ts1neq1 = util.Timespan(dt1, dt2+timedelta(hours=1))
+    assert ts1neq1 != ts1
+    ts1neq2 = util.Timespan(dt1+timedelta(hours=1), dt2)
+    assert ts1neq2 != ts1
+    ts1neq3 = util.Timespan(dt1+timedelta(hours=1), dt2+timedelta(hours=1))
+    assert ts1neq3 != ts1
+    # Test .delay_seconds():
+    ts1delay = ts1.delay_seconds(120)
+    assert ts1delay.start == ts1.start + timedelta(seconds=120)
+    assert ts1delay.end == ts1.end + timedelta(seconds=120)
+    # Test .intersect():
+    ts1a = util.Timespan(dt1 + timedelta(hours=0.5), dt2 + timedelta(hours=3))
+    ts1a_int1 = ts1.intersect(ts1a)
+    assert ts1a_int1.start == ts1a.start
+    assert ts1a_int1.end == ts1.end
+    ts1a_int2 = ts1a.intersect(ts1)
+    assert ts1a_int1.start == ts1a_int2.start
+    assert ts1a_int1.end == ts1a_int2.end
+    # Test .subtract():
+    ts1_sub = ts1.subtract(ts1.delay_seconds(+10000))  # no overlap
+    assert ts1_sub == ts1
+    ts1_sub = ts1.subtract(ts1.delay_seconds(-10000))  # also no overlap
+    assert ts1_sub == ts1
+    ts1_sub = ts1.subtract(ts1.delay_seconds(+1800))  # partial overlap of 1 hour
+    assert ts1_sub.start == ts1.start
+    assert ts1_sub.end == ts1.start + timedelta(seconds=+1800)
+    ts1_sub = ts1.subtract(ts1.delay_seconds(-1800))  # partial overlap of 1 hour
+    assert ts1_sub.start == ts1.delay_seconds(-1800).end
+    assert ts1_sub.end == ts1.end
+    ts1_other = util.Timespan(ts1.start+timedelta(seconds=100),
+                              ts1.end+timedelta(seconds=-150))  # ts1_other within ts1 (early side).
+    ts1_sub = ts1.subtract(ts1_other)
+    assert ts1_sub.start == ts1_other.end
+    assert ts1_sub.end == ts1.end
+    ts1_other = util.Timespan(ts1.start+timedelta(seconds=160),
+                              ts1.end+timedelta(seconds=-70))  # ts1_other within ts1 (late side).
+    ts1_sub = ts1.subtract(ts1_other)
+    assert ts1_sub.start == ts1.start
+    assert ts1_sub.end == ts1_other.start
+    ts1_other = util.Timespan(ts1.start+timedelta(seconds=-160),
+                              ts1.end+timedelta(seconds=+7000))  # ts1 contained in ts1_other.
+    ts1_sub = ts1.subtract(ts1_other)
+    assert ts1_sub.start == ts1.start
+    assert ts1_sub.end == ts1.start
+    assert ts1_sub.seconds == 0
     # Test .contains_time():
     assert ts1.contains_time(dt1)
     assert ts1.contains_time(dt2)
@@ -157,14 +210,9 @@ def test_Timespan():
     ts_shift_later = util.Timespan(dt1+timedelta(hours=0.5), dt2+timedelta(hours=0.5))
     assert not ts1.contains_timespan(ts_shift_later)
     assert not ts_shift_later.contains_timespan(ts1)
-    # Test .intersect():
-    ts1a = util.Timespan(dt1+timedelta(hours=0.5), dt2+timedelta(hours=3))
-    ts1a_int1 = ts1.intersect(ts1a)
-    assert ts1a_int1.start == ts1a.start
-    assert ts1a_int1.end == ts1.end
-    ts1a_int2 = ts1a.intersect(ts1)
-    assert ts1a_int1.start == ts1a_int2.start
-    assert ts1a_int1.end == ts1a_int2.end
+    # Test str():
+    s = str(ts1)
+    assert s.startswith("Timespan ") and s.endswith(" = 5400 seconds.")
 
     # Case: input times equal
     dt3 = dt1
@@ -190,4 +238,81 @@ def test_Timespan():
     assert not ts3.contains_time(dt2 - timedelta(hours=0.5))
     assert not ts3.contains_time(dt1 + timedelta(hours=0.5))
 
-# TODO write test for class RaDec
+    # Test .longer():
+    dt1 = datetime(2016, 9, 10, 0, 0, 0, tzinfo=timezone.utc)
+    dt2 = dt1 + timedelta(hours=1.5)
+    dt3 = dt2 + timedelta(hours=1)
+    tsa = util.Timespan(dt1, dt2)
+    tsb = util.Timespan(dt1, dt3)
+    # simple case: equal start, unequal end: returns longer Timespan.
+    assert util.Timespan.longer(tsa, tsb) == tsb
+    assert util.Timespan.longer(tsb, tsa) == tsb
+    # edge case: identical inputs: returns first input.
+    ts_copy = tsa.copy()
+    assert util.Timespan.longer(tsa, ts_copy) == tsa
+    assert util.Timespan.longer(ts_copy, tsa) == ts_copy
+    # edge case: one zero-length input: returns the non-zero-length Timespan.
+    ts_zero = util.Timespan(dt1, dt1)
+    assert util.Timespan.longer(tsa, ts_zero) == tsa
+    # edge case: both zero-length inputs: returns earlier Timespan.
+    ts_zero_2 = util.Timespan(dt2, dt2)
+    assert util.Timespan.longer(ts_zero, ts_zero_2) == ts_zero
+    assert util.Timespan.longer(ts_zero_2, ts_zero) == ts_zero
+    # case if_tie=="earlier": returns earlier Timespan.
+    tsc = tsa.delay_seconds(7200)
+    assert util.Timespan.longer(tsa, tsc, if_tie="earlier") == tsa
+    assert util.Timespan.longer(tsc, tsa, if_tie="earlier") == tsa
+    # case if_tie=="first": returns first input.
+    assert util.Timespan.longer(tsa, tsc, if_tie="first") == tsa
+    assert util.Timespan.longer(tsc, tsa, if_tie="first") == tsc
+    # case if_tie==some other string: returns first input.
+    assert util.Timespan.longer(tsa, tsc, if_tie="whatever") == tsa
+    assert util.Timespan.longer(tsc, tsa, if_tie="whatever") == tsc
+
+
+def test_RaDec():
+    # Set up tests.
+    rd1 = util.RaDec(60, 70)
+    rd2 = util.RaDec(70, +80)
+    rd3 = util.RaDec("10:30:00", "-45:15:00")
+    rd4 = util.RaDec("10:30:00", -45.25)
+    rd5 = util.RaDec(157.5, "-45:15:00")
+    # Test fields and __eq__().
+    assert rd1.as_degrees == (60, +70)
+    assert rd1.as_degrees != (60, -70)
+    assert rd1.as_hex == ("04:00:00.000", "+70:00:00.00")
+    assert rd3.as_hex == ("10:30:00.000", "-45:15:00.00")
+    assert rd3.ra == 10.5*15
+    assert rd3.dec == -45.25
+    assert rd1 != rd2
+    assert rd3 == rd4 == rd5
+    # Test .degrees_from() and .farther_from().
+    assert rd1.degrees_from(rd2) == pytest.approx(10.293451406994343)
+    assert util.RaDec(0, 60).degrees_from(util.RaDec(180, 60)) == pytest.approx(60.0)
+    assert util.RaDec(0, 0).degrees_from(util.RaDec(180, 0)) == pytest.approx(180.0)
+    assert rd1.farther_from(rd2, 10)
+    assert not rd1.farther_from(rd2, 11)
+    assert rd1.farther_from(rd3, 130)
+    assert not rd1.farther_from(rd3, 140)
+    # Test __str__() and __repr__().
+    assert str(rd1) == "RaDec object:  04:00:00.000  +70:00:00.00"
+    assert str(rd5) == "RaDec object:  10:30:00.000  -45:15:00.00"
+    assert repr(rd2) == "RaDec('04:40:00.000', '+80:00:00.00')"
+    assert repr(rd5) == "RaDec('10:30:00.000', '-45:15:00.00')"
+    assert eval('util.' + repr(rd1)) == rd1
+    assert eval('util.' + repr(rd5)) == rd5
+    assert eval('util.' + repr(rd1)) != rd5
+
+
+def test_get_phase():
+    assert util.get_phase(5, 2, 10) == pytest.approx(0.3)
+    assert util.get_phase(-5, 2, 10) == pytest.approx(0.3)
+    assert util.get_phase(-335, 2, 10) == pytest.approx(0.3)
+    assert util.get_phase(335, 2, 10) == pytest.approx(0.3)
+    assert util.get_phase(3352, 2, 10) == 0
+    assert util.get_phase(2, 2, 10) == 0
+    assert util.get_phase(1.99, 2, 10) == pytest.approx(0.999)
+    assert util.get_phase(12, 2, 10) == 0
+    assert util.get_phase(7, 2, 10) == 0.5
+
+

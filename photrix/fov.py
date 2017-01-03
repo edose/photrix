@@ -1,8 +1,5 @@
 from photrix.util import *
-from photrix.user import Astronight
 import os
-import pandas as pd
-from collections import defaultdict
 
 __author__ = "Eric Dose :: Bois d'Arc Observatory, Kansas"
 
@@ -11,8 +8,6 @@ FOV_OBSERVING_STYLES = ["Standard", "Stare", "Monitor", "LPV"]
 CURRENT_SCHEMA_VERSION = "1.3"
 SINE_FRACTION = 0.5
 VR_FRACTION_OF_VI = 0.5
-MIN_AVAILABLE_SECONDS = 900
-FITS_DIRECTORY = "J:/Astro/Images"
 
 
 class Fov:
@@ -26,7 +21,7 @@ class Fov:
         fov_fullpath = os.path.join(fov_directory, fov_name + ".txt")
         with open(fov_fullpath) as fov_file:
             lines = fov_file.readlines()
-        lines = [line.split(";")[0] for line in lines]  # remove comments
+        lines = [line.split(";")[0] for line in lines]  # remove all comments
 
         # ---------- Header section.
         self.fov_name = Fov._directive_value(lines, "#FOV_NAME")
@@ -68,7 +63,7 @@ class Fov:
         obs_style_words = Fov._directive_words(lines, "#OBSERVING_STYLE")
         obs_style = obs_style_words[0]
         obs_values = obs_style_words[1:]
-        if obs_style not in ["Stare", "Monitor", "LPV", "Standard"]:
+        if obs_style not in FOV_OBSERVING_STYLES:
             raise ValueError("'" + obs_style + "' is not a valid Observing Style.")
 
         self.observing_style = obs_style
@@ -227,34 +222,30 @@ class Fov:
         period = self.period
         # First, determine whether brightness is increasing or decreasing at jd.
         # phases must be in [0,1], where phase = 0 means max brightness.
-        phase_jd = math.modf((jd - jd_bright) / period)[0]  # fractional part
-        if phase_jd < 0:
-            phase_jd += 1
-        phase_faint = math.modf((jd_faint - jd_bright) / period)[0]
-        if phase_faint < 0:
-            phase_faint += 1
+        phase_jd = get_phase(jd, jd_bright, period)
+        phase_faint = get_phase(jd_faint, jd_bright, period)
         if 0 <= phase_jd <= phase_faint:  # brightness decreasing at jd
             time_fract = phase_jd / phase_faint
             v_start = v_bright
             color_start = color_bright
-            v_diff = v_faint - v_bright
-            color_diff = color_faint - color_bright
+            v_change = v_faint - v_bright
+            color_change = color_faint - color_bright
         elif phase_faint <= phase_jd <= 1:  # brightness increasing at jd
             time_fract = (phase_jd - phase_faint) / (1 - phase_faint)
             v_start = v_faint
-            color_start = v_faint
-            v_diff = v_bright - v_faint
-            color_diff = color_bright - color_faint
+            color_start = color_faint
+            v_change = v_bright - v_faint
+            color_change = color_bright - color_faint
         else:
             return None  # phase_jd must be outside [0,1]
         #  Now, calculate linear and sine components and blend them (each filter).
         linear_mag_fract = time_fract
-        sine_mag_fract = (1.0 - math.cos(linear_mag_fract * math.pi)) / 2.0
+        sine_mag_fract = (1 + math.sin((time_fract-0.5)*math.pi)) / 2
         mag_fract = SINE_FRACTION * sine_mag_fract + (1 - SINE_FRACTION) * linear_mag_fract
         #  Render mag in each filter.
         mags = dict()
-        mags['V'] = v_start + mag_fract * v_diff
-        mags['I'] = (v_start + color_start) + mag_fract * (v_diff + color_diff)
+        mags['V'] = v_start + mag_fract * v_change
+        mags['I'] = (v_start - color_start) + mag_fract * (v_change - color_change)
         mags['R'] = mags['V'] + VR_FRACTION_OF_VI * (mags['I'] - mags['V'])
         return mags
 
@@ -319,12 +310,18 @@ class FovError(Exception):
 
 
 def all_fov_names(fov_directory=FOV_DIRECTORY):
+    """ Returns list of all FOV names (from filenames in FOV_DIRECTORY). """
     fov_names = [fname[:-4] for fname in os.listdir(fov_directory)
                  if (fname.endswith(".txt")) and (not fname.startswith("$"))]
     return fov_names
 
 
 def make_fov_dict(fov_directory=FOV_DIRECTORY, fov_names_selected=None):
+    """
+    Returns dict of FOVs, as:  FOV_name:FOV object.
+    Usage: d = make_fov_dict()  --> returns dict of *all* FOVs.
+    Usage: d = make_fov_dict(fov_names_selected=name_list) --> returns selected FOVs.
+    """
     fov_all_names = all_fov_names(fov_directory)
     if fov_names_selected is None:
         fov_names = fov_all_names
@@ -333,90 +330,4 @@ def make_fov_dict(fov_directory=FOV_DIRECTORY, fov_names_selected=None):
     fov_dict = {fov_name: Fov(fov_name, fov_directory) for fov_name in fov_names}
     return fov_dict
 
-
-def make_monitor_df(fov_directory=FOV_DIRECTORY, fov_names_selected=None,
-                    an_string="20160101", site_name="BDO_Kansas"):
-    fov_dict = make_fov_dict(fov_directory=fov_directory, fov_names_selected=fov_names_selected)
-
-    # Keep only Monitor and LPV fovs.
-    fov_dict = {name: fov for (name, fov) in fov_dict.items()
-                if fov.observing_style.lower() in ['monitor', 'lpv']}
-
-    # Keep only those fovs available this night.
-    an = Astronight(an_string, site_name)
-    site = an.site
-    available_dict = {name: an.available(site.min_altitude, fov.ra, fov.dec).seconds
-                      for (name, fov) in fov_dict.items()}  # values are Timespan objects.
-    fov_dict = {name: fov for (name, fov) in fov_dict.items()
-                if available_dict[name] >= MIN_AVAILABLE_SECONDS}
-
-    # Eliminate fovs that are too recently observed by me.
-    max_days = max([fov.gap_score_days[2] for fov in fov_dict.keys()])
-    local_obs_age_dict = get_local_obs_age_dict(fov_dict=fov_dict, max_days=max_days)
-    fov_dict = {name: fov for (name, fov) in fov_dict.items()
-                if fov.calc_priority_score(local_obs_age_dict[name]) > 0}
-
-    # Eliminate fovs that are too recently observed by AAVSO.
-    aavso_obs_age_dict = get_aavso_obs_age_dict(fov_dict=fov_dict, max_days=max_days)
-    fov_dict = {name: fov for (name, fov) in fov_dict.items()
-                if fov.calc_priority_score(aavso_obs_age_dict[name]) > 0}
-
-    # Construct and return the data frame.
-    out_dict = dict()
-    for fov_name in fov_dict.keys():
-        avail = available_dict[fov_name]  # is a Timespan objectb
-        local_age = local_obs_age_dict[fov_name]
-        aavso_age = aavso_obs_age_dict[fov_name]
-        if local_age is None:
-            if aavso_age is None:
-                age = None
-            else:
-                age = aavso_age
-        else:
-            if aavso_age is None:
-                age = local_age
-            else:
-                age = max(local_age, aavso_age)
-        out_dict[fov_name] = (fov_name, avail.start, avail.end, avail.seconds, age)
-
-    fov_df = pd.DataFrame()
-
-    return fov_df
-
-
-def get_local_obs_age_dict(fov_dict=None, max_days=None):
-    # TODO: finish writing get_local_obs_age_dict()
-    fov_age_dict = defaultdict(lambda: None)
-    dir_list = ["a","b"]  # all FITS directories qualifying as recent enough
-    for an_dir in dir_list:
-        an_dict = defaultdict(lambda: None)
-        #  read AAVSO report, fill an_dict with target: latest JD
-        for fov_name, fov in fov_dict.items():
-            an_age = an_dict[fov.main_target]
-            if an_age is not None:
-                dict_age = fov_age_dict[fov_name]
-                if dict_age is not None:
-                    if an_age < dict_age:
-                        fov_age_dict[fov_name] = an_age
-                else:
-                    fov_age_dict[fov_name] = an_age
-    return fov_age_dict
-
-def get_aavso_obs_age_dict(fov_dict=None, max_days=None):
-    # TODO: finish writing get_aavso_obs_age_dict()
-    fov_age_dict = defaultdict(lambda: None)
-    for fov_name, fov in fov_dict.items():
-        # x is some function to get JD or age of most recent aavso observation
-        # may be more sophisticated, to weight visible, V, and other observations differently.
-        # watch out for age vs JD...must be some reference JD for any age calculations (AN middark?)
-        fov_age_dict[fov_name] = x(fov.main_target)
-    return fov_age_dict
-
-
-
-
-# ---------------------------------------------------------------------
-
-if __name__ == '__main__':
-    pass
 
