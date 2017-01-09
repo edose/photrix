@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 import math
 
 __author__ = "Eric Dose :: Bois d'Arc Observatory, Kansas"
@@ -62,7 +62,7 @@ class Timespan:
         return (self.start <= other.start) & (self.end >= other.end)
 
     @staticmethod
-    def longer(ts1, ts2, if_tie="earlier"):
+    def longer(ts1, ts2, on_tie="earlier"):
         """
         Returns Timespan with longer duration (larger .seconds).
         If equal duration:
@@ -71,7 +71,7 @@ class Timespan:
             [TODO: add "random" option later to return randomly chosen ts1 or ts2.]
         :param ts1: input Timespan object.
         :param ts2: input Timespan object.
-        :param if_tie: "earlier" or "first". Other strings behave as "first".
+        :param on_tie: "earlier" or "first". Any other string behaves as "first".
         :return: the Timespan object with longer duration.
         """
         if ts1.seconds > ts2.seconds:
@@ -79,7 +79,7 @@ class Timespan:
         if ts2.seconds > ts1.seconds:
             return ts2
         # here: equal length cases. First, try to break duration tie with earlier midpoint.
-        if if_tie.lower() == "earlier" and ts1.midpoint != ts2.midpoint:
+        if on_tie.lower() == "earlier" and ts1.midpoint != ts2.midpoint:
             if ts1.midpoint < ts2.midpoint:
                 return ts1
             return ts2
@@ -201,7 +201,7 @@ def ra_as_hours(ra_degrees):
     ra_minutes, remainder = divmod(remainder, 60 * 1000)
     ra_seconds = round(remainder / 1000, 3)
     format_string = "{0:02d}:{1:02d}:{2:06.3f}"
-    ra_str = format_string.format(ra_hours, ra_minutes, ra_seconds)
+    ra_str = format_string.format(int(ra_hours), int(ra_minutes), ra_seconds)
     if ra_str[:3] == "24:":
         ra_str = format_string.format(0, 0, 0)
     return ra_str
@@ -223,7 +223,7 @@ def dec_as_hex(dec_degrees):
     minutes, remainder = divmod(remainder, 60 * 1000)
     seconds = round(remainder / 1000, 2)
     format_string = "{0}{1:02d}:{2:02d}:{3:05.2f}"
-    dec_str = format_string.format(sign_str, degrees, minutes, seconds)
+    dec_str = format_string.format(sign_str, int(degrees), int(minutes), seconds)
     return dec_str
 
 
@@ -291,4 +291,12 @@ def get_phase(jd, jd_epoch, period):
         phase += 1
     return phase
 
+
+def jd_from_datetime_utc(datetime_utc=None):
+    if datetime_utc is None:
+        datetime_utc = datetime.now(timezone.utc)
+    datetime_j2000 = datetime(2000, 1, 1, 0, 0, 0).replace(tzinfo=timezone.utc)
+    jd_j2000 = 2451544.5
+    seconds_since_j2000 = (datetime_utc - datetime_j2000).total_seconds()
+    return jd_j2000 + seconds_since_j2000 / (24*3600)
 

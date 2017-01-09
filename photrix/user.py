@@ -165,8 +165,9 @@ class Astronight:
         an_year = int(an_date_string[0:4])
         an_month = int(an_date_string[4:6])
         an_day = int(an_date_string[6:8])
-        approx_midnight_utc = datetime(an_year, an_month, an_day, 0, 0, 0) + \
-            timedelta(hours=-self.site.longitude / 15.0) + timedelta(hours=+24)
+        approx_midnight_utc = datetime(an_year, an_month, an_day, 0, 0, 0).\
+                              replace(tzinfo=timezone.utc) + \
+                              timedelta(hours=-self.site.longitude / 15.0) + timedelta(hours=+24)
 
         sun = ephem.Sun()
         site_obs.horizon = str(self.site.twilight_sun_alt)
@@ -222,8 +223,8 @@ class Astronight:
         :param min_alt: min object altitude to observe, in degrees; default->use Site min alt.
         :param min_moon_dist: min distance from moon to observe, enforced only when moon is up,
            in degrees; default->use Site min moon distance.
-           Set to 0 to ignore moon.
-           Set to >=180 to ignore moon phase (moon must be down to observe at all).
+           Set to 0 to ignore moon (i.e., moon makes no difference to observable times).
+           Set to >=180 to ignore moon phase (i.e., moon must be down to observe at all).
            [User may want to set this value by using a Lorentzian fn, as RTML does,
               using (possibly auto-computed) distance and days-from-full-moon values.]
         :return: Timespan object of start and end times (UT) that observing is allowed.
@@ -242,23 +243,26 @@ class Astronight:
         target._epoch = '2000'
         target._ra, target._dec = radec.as_hex
         target.compute(obs)
-        print(target.a_epoch, target._epoch, "     horizon:", obs.horizon,
-              "   min_moon_dist:", min_moon_dist)
-        print(obs.date)
-        print(".ra.dec", target.ra, target.dec)
-        print("g", target.g_ra, target.g_dec)
-        print("a", target.a_ra, target.a_dec)
+        # print(target.a_epoch, target._epoch, "     horizon:", obs.horizon,
+        #       "   min_moon_dist:", min_moon_dist)
+        # print(obs.date)
+        # print(".ra.dec", target.ra, target.dec)
+        # print("g", target.g_ra, target.g_dec)
+        # print("a", target.a_ra, target.a_dec)
         # Compute object-up Timespan, watching for exceptions (i.e., obj Never up or Always up).
         try:
             obj_rise_1 = obs.previous_rising(target,
                 start=self.local_middark_utc).datetime().replace(tzinfo=timezone.utc)
         except ephem.NeverUpError:
+            # return zero-duration Timespans.
             obj_ts_1 = Timespan(self.local_middark_utc, self.local_middark_utc)
             obj_ts_2 = obj_ts_1
         except ephem.AlwaysUpError:
+            # return Timespans of astronight's entire dark period.
             obj_ts_1 = self.ts_dark
             obj_ts_2 = obj_ts_1
         else:
+            # get remaining rise and set times, return the 2 candidate Timespans.
             obj_set_1 = obs.next_setting(target,
                 start=obj_rise_1).datetime().replace(tzinfo=timezone.utc)
             obj_set_2 = obs.next_setting(target,
@@ -267,24 +271,28 @@ class Astronight:
                 start=obj_set_2).datetime().replace(tzinfo=timezone.utc)
             obj_ts_1 = Timespan(obj_rise_1, obj_set_1)
             obj_ts_2 = Timespan(obj_rise_2, obj_set_2)
-        print("dark:", self.ts_dark)
-        print("dark_no_moon:", self.ts_dark_no_moon)
-        print("1:", obj_ts_1)
-        print("2:", obj_ts_2)
-        print("moon:", str(self.moon_radec.ra), str(self.moon_radec.dec))
+        # print("dark:", self.ts_dark)
+        # print("dark_no_moon:", self.ts_dark_no_moon)
+        # print("1:", obj_ts_1)
+        # print("2:", obj_ts_2)
+        # print("moon:", str(self.moon_radec.ra), str(self.moon_radec.dec))
         moon_dist_deg = (180.0 / pi) * ephem.separation((self.moon_radec.ra, self.moon_radec.dec),
                                                         (target.ra, target.dec))
-        print("moon dist deg:", moon_dist_deg, "dist-min:", moon_dist_deg-min_moon_dist)
+        # print("moon dist deg:", moon_dist_deg, "dist-min:", moon_dist_deg-min_moon_dist)
         if moon_dist_deg > min_moon_dist:
             obj_avail_1 = obj_ts_1.intersect(self.ts_dark)
             obj_avail_2 = obj_ts_2.intersect(self.ts_dark)
         else:
             obj_avail_1 = obj_ts_1.intersect(self.ts_dark_no_moon)
             obj_avail_2 = obj_ts_2.intersect(self.ts_dark_no_moon)
-        print("obj_avail_1", obj_avail_1)
-        print("obj_avail_2", obj_avail_2)
-        ts_obj_avail = Timespan.longer(obj_avail_1, obj_avail_2, if_tie="earlier")
+        # print("obj_avail_1", obj_avail_1)
+        # print("obj_avail_2", obj_avail_2)
+        ts_obj_avail = Timespan.longer(obj_avail_1, obj_avail_2, on_tie="earlier")
         return ts_obj_avail
+
+    # def moon_dist(self, ra, dec):
+    #     return (180.0 / pi) * ephem.separation((self.moon_radec.ra, self.moon_radec.dec),
+    #                                            (target.ra, target.dec))
 
     def __repr__(self):
         return "Astronight '" + self.an_date_string + "' at site '" + self.site_name + "'."
@@ -343,10 +351,12 @@ class Astronight:
         #                  str(self.moon.dec) + ")   rise/set=??? local" + "\n"
         return header_string
 
-    def ts_FOV_observable(self, fov):
-        """ Returns Timespan object containing when FOV is observable during this Astronight.
-        Usage: ts = an.when_FOV_observable(FOV)
+    def ts_fov_observable(self, fov, min_alt=None, min_moon_dist=None):
+        """ Convenience function.
+        Returns Timespan object containing when FOV (or rather, its center RaDec is observable
+        during this Astronight.
+        Usage: ts = an.when_FOV_observable(FOV, min_alt, min_moon_dist)
         """
-        pass  # probably just calls ts_observable using FOV's RA and Dec
+        return self.ts_observable(RaDec(fov.ra, fov.dec), min_alt, min_moon_dist)
 
 

@@ -2,6 +2,7 @@ from datetime import datetime, timezone, timedelta
 from pytest import approx
 from photrix import user                 # call: user.fn() & user.Class()
 from photrix.util import hex_degrees_as_degrees, ra_as_hours, dec_as_hex, RaDec
+from photrix.fov import Fov
 
 __author__ = "Eric Dose :: Bois d'Arc Observatory, Kansas"
 
@@ -194,7 +195,7 @@ def test_Astronight():
 
     # Test ts_observable(), case = object farther than min dist from moon (common case).  --------
     ts_obs = an.ts_observable(hip_116928, min_moon_dist=45)
-    print("a", ts_obs, "\n\n\n")
+    # print("a", ts_obs, "\n\n\n")
     assert abs((ts_obs.start - datetime(2016, 9, 20, 2, 13, 12, 660671,
                 tzinfo=timezone.utc)).total_seconds()) <= 60
     assert abs((ts_obs.end - datetime(2016, 9, 20, 10, 3, 11, 540779,
@@ -202,7 +203,7 @@ def test_Astronight():
 
     # Test ts_observable(), case = object closer than min dist from moon. ------------------------
     ts_obs = an.ts_observable(hip_116928, min_moon_dist=90)
-    print("b", ts_obs, "\n\n\n")
+    # print("b", ts_obs, "\n\n\n")
     assert abs((ts_obs.start - datetime(2016, 9, 20, 2, 13, 12, 660671,
                 tzinfo=timezone.utc)).total_seconds()) <= 60
     assert abs((ts_obs.end - datetime(2016, 9, 20, 2, 38, 2, 264284,
@@ -210,7 +211,7 @@ def test_Astronight():
 
     # Test ts_observable(), case = ignore moon altogether (set min_moon_dist to 0). --------------
     ts_obs = an.ts_observable(hip_116928, min_moon_dist=0)
-    print("c", ts_obs, "\n\n\n")
+    # print("c", ts_obs, "\n\n\n")
     assert abs((ts_obs.start - datetime(2016, 9, 20, 2, 13, 12, 660671,
                 tzinfo=timezone.utc)).total_seconds()) <= 60
     assert abs((ts_obs.end - datetime(2016, 9, 20, 10, 3, 11, 540779,
@@ -218,7 +219,7 @@ def test_Astronight():
 
     # Test ts_observable(), case = disable observing any time moon is up at all. -----------------
     ts_obs = an.ts_observable(hip_116928, min_moon_dist=200)
-    print("d", ts_obs, "\n\n\n")
+    # print("d", ts_obs, "\n\n\n")
     assert abs((ts_obs.start - datetime(2016, 9, 20, 2, 13, 12, 660671,
                 tzinfo=timezone.utc)).total_seconds()) <= 60
     assert abs((ts_obs.end - datetime(2016, 9, 20, 2, 38, 2, 264284,
@@ -226,7 +227,7 @@ def test_Astronight():
 
     # Test ts_observable(), case = object farther than min dist from moon, higher min_alt. ------
     ts_obs = an.ts_observable(hip_116928, min_moon_dist=45, min_alt=35)
-    print("e", ts_obs, "\n\n\n")
+    # print("e", ts_obs, "\n\n\n")
     assert abs((ts_obs.start - datetime(2016, 9, 20, 3, 9, 53, 907299,
                 tzinfo=timezone.utc)).total_seconds()) <= 60
     assert abs((ts_obs.end - datetime(2016, 9, 20, 9, 6, 30, 294148,
@@ -234,28 +235,159 @@ def test_Astronight():
 
     # Test ts_observable(), case = object closer than min dist from moon, higher min_alt. --------
     ts_obs = an.ts_observable(hip_116928, min_moon_dist=90, min_alt=35)
-    print("f", ts_obs, "\n\n\n")
+    # print("f", ts_obs, "\n\n\n")
     assert ts_obs.seconds == 0  # start and end times are unimportant (indeed they are undefined).
 
     # For remaining tests, assume Astronight object's returned values are ok (as were tested above).
-    # Different objects (sky positions) to exercise all functions.
-    altais = RaDec('19:12:33.405', '+69:39:43.092')  # in NW sky
+    # Wide range of sky positions, to exercise all functions and exception handling.
+    altais = RaDec('19:12:33.405', '+67:39:43.092')  # in NW sky (from North America)
     hip_22783 = RaDec('04:54:03.012', '+66:20:33.763')  # in NE sky
     mira = RaDec('02:19:20.804', '-02:58:43.518')  # in SE sky
     algedi = RaDec('20:18:03.324', '-12:32:41.419')  # in SW sky
     ankaa = RaDec('00:26:17.310', '-42:18:27.446')  # too far south to observe
-    polaris = RaDec('02:31:49.133', '+89:15:50.598')  # circumpolar
+    polaris = RaDec('02:31:49.133', '+89:15:50.598')  # circumpolar north
 
-    ts_obs = an.ts_observable(altais, min_moon_dist=45, min_alt=25)
-    print("altais >> ", ts_obs, "\n\n\n")
-    ts_obs = an.ts_observable(hip_22783, min_moon_dist=45, min_alt=25)
-    print("hip_22783 >> ", ts_obs, "\n\n\n")
-    ts_obs = an.ts_observable(mira, min_moon_dist=45, min_alt=25)
-    print("mira >> ", ts_obs, "\n\n\n")
-    ts_obs = an.ts_observable(algedi, min_moon_dist=45, min_alt=25)
-    print("algedi >> ", ts_obs, "\n\n\n")
-    ts_obs = an.ts_observable(ankaa, min_moon_dist=45, min_alt=25)
-    print("ankaa >> ", ts_obs, "\n\n\n")
-    ts_obs = an.ts_observable(polaris, min_moon_dist=45, min_alt=25)
-    print("polaris >> ", ts_obs, "\n\n\n")
+    # All targets, allow any moon.
+    ts_obs = an.ts_observable(altais, min_moon_dist=0, min_alt=25)
+    # print("altais / any moon >> ", ts_obs, "\n\n\n")
+    assert abs((ts_obs.start - an.ts_dark.start).total_seconds()) <= 60
+    assert abs((ts_obs.end - datetime(2016, 9, 20, 9, 47, 48, 586041,
+                tzinfo=timezone.utc)).total_seconds()) <= 60
+    ts_obs = an.ts_observable(hip_22783, min_moon_dist=0, min_alt=25)
+    # print("hip_22783 / any moon >> ", ts_obs, "\n\n\n")
+    assert abs((ts_obs.start - datetime(2016, 9, 20, 3, 23, 32, 838379,
+                tzinfo=timezone.utc)).total_seconds()) <= 60
+    assert abs((ts_obs.end - an.ts_dark.end).total_seconds()) <= 60
+    ts_obs = an.ts_observable(mira, min_moon_dist=0, min_alt=25)
+    # print("mira / any moon >> ", ts_obs, "\n\n\n")
+    assert abs((ts_obs.start - datetime(2016, 9, 20, 5, 8, 37, 879958,
+                tzinfo=timezone.utc)).total_seconds()) <= 60
+    assert abs((ts_obs.end - an.ts_dark.end).total_seconds()) <= 60
+    ts_obs = an.ts_observable(algedi, min_moon_dist=0, min_alt=25)
+    # print("algedi / any moon >> ", ts_obs, "\n\n\n")
+    assert abs((ts_obs.start - an.ts_dark.start).total_seconds()) <= 60
+    assert abs((ts_obs.end - datetime(2016, 9, 20, 5, 35, 16, 643651,
+                tzinfo=timezone.utc)).total_seconds()) <= 60
+    ts_obs = an.ts_observable(ankaa, min_moon_dist=0, min_alt=25)
+    # print("ankaa / any moon >> ", ts_obs, "\n\n\n")
+    assert ts_obs.seconds == 0
+    ts_obs = an.ts_observable(polaris, min_moon_dist=0, min_alt=25)
+    # print("polaris / any moon >> ", ts_obs, "\n\n\n")
+    assert ts_obs == an.ts_dark
 
+    # All targets, allow NO moon.
+    ts_obs = an.ts_observable(altais, min_moon_dist=220, min_alt=25)
+    # print("altais / NO moon >> ", ts_obs, "\n\n\n")
+    assert ts_obs == an.ts_dark_no_moon
+    ts_obs = an.ts_observable(hip_22783, min_moon_dist=220, min_alt=25)
+    # print("hip_22783 / NO moon >> ", ts_obs, "\n\n\n")
+    assert ts_obs.seconds == 0
+    ts_obs = an.ts_observable(mira, min_moon_dist=220, min_alt=25)
+    # print("mira / NO moon >> ", ts_obs, "\n\n\n")
+    assert ts_obs.seconds == 0
+    ts_obs = an.ts_observable(algedi, min_moon_dist=220, min_alt=25)
+    # print("algedi / NO moon >> ", ts_obs, "\n\n\n")
+    assert ts_obs == an.ts_dark_no_moon
+    ts_obs = an.ts_observable(ankaa, min_moon_dist=220, min_alt=25)
+    # print("ankaa / NO moon >> ", ts_obs, "\n\n\n")
+    assert ts_obs.seconds == 0
+    ts_obs = an.ts_observable(polaris, min_moon_dist=220, min_alt=25)
+    # print("polaris / NO moon >> ", ts_obs, "\n\n\n")
+    assert ts_obs == an.ts_dark_no_moon
+
+    # Continue testing .ts_observable():  --------------------------------------------------------
+    # Same targets, new astronight with ~ opposite moon phase to previous astronight.
+    an_date_string = "20161008"
+    site_string = "BDO_Kansas"
+    an = user.Astronight(an_date_string, site_string)
+
+    # Case: allow any moon.
+    ts_obs = an.ts_observable(altais, min_moon_dist=0, min_alt=25)
+    # print("altais / any moon >> ", ts_obs, "\n\n\n")
+    assert abs((ts_obs.start - an.ts_dark.start).total_seconds()) <= 60
+    assert abs((ts_obs.end - datetime(2016, 10, 9, 8, 33, 5, 419491,
+               tzinfo=timezone.utc)).total_seconds()) <= 60
+    ts_obs = an.ts_observable(hip_22783, min_moon_dist=0, min_alt=25)
+    # print("hip_22783 / any moon >> ", ts_obs, "\n\n\n")
+    assert abs((ts_obs.start - datetime(2016, 10, 9, 2, 8, 51, 471332,
+               tzinfo=timezone.utc)).total_seconds()) <= 60
+    assert abs((ts_obs.end - an.ts_dark.end).total_seconds()) <= 60
+    ts_obs = an.ts_observable(mira, min_moon_dist=0, min_alt=25)
+    # print("mira / any moon >> ", ts_obs, "\n\n\n")
+    assert abs((ts_obs.start - datetime(2016, 10, 9, 3, 53, 55, 971837,
+               tzinfo=timezone.utc)).total_seconds()) <= 60
+    assert abs((ts_obs.end - datetime(2016, 10, 9, 11, 6, 47, 395358,
+               tzinfo=timezone.utc)).total_seconds()) <= 60
+    ts_obs = an.ts_observable(algedi, min_moon_dist=0, min_alt=25)
+    # print("algedi / any moon >> ", ts_obs, "\n\n\n")
+    assert abs((ts_obs.start - an.ts_dark.start).total_seconds()) <= 60
+    assert abs((ts_obs.end - datetime(2016, 10, 9, 4, 20, 34, 71309,
+               tzinfo=timezone.utc)).total_seconds()) <= 60
+    ts_obs = an.ts_observable(ankaa, min_moon_dist=0, min_alt=25)
+    # print("ankaa / any moon >> ", ts_obs, "\n\n\n")
+    assert ts_obs.seconds == 0
+    ts_obs = an.ts_observable(polaris, min_moon_dist=0, min_alt=25)
+    # print("polaris / any moon >> ", ts_obs, "\n\n\n")
+    assert ts_obs == an.ts_dark
+
+    # Case: allow NO moon.
+    ts_obs = an.ts_observable(altais, min_moon_dist=220, min_alt=25)
+    # print("altais / NO moon >> ", ts_obs, "\n\n\n")
+    assert abs((ts_obs.start - an.ts_dark_no_moon.start).total_seconds()) <= 60
+    assert abs((ts_obs.end - datetime(2016, 10, 9, 8, 33, 5, 419491,
+               tzinfo=timezone.utc)).total_seconds()) <= 60
+    ts_obs = an.ts_observable(hip_22783, min_moon_dist=220, min_alt=25)
+    # print("hip_22783 / NO moon >> ", ts_obs, "\n\n\n")
+    assert ts_obs == an.ts_dark_no_moon
+    ts_obs = an.ts_observable(mira, min_moon_dist=220, min_alt=25)
+    # print("mira / NO moon >> ", ts_obs, "\n\n\n")
+    assert abs((ts_obs.start - an.ts_dark_no_moon.start).total_seconds()) <= 60
+    assert abs((ts_obs.end - datetime(2016, 10, 9, 11, 6, 47, 395358,
+               tzinfo=timezone.utc)).total_seconds()) <= 60
+    ts_obs = an.ts_observable(algedi, min_moon_dist=220, min_alt=25)
+    # print("algedi / NO moon >> ", ts_obs, "\n\n\n")
+    assert ts_obs.seconds == 0
+    ts_obs = an.ts_observable(ankaa, min_moon_dist=220, min_alt=25)
+    # print("ankaa / NO moon >> ", ts_obs, "\n\n\n")
+    assert ts_obs.seconds == 0
+    ts_obs = an.ts_observable(polaris, min_moon_dist=220, min_alt=25)
+    # print("polaris / NO moon >> ", ts_obs, "\n\n\n")
+    assert ts_obs == an.ts_dark_no_moon
+
+    # Case: object near sun (wholly unobservable) and during new moon (moon matters little).
+    an_date_string = "20160930"
+    site_string = "BDO_Kansas"
+    an = user.Astronight(an_date_string, site_string)
+    porrima = RaDec('12:41:38.954', '-01:26:56.733')
+    ts_obs = an.ts_observable(porrima, min_moon_dist=0, min_alt=25)
+    assert ts_obs.seconds == 0
+    ts_obs = an.ts_observable(porrima, min_moon_dist=220, min_alt=25)
+    assert ts_obs.seconds == 0
+    ts_obs = an.ts_observable(porrima, min_moon_dist=0, min_alt=2)
+    assert ts_obs.seconds == 0
+    ts_obs = an.ts_observable(porrima, min_moon_dist=220, min_alt=2)
+    assert ts_obs.seconds == 0
+
+    # Case: object circumpolar and during new moon.
+    polaris = RaDec('02:31:49.133', '+89:15:50.598')  # circumpolar north
+    ts_obs = an.ts_observable(polaris, min_moon_dist=0, min_alt=25)
+    assert ts_obs == an.ts_dark
+    ts_obs = an.ts_observable(polaris, min_moon_dist=220, min_alt=25)
+    assert ts_obs == an.ts_dark_no_moon
+    ts_obs = an.ts_observable(polaris, min_moon_dist=0, min_alt=2)
+    assert ts_obs == an.ts_dark
+    ts_obs = an.ts_observable(polaris, min_moon_dist=220, min_alt=2)
+    assert ts_obs == an.ts_dark_no_moon
+    ts_obs = an.ts_observable(polaris, min_moon_dist=0, min_alt=60)  # it's never this high.
+    assert ts_obs.seconds == 0
+    ts_obs = an.ts_observable(polaris, min_moon_dist=220, min_alt=60)
+    assert ts_obs.seconds == 0
+
+    # Test ts_fov_observable.
+    an_date_string = "20160930"
+    site_string = "BDO_Kansas"
+    an = user.Astronight(an_date_string, site_string)
+    fov = Fov('ST Tri')
+    ts_from_radec = an.ts_observable(RaDec(fov.ra, fov.dec), min_moon_dist=50, min_alt=40)
+    ts_from_fov = an.ts_fov_observable(fov, min_moon_dist=50, min_alt=40)
+    assert ts_from_fov == ts_from_radec

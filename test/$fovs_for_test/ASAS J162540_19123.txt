@@ -1,0 +1,34 @@
+#FOV_NAME           ASAS J162540_19123
+#FORMAT_VERSION     1.4  ;  FOV format version defined 6 Jan 2017
+#CENTER             16:25:39.0  +19:03:18  ;  (J2000)
+#CHART              X16073AJD  ;  of the table, not the graphical chart
+#DATE               5/20/2016
+;---------- Main-Target Section
+#MAIN_TARGET        ASAS J162540+1912.3
+#TARGET_TYPE        Delta Scuti
+#MOTIVE             Test only.
+#PERIOD             0.0571721  ;  in days
+; JD, MAG, COLOR as: @brightest @faintest, in that order
+#JD                 2457614.69717 2457614.67845  ;     [DERA] [no 2' min]
+#MAG_V              12.38 12.74  ;      [DERA]
+#COLOR_VI           0.25 0.45  ;      [DERA]
+;---------- Observing Section
+#OBSERVING_STYLE    Stare   I=11(1)  V=12(16)
+#STARE_HOURS        ANY  3
+#MAX_EXPOSURE       80  ;  in seconds, or 0 to disable
+#PRIORITY           6  ;  0=never, 4=default, 8=pet
+#GAP_SCORE_DAYS     60 90 150   ;  days@0x days@1x days@2x (Priority multiplier)
+#ACP_DIRECTIVES     #REPEAT 50|#DITHER 0|#FILTER I,V|#BINNING 1,1|#COUNT 1,16|#INTERVAL 60,60
+#ACP_COMMENTS       Eclipser DSCT  V=12.38-12.74  P=82 min  NO R COMPS
+;---------- AAVSO Sequence Section
+#STARS:
+94	246.39875	18.94605	1_10.962|2_9.422|4_0|8_7.73|1024_0	C	8.18375	8.18375
+110_1	246.59874	18.90341	1_11.924|2_10.954|4_0|8_9.735|1024_0	C	8.18375	8.18375
+110	246.26656	18.89222	1_11.66|2_11.033|4_0|8_10.339|1024_0	C	8.18375	8.18375 ; corner of FOV: beware
+ASAS J162540+1912.3	246.41488	19.20568	0	T	8.18375	8.18375	0	0	0
+U Her	246.44696	18.89317	0	T	8.18375	8.18375	0	0	0
+; bad mags 153	246.47798	18.90096	1_13.474|2_15.35|4_15.37|8_15.381|1024_14.486	C	8.18375	8.18375
+70	246.31608	19.23928	1_8.882|2_6.994|4_5.605|8_0|1024_10.301	C	8.18375	8.18375
+114	246.41352	18.97325	1_11.702|2_11.359|4_0|8_10.968|1024_0	H	8.18375	8.18375
+132	246.45244	18.86270	1_0|2_13.194|4_0|8_0|1024_0	C	8.18375	8.18375
+

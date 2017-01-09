@@ -260,14 +260,14 @@ def test_Timespan():
     assert util.Timespan.longer(ts_zero_2, ts_zero) == ts_zero
     # case if_tie=="earlier": returns earlier Timespan.
     tsc = tsa.delay_seconds(7200)
-    assert util.Timespan.longer(tsa, tsc, if_tie="earlier") == tsa
-    assert util.Timespan.longer(tsc, tsa, if_tie="earlier") == tsa
+    assert util.Timespan.longer(tsa, tsc, on_tie="earlier") == tsa
+    assert util.Timespan.longer(tsc, tsa, on_tie="earlier") == tsa
     # case if_tie=="first": returns first input.
-    assert util.Timespan.longer(tsa, tsc, if_tie="first") == tsa
-    assert util.Timespan.longer(tsc, tsa, if_tie="first") == tsc
+    assert util.Timespan.longer(tsa, tsc, on_tie="first") == tsa
+    assert util.Timespan.longer(tsc, tsa, on_tie="first") == tsc
     # case if_tie==some other string: returns first input.
-    assert util.Timespan.longer(tsa, tsc, if_tie="whatever") == tsa
-    assert util.Timespan.longer(tsc, tsa, if_tie="whatever") == tsc
+    assert util.Timespan.longer(tsa, tsc, on_tie="whatever") == tsa
+    assert util.Timespan.longer(tsc, tsa, on_tie="whatever") == tsc
 
 
 def test_RaDec():
@@ -316,3 +316,20 @@ def test_get_phase():
     assert util.get_phase(7, 2, 10) == 0.5
 
 
+def test_jd_from_datetime_utc():
+    one_second = 1.0 / (24.0 * 3600.0)  # tolerance of 1 second, in days (for JD)
+    datetime_j2000 = datetime(2000, 1, 1, 0, 0, 0).replace(tzinfo=timezone.utc)
+    assert util.jd_from_datetime_utc(datetime_j2000) == pytest.approx(2451544.5, abs=one_second)
+
+    datetime_now = datetime.now(timezone.utc)
+    jd_now = util.jd_from_datetime_utc(datetime_now)  # tested just above.
+    assert util.jd_from_datetime_utc() == pytest.approx(jd_now, abs=one_second)
+
+    datetime_1 = datetime(2017, 1, 9, 15, 23, 53).replace(tzinfo=timezone.utc)
+    assert util.jd_from_datetime_utc(datetime_1) == pytest.approx(2457763.14158398, abs=one_second)
+    datetime_2 = datetime(2020, 7, 9, 6, 23, 53).replace(tzinfo=timezone.utc)
+    assert util.jd_from_datetime_utc(datetime_2) == pytest.approx(2459039.76658403, abs=one_second)
+    datetime_3 = datetime(1986, 10, 11, 3, 12, 7).replace(tzinfo=timezone.utc)
+    assert util.jd_from_datetime_utc(datetime_3) == pytest.approx(2446714.63341273, abs=one_second)
+    datetime_3 = datetime(1986, 10, 11, 3, 12, 7).replace(tzinfo=timezone.utc)
+    assert util.jd_from_datetime_utc(datetime_3) == pytest.approx(2446714.63341273, abs=one_second)

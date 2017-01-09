@@ -7,7 +7,7 @@ __author__ = "Eric Dose :: Bois d'Arc Observatory, Kansas"
 
 PHOTRIX_ROOT_DIRECTORY = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TEST_FOV_DIRECTORY = os.path.join(PHOTRIX_ROOT_DIRECTORY, "test", "$fovs_for_test")
-CURRENT_SCHEMA_VERSION = "1.3"  # For Schema 1.3 of Sept 2016.
+CURRENT_SCHEMA_VERSION = "1.4"  # For Schema 1.4 of Jan. 2017.
 
 
 def test_fov():
@@ -20,7 +20,7 @@ def test_fov():
     fov1 = fov.Fov(fovname1, fov_directory=TEST_FOV_DIRECTORY)
     # Test fields.
     assert fov1.fov_name == fovname1
-    assert fov1.format_version == "1.3"
+    assert fov1.format_version == CURRENT_SCHEMA_VERSION
     assert fov1.ra == 2*15 + 42*15/60
     assert fov1.dec == 35 + 43/60 + 31/3600
     assert fov1.chart == "X15646NP"
@@ -28,8 +28,9 @@ def test_fov():
     assert fov1.main_target == "ST Tri"
     assert fov1.target_type == "Eclipser"
     assert fov1.period == 0.47905145
-    assert fov1.JD_bright == 2457360.45
+    assert fov1.JD_bright == 2457360.57
     assert fov1.JD_faint == 2457360.69
+    assert fov1.JD_second == 2457360.45
     assert fov1.mag_V_bright == 14
     assert fov1.mag_V_faint == 14.77
     assert fov1.color_VI_bright == 0.5
@@ -114,7 +115,7 @@ def test_fov_mira():
     fov2 = fov.Fov(fovname2, fov_directory=TEST_FOV_DIRECTORY)
     # Test fields.
     assert fov2.fov_name == fovname2
-    assert fov2.format_version == "1.3"
+    assert fov2.format_version == CURRENT_SCHEMA_VERSION
     assert fov2.main_target == "AU Aur"
     assert fov2.target_type == "Mira"
     assert fov2.period == 400
@@ -237,7 +238,7 @@ def test_fov_mira_init_multi_exposure():
     fov_name = "AU Aur Modified"
     f = fov.Fov("AU Aur Modified", TEST_FOV_DIRECTORY)
     assert f.fov_name == fov_name
-    assert f.format_version == "1.3"
+    assert f.format_version == CURRENT_SCHEMA_VERSION
     assert f.observing_style == "LPV"
     assert len(f.observing_list) == 2
     assert f.alert is None
@@ -249,7 +250,7 @@ def test_fov_init_delta_scuti():
     fov_name = "ASAS J162540_19123"
     f = fov.Fov("ASAS J162540_19123", TEST_FOV_DIRECTORY)
     assert f.fov_name == fov_name
-    assert f.format_version == "1.3"
+    assert f.format_version == CURRENT_SCHEMA_VERSION
     assert f.ra == util.ra_as_degrees("16:25:39.0")
     assert f.dec == util.dec_as_degrees("+19:03:18")
     assert f.chart == "X16073AJD"
@@ -287,7 +288,7 @@ def test_fov_init_z_cam():
     fov_name = "NSV 14581"
     f = fov.Fov("NSV 14581", TEST_FOV_DIRECTORY)
     assert f.fov_name == fov_name
-    assert f.format_version == "1.3"
+    assert f.format_version == CURRENT_SCHEMA_VERSION
     assert f.ra == util.ra_as_degrees("23:26:50.3")
     assert f.dec == util.dec_as_degrees("+82:22:11")
     assert f.chart == "X16224AYI"
@@ -326,7 +327,7 @@ def test_fov_init_exoplanet():
     fov_name = "HAT_P_3"
     f = fov.Fov("HAT_P_3", TEST_FOV_DIRECTORY)
     assert f.fov_name == fov_name
-    assert f.format_version == "1.3"
+    assert f.format_version == CURRENT_SCHEMA_VERSION
     assert f.main_target == "HAT-P-3"
     assert f.target_type == "Exoplanet"
     assert f.observing_style == "Stare"
@@ -353,7 +354,7 @@ def test_fov_init_standard():
     fov_name = "Std_SA100"
     f = fov.Fov("Std_SA100", TEST_FOV_DIRECTORY)
     assert f.fov_name == fov_name
-    assert f.format_version == "1.3"
+    assert f.format_version == CURRENT_SCHEMA_VERSION
     assert f.ra == util.ra_as_degrees("08:53:14.3")
     assert f.dec == util.dec_as_degrees("-00:37:56")
     assert f.chart == "X15687X"
