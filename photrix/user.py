@@ -159,7 +159,6 @@ class Astronight:
         site_obs = ephem.Observer()  # for local use (within __init__()).
         site_obs.lat, site_obs.lon = str(self.site.latitude), str(self.site.longitude)
         site_obs.elevation = self.site.elevation
-        # self._observer = copy(site_obs)  # for access by other methods in this class.
 
         # get local middark times for requested Astronight.
         an_year = int(an_date_string[0:4])
@@ -290,9 +289,13 @@ class Astronight:
         ts_obj_avail = Timespan.longer(obj_avail_1, obj_avail_2, on_tie="earlier")
         return ts_obj_avail
 
-    # def moon_dist(self, ra, dec):
-    #     return (180.0 / pi) * ephem.separation((self.moon_radec.ra, self.moon_radec.dec),
-    #                                            (target.ra, target.dec))
+    def ts_fov_observable(self, fov, min_alt=None, min_moon_dist=None):
+        """ Convenience function.
+        Returns Timespan object containing when FOV (or rather, its center RaDec is observable
+        during this Astronight.
+        Usage: ts = an.when_FOV_observable(FOV, min_alt, min_moon_dist)
+        """
+        return self.ts_observable(RaDec(fov.ra, fov.dec), min_alt, min_moon_dist)
 
     def __repr__(self):
         return "Astronight '" + self.an_date_string + "' at site '" + self.site_name + "'."
@@ -303,60 +306,81 @@ class Astronight:
             ; moon 15% @ (~22h04,-10) rise 0936 UT
         Usage: s = an.acp_header_string()
         """
-        obs = copy(self._observer)
-        sun = ephem.Sun(obs)
-        moon = ephem.Moon(obs)
+        # TODO: redo this method with: (1) template from more recent ACP plans, and
+        #                              (2) the better facilities in current Astronight class.
 
-        obs.horizon = '-0.25'  # top edge below horizon
-        sunset_local = obs.previous_setting(sun, self.local_middark_utc)
-        sunrise_local = obs.next_rising(sun, self.local_middark_utc)
+        site_obs = ephem.Observer()
+        site_obs.lat, site_obs.lon = str(self.site.latitude), str(self.site.longitude)
+        site_obs.elevation = self.site.elevation
+        sun = ephem.Sun(site_obs)
+        # moon = ephem.Moon(site_obs)
 
-        obs.horizon = str(self.site.min_altitude)
-        evening_twilight_local = obs.previous_setting(sun, self.local_middark_utc)
-        morning_twilight_local = obs.next_rising(sun, self.local_middark_utc)
+        # Handle sun data:
+        site_obs.horizon = '0'
+        sunset_utc = site_obs.previous_setting(sun, self.local_middark_utc)\
+            .datetime().replace(tzinfo=timezone.utc)
+        sunset_utc_string = sunset_utc.strftime('%H%M')
+        dark_start_utc_string = self.ts_dark.start.strftime('%H%M')
+        site_obs.date = self.ts_dark.start
+        dark_start_lst = site_obs.sidereal_time()
+        dark_start_lst_minutes = round(60.0 * ((dark_start_lst * 180.0 / pi) / 15.0))
+        dark_start_lst_string = '{0:02d}'.format(int(dark_start_lst_minutes / 60)) + \
+                       '{0:02d}'.format(dark_start_lst_minutes % 60)
 
-        obs.horizon = '-0.25'  # top edge below horizon
-        moon_pct = self.moon_phase * 100.0
-        moon_ra = self.moon_radec.ra
-        moon_dec = self.moon_radec.dec
-        # need moon logic here  [ rise vs set; also add "no factor" if phase < threshold ]
-        previous_transit_utc = obs.previous_rising(moon, start=self.local_middark_utc)
-        next_transit_utc = obs.next_setting(moon, start=self.local_middark_utc)
-        if next_transit_utc-self.local_middark_utc < self.local_middark_utc-previous_transit_utc:
-            nearest_transit_utc = next_transit_utc
-        else:
-            nearest_transit_utc = previous_transit_utc
-        obs.date = nearest_transit_utc
-        moon.compute(obs)
-        if moon.alt > -0.25 * pi / 180.0:
-            start = obs.previous_rising(moon, start=nearest_transit_utc).datetime()
-            end = obs.next_setting(moon, start=nearest_transit_utc).datetime()
-            above_min_alt = Timespan(start, end)
-        else:
-            above_min_alt = Timespan(nearest_transit_utc.datetime(),
-                                     nearest_transit_utc.datetime())  # null Timespan
-        return self.ts_dark.intersect(above_min_alt)
-
-
-
-        # header_string += "; sunset " + str(sunset_local) + " local,   " + str(twilight_angle) + \
-        #                  " deg alt @ " + str(evening_twilight_local) + " - " + \
-        #                  str(morning_twilight_local) + "   sunrise " + str(sunrise_local) + "\n"
+        sunrise_utc = site_obs.next_rising(sun, self.local_middark_utc)\
+            .datetime().replace(tzinfo=timezone.utc)
+        sunrise_utc_string = sunrise_utc.strftime('%H%M')
+        dark_end_utc_string = self.ts_dark.end.strftime('%H%M')
+        site_obs.date = self.ts_dark.end
+        dark_end_lst = site_obs.sidereal_time()
+        dark_end_lst_minutes = round(60.0 * ((dark_end_lst * 180.0 / pi) / 15.0))
+        dark_end_lst_string = '{0:02d}'.format(int(dark_end_lst_minutes / 60)) + \
+                       '{0:02d}'.format(dark_end_lst_minutes % 60)
+        # site_obs.date = sunrise_utc
+        # sunrise_lst = site_obs.sidereal_time()
         #
-        # # Moon info line.
-        # moon_pct = self.moon.phase
-        # moon_up = self.moon_up_and_dark_timespan
-        # # --> Here, do logic or whether moonrise or moonset is actually within nighttime
-        # header_string += "; moon " + str(moon_pct) + "% @ (" + str(self.moon.ra) + ", " + \
-        #                  str(self.moon.dec) + ")   rise/set=??? local" + "\n"
+        # sunrise_lst_minutes = round(60.0 * ((sunrise_lst * 180.0 / pi) / 15.0))
+        # sunrise_lst_string = '{0:02d}'.format(int(sunrise_lst_minutes / 60)) + \
+        #                '{0:02d}'.format(sunrise_lst_minutes % 60)
+
+        # Handle moon data:
+        moon_phase_string = '{0:d}%'.format(round(100 * self.moon_phase))
+        moon_ra = round(self.moon_radec.ra / 15, 1)
+        moon_dec = round(self.moon_radec.dec)
+        moon_radec_string = ('({0:.1f}h,{1:+d}' + u'\N{DEGREE SIGN}' + ')').\
+            format(moon_ra, moon_dec)
+        # need moon logic here  [ rise vs set; also add "no factor" if phase < threshold ]
+        if self.ts_dark_no_moon.seconds <= 0:
+            dark_no_moon_string = 'MOON UP all night.'
+        elif self.ts_dark_no_moon == self.ts_dark:
+            dark_no_moon_string = 'MOON DOWN all night.'
+        else:
+            dark_no_moon_string = 'no moon: ' + \
+                                  self.ts_dark_no_moon.start.strftime('%H%M') + '-' + \
+                                  self.ts_dark_no_moon.end.strftime('%H%M') + ' UT'
+
+        # Handle LST vs UT:
+        lst_middark_seconds = self.local_middark_lst / 15 * 3600
+        utc_middark_seconds = self.local_middark_utc.hour * 3600 + \
+                              self.local_middark_utc.minute * 60 + \
+                              self.local_middark_utc.second + \
+                              self.local_middark_utc.microsecond/1000000.0
+        diff_seconds = (lst_middark_seconds - utc_middark_seconds) % (24 * 3600)  # to make > 0.
+        diff_hour = int(diff_seconds/3600)
+        diff_minute = round((diff_seconds - (diff_hour*3600)) / 60)
+        lst_vs_utc_string = '{0:02d}'.format(diff_hour) + '{0:02d}'.format(diff_minute)
+
+        # Construct ACP header string:
+        header_string = '; sun --- down: ' + \
+                        sunset_utc_string + '-' + sunrise_utc_string + ' UT,   ' + \
+                        'dark(' + '{0:+2d}'.format(round(self.site.twilight_sun_alt)) + \
+                        u'\N{DEGREE SIGN}' + '): ' + \
+                        dark_start_utc_string + '-' + dark_end_utc_string + ' UT  = ' + \
+                        dark_start_lst_string + '-' + dark_end_lst_string + ' LST\n'
+        header_string += '; moon -- ' + moon_phase_string + ' ' + moon_radec_string + \
+                         '   ' + dark_no_moon_string + '\n'
+        header_string += '; LST = UT + ' + lst_vs_utc_string + ' (middark)\n'
         return header_string
 
-    def ts_fov_observable(self, fov, min_alt=None, min_moon_dist=None):
-        """ Convenience function.
-        Returns Timespan object containing when FOV (or rather, its center RaDec is observable
-        during this Astronight.
-        Usage: ts = an.when_FOV_observable(FOV, min_alt, min_moon_dist)
-        """
-        return self.ts_observable(RaDec(fov.ra, fov.dec), min_alt, min_moon_dist)
 
 
