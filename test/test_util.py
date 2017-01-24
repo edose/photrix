@@ -1,4 +1,5 @@
 from datetime import datetime, timezone, timedelta
+from math import isnan
 import pytest
 
 # Your choices for importing (at least in this test module):
@@ -331,5 +332,62 @@ def test_jd_from_datetime_utc():
     assert util.jd_from_datetime_utc(datetime_2) == pytest.approx(2459039.76658403, abs=one_second)
     datetime_3 = datetime(1986, 10, 11, 3, 12, 7).replace(tzinfo=timezone.utc)
     assert util.jd_from_datetime_utc(datetime_3) == pytest.approx(2446714.63341273, abs=one_second)
+
+
+def test_datetime_utc_from_jd():
+    jd_j2000 = 2451544.5
+    datetime_j2000 = datetime(2000, 1, 1, 0, 0, 0).replace(tzinfo=timezone.utc)
+    assert (util.datetime_utc_from_jd(jd_j2000) - datetime_j2000).total_seconds() == \
+           pytest.approx(0, abs=1.0)
+
+    datetime_now = datetime.now(timezone.utc)
+    jd_now = util.jd_from_datetime_utc(datetime_now)  # tested just above.
+    assert (util.datetime_utc_from_jd(jd_now) - datetime_now).total_seconds() == \
+           pytest.approx(0, abs=1.0)
+
+    datetime_1 = datetime(2017, 1, 9, 15, 23, 53).replace(tzinfo=timezone.utc)
+    jd_1 = 2457763.14158398
+    assert (util.datetime_utc_from_jd(jd_1) - datetime_1).total_seconds() == \
+           pytest.approx(0, abs=1.0)
+    datetime_2 = datetime(2020, 7, 9, 6, 23, 53).replace(tzinfo=timezone.utc)
+    jd_2 = 2459039.76658403
+    assert (util.datetime_utc_from_jd(jd_2) - datetime_2).total_seconds() == \
+           pytest.approx(0, abs=1.0)
     datetime_3 = datetime(1986, 10, 11, 3, 12, 7).replace(tzinfo=timezone.utc)
-    assert util.jd_from_datetime_utc(datetime_3) == pytest.approx(2446714.63341273, abs=one_second)
+    jd_3 = 2446714.63341273
+    assert (util.datetime_utc_from_jd(jd_3) - datetime_3).total_seconds() == \
+           pytest.approx(0, abs=1.0)
+
+
+def test_isfloat():
+    assert util.isfloat('-25') is True
+    assert util.isfloat('+34.4') is True
+    assert util.isfloat('  34.4  ') is True
+    assert util.isfloat('-.6') is True
+    assert util.isfloat('-123.E6') is True
+    assert util.isfloat('-inf') is True
+    assert util.isfloat('NaN') is True
+    assert util.isfloat(True) is True
+    assert util.isfloat(False) is True
+    assert util.isfloat('') is False
+    assert util.isfloat('12.2.2') is False
+    assert util.isfloat('-') is False
+    assert util.isfloat('+') is False
+    assert util.isfloat('(3)') is False
+
+
+def test_float_or_none():
+    assert util.float_or_none('-25') == -25
+    assert util.float_or_none('+34.4') == pytest.approx(34.4)
+    assert util.float_or_none('  34.4  ') == pytest.approx(34.4)
+    assert util.float_or_none('-.6') == pytest.approx(-0.6)
+    assert util.float_or_none('-123.E6') == pytest.approx(-123000000.0)
+    assert util.float_or_none('-inf') == float('-inf')
+    assert isnan(util.float_or_none('NaN'))
+    assert util.float_or_none(True) == 1.0
+    assert util.float_or_none(False) == 0.0
+    assert util.float_or_none('') is None
+    assert util.float_or_none('12.2.2') is None
+    assert util.float_or_none('-') is None
+    assert util.float_or_none('+') is None
+    assert util.float_or_none('(3)') is None

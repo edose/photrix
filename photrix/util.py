@@ -300,3 +300,27 @@ def jd_from_datetime_utc(datetime_utc=None):
     seconds_since_j2000 = (datetime_utc - datetime_j2000).total_seconds()
     return jd_j2000 + seconds_since_j2000 / (24*3600)
 
+
+def datetime_utc_from_jd(jd=None):
+    if jd is None:
+        return datetime.now(timezone.utc)
+    datetime_j2000 = datetime(2000, 1, 1, 0, 0, 0).replace(tzinfo=timezone.utc)
+    jd_j2000 = 2451544.5
+    seconds_since_j2000 = 24 * 3600 * (jd - jd_j2000)
+    return datetime_j2000 + timedelta(seconds=seconds_since_j2000)
+
+
+def isfloat(string):
+    try:
+        float(string)
+        return True
+    except ValueError:
+        return False
+
+
+def float_or_none(string):
+    try:
+        return float(string)
+    except ValueError:
+        return None
+
