@@ -213,12 +213,12 @@ class Astronight:
     # venus = ephem.Venus(obs)
     # self.venus_radec = RaDec(str(venus.ra), str(venus.dec))
 
-    def ts_observable(self, radec=RaDec('0', '+0'), min_alt=None, min_moon_dist=None):
+    def ts_observable(self, target_radec=RaDec('0', '+0'), min_alt=None, min_moon_dist=None):
         """
         Returns Timespan object defining when this RA,Dec may be observed during this astronight.
         Site data are taken from ephem Observer object self._observer stored in this object.
         Usage: ts = an.observable(util.RaDec(fov.ra, fov.dec), +28, 45)
-        :param radec: required, a RaDec position for the object to be observed.
+        :param target_radec: required, a RaDec position for the object to be observed.
         :param min_alt: min object altitude to observe, in degrees; default->use Site min alt.
         :param min_moon_dist: min distance from moon to observe, enforced only when moon is up,
            in degrees; default->use Site min moon distance.
@@ -238,10 +238,10 @@ class Astronight:
         obs.elevation = self.site.elevation
         obs.horizon = str(min_alt)
         obs.date = self.local_middark_utc
-        target = ephem.FixedBody()
-        target._epoch = '2000'
-        target._ra, target._dec = radec.as_hex
-        target.compute(obs)
+        target_ephem = ephem.FixedBody()  # so named to suggest restricting its use to ephem.
+        target_ephem._epoch = '2000'
+        target_ephem._ra, target_ephem._dec = target_radec.as_hex  # text: RA in hours, Dec in deg
+        target_ephem.compute(obs)
         # print(target.a_epoch, target._epoch, "     horizon:", obs.horizon,
         #       "   min_moon_dist:", min_moon_dist)
         # print(obs.date)
@@ -250,7 +250,7 @@ class Astronight:
         # print("a", target.a_ra, target.a_dec)
         # Compute object-up Timespan, watching for exceptions (i.e., obj Never up or Always up).
         try:
-            obj_rise_1 = obs.previous_rising(target,
+            obj_rise_1 = obs.previous_rising(target_ephem,
                 start=self.local_middark_utc).datetime().replace(tzinfo=timezone.utc)
         except ephem.NeverUpError:
             # return zero-duration Timespans.
@@ -262,11 +262,11 @@ class Astronight:
             obj_ts_2 = obj_ts_1
         else:
             # get remaining rise and set times, return the 2 candidate Timespans.
-            obj_set_1 = obs.next_setting(target,
+            obj_set_1 = obs.next_setting(target_ephem,
                 start=obj_rise_1).datetime().replace(tzinfo=timezone.utc)
-            obj_set_2 = obs.next_setting(target,
+            obj_set_2 = obs.next_setting(target_ephem,
                 start=self.local_middark_utc).datetime().replace(tzinfo=timezone.utc)
-            obj_rise_2 = obs.previous_rising(target,
+            obj_rise_2 = obs.previous_rising(target_ephem,
                 start=obj_set_2).datetime().replace(tzinfo=timezone.utc)
             obj_ts_1 = Timespan(obj_rise_1, obj_set_1)
             obj_ts_2 = Timespan(obj_rise_2, obj_set_2)
@@ -275,9 +275,10 @@ class Astronight:
         # print("1:", obj_ts_1)
         # print("2:", obj_ts_2)
         # print("moon:", str(self.moon_radec.ra), str(self.moon_radec.dec))
-        moon_dist_deg = (180.0 / pi) * ephem.separation((self.moon_radec.ra, self.moon_radec.dec),
-                                                        (target.ra, target.dec))
-        # print("moon dist deg:", moon_dist_deg, "dist-min:", moon_dist_deg-min_moon_dist)
+        moon_dist_deg = RaDec(self.moon_radec.ra, self.moon_radec.dec).degrees_from(target_radec)
+        print("moon: ", RaDec(self.moon_radec.ra, self.moon_radec.dec))
+        print("target: ", RaDec(target_ephem.ra, target_ephem.dec))
+        print("moon dist deg:", moon_dist_deg, "min_moon_dist:", min_moon_dist)
         if moon_dist_deg > min_moon_dist:
             obj_avail_1 = obj_ts_1.intersect(self.ts_dark)
             obj_avail_2 = obj_ts_2.intersect(self.ts_dark)

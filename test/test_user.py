@@ -195,10 +195,10 @@ def test_Astronight():
 
     # Test ts_observable(), case = object farther than min dist from moon (common case).  --------
     ts_obs = an.ts_observable(hip_116928, min_moon_dist=45)
-    # print("a", ts_obs, "\n\n\n")
+    print("error >>>> ", ts_obs, "\n\n\n")
     assert abs((ts_obs.start - datetime(2016, 9, 20, 2, 13, 12, 660671,
                 tzinfo=timezone.utc)).total_seconds()) <= 60
-    assert abs((ts_obs.end - datetime(2016, 9, 20, 10, 3, 11, 540779,
+    assert abs((ts_obs.end - datetime(2016, 9, 20, 10, 3, 0, 540779,
                 tzinfo=timezone.utc)).total_seconds()) <= 60
 
     # Test ts_observable(), case = object closer than min dist from moon. ------------------------
