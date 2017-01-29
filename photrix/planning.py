@@ -5,7 +5,7 @@ import pandas as pd
 from datetime import datetime, timedelta, timezone
 from collections import defaultdict, namedtuple
 
-from photrix.util import RaDec, datetime_utc_from_jd
+from photrix.util import RaDec, datetime_utc_from_jd, time_hhmm
 from photrix.fov import make_fov_dict, FovError
 from photrix.user import Astronight
 from photrix.web import get_aavso_webobs_raw_table
@@ -17,6 +17,7 @@ FOV_OBSERVING_STYLES = ["Standard", "Stare", "Monitor", "LPV", "Burn"]
 MIN_AVAILABLE_SECONDS = 900
 MIN_MOON_DEGREES_DEFAULT = 45
 FITS_DIRECTORY = "J:/Astro/Images"
+DEFAULT_PLAN_DIRECTORY = 'C:/Astro/Plans'
 
 PHOTRIX_ROOT_DIRECTORY = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LOCAL_OBS_CACHE_FULLPATH = os.path.join(PHOTRIX_ROOT_DIRECTORY, "local_obs_cache.csv")
@@ -98,25 +99,28 @@ def filter_df_fov_available(df_fov, an_string=None, site_name="BDO_Kansas",
     if an_string is None or site_name == "":
         return df_fov
     an = Astronight(an_string, site_name)
-    print("an dark        >", an.ts_dark)
+    print("\n\nan dark        >", an.ts_dark)
     print("an dark_no_moon>", an.ts_dark_no_moon)
     print("moon phase >", an.moon_phase)
     print("min alt > ", an.site.min_altitude)
     print("min_moon_degrees > ", min_moon_degrees)
     # Construct columns (specific to night and site) for available obs time, this astronight.
+    df_fov['moon_deg'] = 0.0  # "
     df_fov['start'] = an.local_middark_utc  # dummy value to be overwritten later.
     df_fov['end'] = df_fov['start']  # "
     df_fov['seconds'] = 0.0  # "
-    df_fov['moon_deg'] = 0.0  # "
+    df_fov['available'] = ' - '.join(2*[4*' '])  # "
+
     for ind in df_fov.index:
-        # print('\nind', ind)
-        # print(an.site.min_altitude, min_moon_degrees)
         ts_obs = an.ts_observable(df_fov.loc[ind, 'radec'], min_alt=an.site.min_altitude,
                                   min_moon_dist=min_moon_degrees)
+        df_fov.loc[ind, 'moon_deg'] = df_fov.loc[ind, 'radec'].degrees_from(an.moon_radec)
         df_fov.loc[ind, 'start'] = ts_obs.start
         df_fov.loc[ind, 'end'] = ts_obs.end
         df_fov.loc[ind, 'seconds'] = ts_obs.seconds
-        df_fov.loc[ind, 'moon_deg'] = df_fov.loc[ind, 'radec'].degrees_from(an.moon_radec)
+        if ts_obs.seconds > 0:
+            df_fov.loc[ind, 'available'] = ' - '.join([time_hhmm(ts_obs.start),
+                                                       time_hhmm(ts_obs.end)])
     if remove_unobservables:
         # df_fov = df_fov[(df_fov['seconds'] >= MIN_AVAILABLE_SECONDS) &
         #                 (df_fov['moon_deg'] >= min_moon_degrees)]
@@ -377,4 +381,151 @@ def get_local_aavso_reports(report_dir=None, earliest_an=None):
     #
 
 
+def parse_an_sketch(excel_path='c:/24hrs/Scratch Plan.xlsx', site_name='BDO_Kansas', fov_dict=None,
+                    output_directory=DEFAULT_PLAN_DIRECTORY):
+    df = pd.read_excel(excel_path, sheetname='Sheet1').\
+        dropna(axis=0, how='all').dropna(axis=1, how='all')
+    nrow = len(df)
+    ncol = len(df.columns)
+    parsed_list = []  # nested list, one element per ACP plan.
+    this_plan_id = ''
+    plan_items = []
 
+    an_date_string = str(df.iloc[0, 0]).strip()
+    if 20170101 < int(an_date_string) < 20201231:  # max prob should be related to today's date.
+        an = Astronight(an_date_string, site_name)
+    else:
+        print('>>>>> STOPPING: an_date_string '" + an_date_string + "' SEEMS UNREASONABLE.')
+        return
+    print('an_date_string: ' + an_date_string)  # TEST
+    if fov_dict is None:
+        fov_dict = make_fov_dict()
+
+    for irow in range(1, nrow):
+        for icol in range(ncol):
+            cell = df.iloc[irow, icol]
+            if isinstance(cell, str):
+                do_this_cell = True
+            else:
+                do_this_cell = ~np.isnan(cell)
+            if do_this_cell:
+                txt_as_read = str(cell).strip()
+                txt_lower = txt_as_read.lower()
+                print(txt_as_read)
+                if txt_lower.startswith('plan'):
+                    if icol != 0:
+                        print('>>>>>ERROR: Plan defined in a column other than the first one: "' +
+                              txt_lower + '".')
+                        return
+                    else:
+                        # Close previous plan if any, probably with chain to next plan:
+                        parsed_list.append(plan_items)
+                        plan_items = []
+                        # Start next plan:
+                        split_txt = txt_lower.split(';', maxsplit=1)
+                        directive = split_txt[0]
+                        this_plan_id = 'plan_' + an_date_string + '_' + \
+                                       directive[len('plan'):].strip()
+                        if len(split_txt) > 1:
+                            comments = split_txt[1].strip()
+                        else:
+                            comments = None
+                        plan_items.append(('plan', this_plan_id, comments))  # append tuple
+                if txt_lower.startswith(';'):
+                    comment_text = txt_lower.strip()[1:]
+                    plan_items.append(('comment', comment_text))
+                if txt_lower.startswith('afinterval'):
+                    directive = txt_lower.split(';')[0].strip()
+                    minutes = float(directive[len('afinterval'):].strip())
+                    plan_items.append(('afinterval', minutes))
+                if txt_lower.startswith('autofocus'):
+                    plan_items.append(('autofocus',))
+                if txt_lower.startswith('chill'):
+                    directive = txt_lower.split(';')[0].strip()
+                    degrees = float(directive[len('chill'):].strip())
+                    plan_items.append(('chill', degrees))
+                if txt_lower.startswith('burn'):
+                    directive = txt_lower.split(';')[0].strip()
+                    this_fov_name = directive[len('burn'):].strip()
+                    plan_items.append(('burn', this_fov_name))
+                if txt_lower.startswith('quitat'):
+                    directive = txt_lower.split(';')[0].strip()
+                    hhmm = directive[len('quitat'):].strip()
+                    plan_items.append(('quitat', hhmm))
+                if txt_lower.startswith('waituntil'):
+                    directive = txt_lower.split(';')[0].strip()
+                    value = directive[len('waituntil'):].strip()
+                    if float(value) < 0:
+                        plan_items.append(('waituntil', 'sun_degrees', value))
+                    else:
+                        plan_items.append(('waituntil', 'hhmm', value))
+                if txt_lower.startswith('chain'):
+                    directive = txt_lower.split(';')[0].strip()
+                    next_plan_filename = directive[len('chain'):].strip()
+                    if not next_plan_filename.endswith('.txt'):
+                        next_plan_filename += '.txt'
+                    plan_items.append(('chain', next_plan_filename))
+                if txt_lower.startswith('flats'):
+                    if this_plan_id[-2:].lower() != '_z':
+                        print('>>>>> WARNING: flats directive encountered but plan_id is' +
+                              this_plan_id + ', not the usual "Z".')
+                    plan_items.append(('flats',))
+                else:
+                    # Treat as a fov_name, with warning if not in fov list.
+                    fov_name = txt_as_read.strip()
+                    plan_items.append(('FOV: ', fov_name))
+
+    parsed_list.append(plan_items)  # Close out last plan.
+
+    summary_lines = []
+    # Add summary header here.
+    for plan in parsed_list:
+        acp_plan_lines = []
+        plan_id = (plan[0])[1]
+        for item in plan:
+            new_summary_line, new_acp_plan_lines = make_lines_from_item(item, an, fov_dict)
+            summary_lines.append(new_summary_line)
+            acp_plan_lines.extend(new_acp_plan_lines)
+
+        # Done with this plan, so write acp_plan_lines to ACP plan file.
+        output_fullpath = os.path.join(output_directory, plan_id + '.txt')
+        print('PRINT lines for plan ' + plan_id + ' to ', output_fullpath)
+        # with open(output_fullpath) as this_file:
+        #     for line in acp_plan_lines:
+        #         this_file.write("{}\n".format(line))
+
+    # Done with all parsing, so write summary_lines to Summary file.
+    output_fullpath = os.path.join(output_directory, 'Summary_' + an.an_date_string + '.txt')
+    print('PRINT all summary lines to ', output_fullpath)
+    # with open(output_fullpath) as this_file:
+    #     for line in summary_lines:
+    #         this_file.write("{}\n".format(line))
+
+
+def make_lines_from_item(item, an, fov_dict):
+    summary_line = 'summary: ' + item[0]  # TEST DUMMY
+    acp_plan_lines = list('acp_plan: ' + item[0])  # TEST DUMMY
+    return summary_line, acp_plan_lines
+
+
+def make_plan_header(an):
+    return an.acp_header_string().split('\n')  # Grab an's header string and return it as lines.
+
+
+def make_plan_fov_entry(an, fov_name, fov_dict):
+    # Returns text plan lines for one fov observation.
+    # For now, obs_style LPV needs estimated V mag to follow fov_name in its excel cell,
+    #    e.g., "AU Aur / 12.5; then compute other mags and thus exp times from that.
+    #    If this V mag is absent: (1) emit warning in summary, (2) assume mean V mag in summary,
+    #    (3) write "XXX" for all exp times in its ACP plan entry.
+    pass
+
+
+def make_flat_lines():
+    # Return list of plan text lines for panel flats.
+    pass
+
+
+def make_an_summary(an, plans, fov_dict):
+    # This needs to translate  to make a summary.
+    return ['PLACEHOLDER TEXT']

@@ -146,11 +146,13 @@ class Astronight:
             .site : this site (Site object)
             ._observer : this site and this astronight (ephem.Observer object)
             .ts_dark : Timespan(twilight_dusk, twilight_dawn) for this astronight.
-            .local_middark_ut = local mid-dark time, this astronight, in UTC time (datetime object)
-            .local_middark_jd = local mid-dark time, this astronight, in Julian date (float)
-            .local_middark_lst = local mid-dark time, this astronight, LST in degrees (float)
-            .moon_radec = moon location at middark (RaDec object)
-            .moon_phase = moon phase at middark (float, range 0-1)
+            .local_middark_ut : local mid-dark time, this astronight, in UTC time (datetime object)
+            .local_middark_jd : local mid-dark time, this astronight, in Julian date (float)
+            .local_middark_lst : local mid-dark time, this astronight, LST in degrees (float)
+            .moon_radec : moon location at middark (RaDec object)
+            .moon_phase : moon phase at middark (float, range 0-1)
+            .ts_dark_no_moon : Timespan both dark and moonless (or just dark if moon phase < MIN)
+
        """
         self.an_date_string = an_date_string
         self.site_name = site_name
@@ -164,9 +166,10 @@ class Astronight:
         an_year = int(an_date_string[0:4])
         an_month = int(an_date_string[4:6])
         an_day = int(an_date_string[6:8])
-        approx_midnight_utc = datetime(an_year, an_month, an_day, 0, 0, 0).\
-                              replace(tzinfo=timezone.utc) + \
-                              timedelta(hours=-self.site.longitude / 15.0) + timedelta(hours=+24)
+        approx_midnight_utc = \
+            datetime(an_year, an_month, an_day, 0, 0, 0).replace(tzinfo=timezone.utc) + \
+            timedelta(hours=-self.site.longitude / 15.0) + \
+            timedelta(hours=+24)
 
         sun = ephem.Sun()
         site_obs.horizon = str(self.site.twilight_sun_alt)
@@ -204,7 +207,6 @@ class Astronight:
                 start=moonset_2).datetime().replace(tzinfo=timezone.utc)
             ts_moon_up_2 = Timespan(moonrise_2, moonset_2)
             self.ts_dark_no_moon = self.ts_dark.subtract(ts_moon_up_1).subtract(ts_moon_up_2)
-        sss = 1  # dummy, just as a place to stop for debugging.
     # TODO: Prep all other solar-system bodies, using their RaDecs at local mid-dark.
     # jupiter = ephem.Jupiter(obs)
     # self.jupiter_radec = RaDec(str(jupiter.ra), str(jupiter.dec))
@@ -242,12 +244,7 @@ class Astronight:
         target_ephem._epoch = '2000'
         target_ephem._ra, target_ephem._dec = target_radec.as_hex  # text: RA in hours, Dec in deg
         target_ephem.compute(obs)
-        # print(target.a_epoch, target._epoch, "     horizon:", obs.horizon,
-        #       "   min_moon_dist:", min_moon_dist)
-        # print(obs.date)
-        # print(".ra.dec", target.ra, target.dec)
-        # print("g", target.g_ra, target.g_dec)
-        # print("a", target.a_ra, target.a_dec)
+
         # Compute object-up Timespan, watching for exceptions (i.e., obj Never up or Always up).
         try:
             obj_rise_1 = obs.previous_rising(target_ephem,
@@ -270,15 +267,10 @@ class Astronight:
                 start=obj_set_2).datetime().replace(tzinfo=timezone.utc)
             obj_ts_1 = Timespan(obj_rise_1, obj_set_1)
             obj_ts_2 = Timespan(obj_rise_2, obj_set_2)
-        # print("dark:", self.ts_dark)
-        # print("dark_no_moon:", self.ts_dark_no_moon)
-        # print("1:", obj_ts_1)
-        # print("2:", obj_ts_2)
-        # print("moon:", str(self.moon_radec.ra), str(self.moon_radec.dec))
         moon_dist_deg = RaDec(self.moon_radec.ra, self.moon_radec.dec).degrees_from(target_radec)
-        print("moon: ", RaDec(self.moon_radec.ra, self.moon_radec.dec))
-        print("target: ", RaDec(target_ephem.ra, target_ephem.dec))
-        print("moon dist deg:", moon_dist_deg, "min_moon_dist:", min_moon_dist)
+        # print("moon: ", RaDec(self.moon_radec.ra, self.moon_radec.dec))
+        # print("target: ", RaDec(target_ephem.ra, target_ephem.dec))
+        # print("moon dist deg:", moon_dist_deg, "min_moon_dist:", min_moon_dist)
         if moon_dist_deg > min_moon_dist:
             obj_avail_1 = obj_ts_1.intersect(self.ts_dark)
             obj_avail_2 = obj_ts_2.intersect(self.ts_dark)
@@ -297,6 +289,15 @@ class Astronight:
         Usage: ts = an.when_FOV_observable(FOV, min_alt, min_moon_dist)
         """
         return self.ts_observable(RaDec(fov.ra, fov.dec), min_alt, min_moon_dist)
+
+    def datetime_utc_from_hhmm(self, hhmm_string):
+        mid_dark = self.local_middark_utc
+        hour_hhmm = int(hhmm_string[0:2])
+        minute_hhmm = int(hhmm_string[2:4])
+        test_dt = mid_dark.replace(hour=hour_hhmm, minute=minute_hhmm)
+        delta_days = round((test_dt - mid_dark).total_seconds() / (24 * 3600))  # adjust if needed.
+        best_dt = test_dt - timedelta(days=delta_days)
+        return best_dt
 
     def __repr__(self):
         return "Astronight '" + self.an_date_string + "' at site '" + self.site_name + "'."

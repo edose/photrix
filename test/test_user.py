@@ -195,7 +195,6 @@ def test_Astronight():
 
     # Test ts_observable(), case = object farther than min dist from moon (common case).  --------
     ts_obs = an.ts_observable(hip_116928, min_moon_dist=45)
-    print("error >>>> ", ts_obs, "\n\n\n")
     assert abs((ts_obs.start - datetime(2016, 9, 20, 2, 13, 12, 660671,
                 tzinfo=timezone.utc)).total_seconds()) <= 60
     assert abs((ts_obs.end - datetime(2016, 9, 20, 10, 3, 0, 540779,
@@ -330,7 +329,7 @@ def test_Astronight():
     # print("polaris / any moon >> ", ts_obs, "\n\n\n")
     assert ts_obs == an.ts_dark
 
-    # Case: allow NO moon.
+    # Case: allow NO moon:
     ts_obs = an.ts_observable(altais, min_moon_dist=220, min_alt=25)
     # print("altais / NO moon >> ", ts_obs, "\n\n\n")
     assert abs((ts_obs.start - an.ts_dark_no_moon.start).total_seconds()) <= 60
@@ -354,7 +353,7 @@ def test_Astronight():
     # print("polaris / NO moon >> ", ts_obs, "\n\n\n")
     assert ts_obs == an.ts_dark_no_moon
 
-    # Case: object near sun (wholly unobservable) and during new moon (moon matters little).
+    # Case: object near sun (wholly unobservable) and during new moon (moon matters little):
     an_date_string = "20160930"
     site_string = "BDO_Kansas"
     an = user.Astronight(an_date_string, site_string)
@@ -368,7 +367,7 @@ def test_Astronight():
     ts_obs = an.ts_observable(porrima, min_moon_dist=220, min_alt=2)
     assert ts_obs.seconds == 0
 
-    # Case: object circumpolar and during new moon.
+    # Case: object circumpolar and during new moon:
     polaris = RaDec('02:31:49.133', '+89:15:50.598')  # circumpolar north
     ts_obs = an.ts_observable(polaris, min_moon_dist=0, min_alt=25)
     assert ts_obs == an.ts_dark
@@ -383,7 +382,7 @@ def test_Astronight():
     ts_obs = an.ts_observable(polaris, min_moon_dist=220, min_alt=60)
     assert ts_obs.seconds == 0
 
-    # Test ts_fov_observable.
+    # Test ts_fov_observable (based on ts_observable() having been tested above):
     an_date_string = "20160930"
     site_string = "BDO_Kansas"
     an = user.Astronight(an_date_string, site_string)
@@ -391,3 +390,33 @@ def test_Astronight():
     ts_from_radec = an.ts_observable(RaDec(fov.ra, fov.dec), min_moon_dist=50, min_alt=40)
     ts_from_fov = an.ts_fov_observable(fov, min_moon_dist=50, min_alt=40)
     assert ts_from_fov == ts_from_radec
+
+    # Test .datetime_utc_from_hhmm():
+    an_date_string = "20160930"
+    site_string = "BDO_Kansas"
+    an = user.Astronight(an_date_string, site_string)
+    assert datetime_utc_from_hhmm_OK('2323', an)
+    assert datetime_utc_from_hhmm_OK('2020', an)
+    assert datetime_utc_from_hhmm_OK('2000', an)
+    assert datetime_utc_from_hhmm_OK('0000', an)
+    assert datetime_utc_from_hhmm_OK('0600', an)
+    assert datetime_utc_from_hhmm_OK('0900', an)
+
+    an_date_string = "20170101"
+    site_string = "BDO_Kansas"
+    an = user.Astronight(an_date_string, site_string)
+    assert datetime_utc_from_hhmm_OK('2323', an)
+    assert datetime_utc_from_hhmm_OK('2020', an)
+    assert datetime_utc_from_hhmm_OK('2000', an)
+    assert datetime_utc_from_hhmm_OK('0000', an)
+    assert datetime_utc_from_hhmm_OK('0600', an)
+    assert datetime_utc_from_hhmm_OK('0900', an)
+
+
+# ----- HELPER FUNCTIONS. --------------------------------------------------------------------
+def datetime_utc_from_hhmm_OK(hhmm_string, an):
+    dt = an.datetime_utc_from_hhmm(hhmm_string)
+    hh = int(hhmm_string[0:2])
+    mm = int(hhmm_string[2:4])
+    days_diff = abs(dt-an.local_middark_utc).total_seconds() / (24*3600)
+    return dt.hour == hh and dt.minute == mm and days_diff <= 0.5

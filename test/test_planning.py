@@ -21,7 +21,7 @@ def test_make_df_fov():
                                     "obs_style", "ra", "dec", 'period',
                                     'target_type', 'max_exposure', 'radec']
     assert list(df_fov.columns) == required_columns  # in order
-    required_fov_names = set(['ASAS J162540_19123', 'AU Aur Modified', 'AU Aur',
+    required_fov_names = set(['ASAS J162540_19123', 'AU Aur Modified', 'AU Aur', 'AU Aur BURN',
                               'HAT_P_3', 'NSV 14581', 'ST Tri', 'Std_SA100'])
     assert set(df_fov.fov_name) == required_fov_names  # not necessarily in order
     assert df_fov.shape == (len(required_fov_names), len(required_columns))
@@ -60,10 +60,11 @@ def test_filter_df_fov_by_fov_priority():
     # Test normal case (including standard fovs).
     min_priority = 3
     df = planning.filter_df_fov_by_fov_priority(df_all, min_priority)
-    assert df.shape == (6, len(df_all.columns))
+    assert df.shape == (7, len(df_all.columns))
     assert list(df.columns) == list(df_all.columns)
     assert set(df["fov_name"]) == \
-        {"AU Aur Modified", "ASAS J162540_19123", "Std_SA100", "ST Tri", "NSV 14581", "AU Aur"}
+        {"AU Aur BURN", "AU Aur Modified", "ASAS J162540_19123",
+         "Std_SA100", "ST Tri", "NSV 14581", "AU Aur"}
     priority_ok = df["fov_priority"] >= min_priority
     is_standard_fov = (df["obs_style"].str.lower() == "Standard".lower())
     assert all(priority_ok | is_standard_fov)
@@ -71,10 +72,10 @@ def test_filter_df_fov_by_fov_priority():
     # Test exclude standard fovs.
     min_priority = 3
     df = planning.filter_df_fov_by_fov_priority(df_all, min_priority, include_std_fovs=False)
-    assert df.shape == (5, len(df_all.columns))
+    assert df.shape == (6, len(df_all.columns))
     assert list(df.columns) == list(df_all.columns)
     assert set(df["fov_name"]) == \
-        {"AU Aur Modified", "ASAS J162540_19123", "ST Tri", "NSV 14581", "AU Aur"}
+        {"AU Aur BURN", "AU Aur Modified", "ASAS J162540_19123", "ST Tri", "NSV 14581", "AU Aur"}
     priority_ok = df["fov_priority"] >= min_priority
     is_standard_fov = (df["obs_style"].str.lower() == "Standard".lower())
     assert all(priority_ok)
@@ -90,14 +91,65 @@ def test_filter_df_fov_by_fov_priority():
 def test_filter_df_fov_available():
     df_all = planning.make_df_fov(fov_directory=TEST_FOV_DIRECTORY)
     # Test normal case, no moon effect.
-    # df = planning.filter_df_fov_available(df_all, an_string='20160919', site_name='BDO_Kansas',
-    #                                       min_moon_degrees=0, remove_unobservables=False)
-    df_au_aur = df_all[df_all['fov_name'] == 'AU Aur']
+    df = planning.filter_df_fov_available(df_all, an_string='20160919', site_name='BDO_Kansas',
+                                          min_moon_degrees=0, remove_unobservables=False)
+    moon_deg_expected = [143, 45, 45, 45, 118, 74, 25, 88]
+    seconds_expected = [8693, 22905, 22905, 22905, 4323, 35846, 28034, 0]
+    print('\n', df)
+    assert all([list(df['moon_deg'])[i] == pytest.approx(moon_deg_expected[i], abs=1)
+                for i in range(len(df))])
+    assert all([list(df['seconds'])[i] == pytest.approx(seconds_expected[i], abs=60)
+                for i in range(len(df))])
+
+    # Test normal case, big moon effect.
     df = planning.filter_df_fov_available(df_all, an_string='20160919', site_name='BDO_Kansas',
                                           min_moon_degrees=80, remove_unobservables=False)
+    moon_deg_expected = [143, 45, 45, 45, 118, 74, 25, 88]
+    seconds_expected = [8693, 0, 0, 0, 4323, 4776, 0, 0]
+    assert all([list(df['moon_deg'])[i] == pytest.approx(moon_deg_expected[i], abs=1)
+                for i in range(len(df))])
+    assert all([list(df['seconds'])[i] == pytest.approx(seconds_expected[i], abs=60)
+                for i in range(len(df))])
+    # print(df)
+
+    # Test case: 6 months before previous case (for opposite fov availabilities):
+    df_all = planning.make_df_fov(fov_directory=TEST_FOV_DIRECTORY)
+    # Test normal case, no moon effect.
+    df = planning.filter_df_fov_available(df_all, an_string='20160319', site_name='BDO_Kansas',
+                                          min_moon_degrees=65, remove_unobservables=True)
+    moon_deg_expected = [97, 70, 70, 70, 62, 86, 96]
+    seconds_expected = [19589, 15848, 15878, 15878, 2165, 36198, 5120]
+    assert all([list(df['moon_deg'])[i] == pytest.approx(moon_deg_expected[i], abs=1)
+                for i in range(len(df))])
+    assert all([list(df['seconds'])[i] == pytest.approx(seconds_expected[i], abs=60)
+                for i in range(len(df))])
+    # print('\n', df)
+
+    # Test case: near-new moon (moon 3% phase, no factor at all whatever targets' sky position):
+    df_all = planning.make_df_fov(fov_directory=TEST_FOV_DIRECTORY)
+    # Test normal case, no moon effect.
+    df = planning.filter_df_fov_available(df_all, an_string='20161226', site_name='BDO_Kansas',
+                                          min_moon_degrees=120, remove_unobservables=True)
+    moon_deg_expected = [37, 148, 148, 148, 78, 109, 146, 118]
+    seconds_expected = [4122, 40384, 40384, 40384, 19071, 45262, 29656, 27029]
+    assert all([list(df['moon_deg'])[i] == pytest.approx(moon_deg_expected[i], abs=1)
+                for i in range(len(df))])
+    assert all([list(df['seconds'])[i] == pytest.approx(seconds_expected[i], abs=60)
+                for i in range(len(df))])
+    # print('\n', df)
+
+    # Test case: moon very near at least one FOV:
+    df_all = planning.make_df_fov(fov_directory=TEST_FOV_DIRECTORY)
+    # Test normal case, no moon effect.
+    df = planning.filter_df_fov_available(df_all, an_string='20170113', site_name='BDO_Kansas',
+                                          min_moon_degrees=70, remove_unobservables=True)
     print('\n', df)
-
-
+    moon_deg_expected = [100, 65, 65, 65, 83, 90]
+    seconds_expected = [8423, 2674, 2674, 2674, 44439, 24531]
+    assert all([list(df['moon_deg'])[i] == pytest.approx(moon_deg_expected[i], abs=1)
+                for i in range(len(df))])
+    assert all([list(df['seconds'])[i] == pytest.approx(seconds_expected[i], abs=60)
+                for i in range(len(df))])
 
 
 

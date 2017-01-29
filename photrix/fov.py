@@ -1,3 +1,4 @@
+
 import os
 import pandas as pd
 from collections import Counter
@@ -7,7 +8,7 @@ from photrix.util import *
 __author__ = "Eric Dose :: Bois d'Arc Observatory, Kansas"
 
 FOV_DIRECTORY = "C:/Dev/Photometry/FOV/"
-VALID_FOV_OBSERVING_STYLES = ["Standard", "Stare", "Monitor", "LPV"]
+VALID_FOV_OBSERVING_STYLES = ["Standard", "Stare", "Monitor", "LPV", "Burn"]
 CURRENT_SCHEMA_VERSION = "1.4"
 SINE_FRACTION = 0.5
 VR_FRACTION_OF_VI = 0.5
@@ -76,8 +77,8 @@ class Fov:
         obs_style = obs_style_words[0]
         obs_values = obs_style_words[1:]
         if obs_style not in VALID_FOV_OBSERVING_STYLES:
-            raise ValueError("'" + obs_style + "' is not a valid Observing Style.")
-
+            raise ValueError("In '" + self.fov_name + "', '" +
+                             obs_style + "' is not a valid Observing Style.")
         self.observing_style = obs_style
         self.alert = None  # default
         self.observing_list = []

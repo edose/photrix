@@ -4,6 +4,7 @@ import pytest
 
 # Your choices for importing (at least in this test module):
 from photrix import util                  # call: util.ra_as_degrees()
+from photrix.user import Astronight
 # from photrix.util import *              # call: ra_as_degrees()
 # from photrix.util import ra_as_degrees  # call: ra_as_degrees()
 # import photrix.util as u                # call: u.ra_as_degrees()
@@ -357,6 +358,23 @@ def test_datetime_utc_from_jd():
     jd_3 = 2446714.63341273
     assert (util.datetime_utc_from_jd(jd_3) - datetime_3).total_seconds() == \
            pytest.approx(0, abs=1.0)
+
+
+def test_time_hhmm():
+    dt = datetime(2016, 1, 1, 23, 34, 45, 454545).replace(tzinfo=timezone.utc)
+    assert util.time_hhmm(dt) == '2335'
+    dt = datetime(2016, 1, 1, 23, 34, 29, 999999).replace(tzinfo=timezone.utc)
+    assert util.time_hhmm(dt) == '2334'
+    dt = datetime(2016, 1, 1, 23, 59, 31, 454545).replace(tzinfo=timezone.utc)
+    assert util.time_hhmm(dt) == '0000'
+    dt = datetime(2016, 1, 31, 0, 0, 0, 0).replace(tzinfo=timezone.utc)
+    assert util.time_hhmm(dt) == '0000'
+    dt = datetime(2016, 1, 31, 0, 0, 30, 0).replace(tzinfo=timezone.utc)  # banker's rounding.
+    assert util.time_hhmm(dt) == '0000'
+    dt = datetime(2016, 1, 31, 0, 1, 30, 0).replace(tzinfo=timezone.utc)  # banker's rounding.
+    assert util.time_hhmm(dt) == '0002'
+    dt = datetime(2016, 1, 31, 0, 0, 30, 1).replace(tzinfo=timezone.utc)
+    assert util.time_hhmm(dt) == '0001'
 
 
 def test_isfloat():
