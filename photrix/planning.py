@@ -5,7 +5,7 @@ import pandas as pd
 from datetime import datetime, timedelta, timezone
 from collections import defaultdict, namedtuple
 
-from photrix.util import RaDec, datetime_utc_from_jd, time_hhmm
+from photrix.util import RaDec, datetime_utc_from_jd, time_hhmm, datetime_utc_from_hhmm
 from photrix.fov import make_fov_dict, FovError
 from photrix.user import Astronight
 from photrix.web import get_aavso_webobs_raw_table
@@ -383,8 +383,7 @@ def get_local_aavso_reports(report_dir=None, earliest_an=None):
 
 def parse_an_sketch(excel_path='c:/24hrs/Scratch Plan.xlsx', site_name='BDO_Kansas', fov_dict=None,
                     output_directory=DEFAULT_PLAN_DIRECTORY):
-    df = pd.read_excel(excel_path, sheetname='Sheet1').\
-        dropna(axis=0, how='all').dropna(axis=1, how='all')
+    df = pd.read_excel(excel_path).dropna(axis=0, how='all').dropna(axis=1, how='all')
     nrow = len(df)
     ncol = len(df.columns)
     parsed_list = []  # nested list, one element per ACP plan.
@@ -409,116 +408,190 @@ def parse_an_sketch(excel_path='c:/24hrs/Scratch Plan.xlsx', site_name='BDO_Kans
             else:
                 do_this_cell = ~np.isnan(cell)
             if do_this_cell:
+                # Extract and process substrings from this cell:
                 txt_as_read = str(cell).strip()
                 txt_lower = txt_as_read.lower()
+                split_txt = txt_as_read.split(';', maxsplit=1)
+                command = split_txt[0].strip()
+                if len(split_txt) > 1:
+                    comments = split_txt[1].rstrip()
+                else:
+                    comments = None
                 print(txt_as_read)
+                # Determine command type and add item to plan_items:
                 if txt_lower.startswith('plan'):
-                    if icol != 0:
-                        print('>>>>>ERROR: Plan defined in a column other than the first one: "' +
-                              txt_lower + '".')
-                        return
-                    else:
-                        # Close previous plan if any, probably with chain to next plan:
+                    # Close previous plan if any, probably with chain to next plan:
+                    if len(plan_items) > 0:
                         parsed_list.append(plan_items)
                         plan_items = []
-                        # Start next plan:
-                        split_txt = txt_lower.split(';', maxsplit=1)
-                        directive = split_txt[0]
-                        this_plan_id = 'plan_' + an_date_string + '_' + \
-                                       directive[len('plan'):].strip()
-                        if len(split_txt) > 1:
-                            comments = split_txt[1].strip()
-                        else:
-                            comments = None
-                        plan_items.append(('plan', this_plan_id, comments))  # append tuple
-                if txt_lower.startswith(';'):
-                    comment_text = txt_lower.strip()[1:]
-                    plan_items.append(('comment', comment_text))
-                if txt_lower.startswith('afinterval'):
-                    directive = txt_lower.split(';')[0].strip()
-                    minutes = float(directive[len('afinterval'):].strip())
+                    # Start next plan:
+                    this_plan_id = an_date_string + '_' + command[len('plan'):].strip()
+                    plan_items.append(('Plan', this_plan_id, comments))  # append tuple
+                elif txt_as_read.startswith(';'):
+                    plan_items.append(('comment', comments))
+                elif txt_lower.startswith('afinterval'):
+                    minutes = command[len('afinterval'):].strip()
                     plan_items.append(('afinterval', minutes))
-                if txt_lower.startswith('autofocus'):
+                elif txt_lower.startswith('autofocus'):
                     plan_items.append(('autofocus',))
-                if txt_lower.startswith('chill'):
-                    directive = txt_lower.split(';')[0].strip()
-                    degrees = float(directive[len('chill'):].strip())
+                elif txt_lower.startswith('chill'):
+                    degrees = command[len('chill'):].strip()
                     plan_items.append(('chill', degrees))
-                if txt_lower.startswith('burn'):
-                    directive = txt_lower.split(';')[0].strip()
-                    this_fov_name = directive[len('burn'):].strip()
-                    plan_items.append(('burn', this_fov_name))
-                if txt_lower.startswith('quitat'):
-                    directive = txt_lower.split(';')[0].strip()
-                    hhmm = directive[len('quitat'):].strip()
+                elif txt_lower.startswith('quitat'):
+                    hhmm = command[len('quitat'):].strip().replace(':', '')
                     plan_items.append(('quitat', hhmm))
-                if txt_lower.startswith('waituntil'):
-                    directive = txt_lower.split(';')[0].strip()
-                    value = directive[len('waituntil'):].strip()
+                elif txt_lower.startswith('waituntil'):
+                    value = command[len('waituntil'):].strip().replace(':', '')
                     if float(value) < 0:
                         plan_items.append(('waituntil', 'sun_degrees', value))
                     else:
                         plan_items.append(('waituntil', 'hhmm', value))
-                if txt_lower.startswith('chain'):
-                    directive = txt_lower.split(';')[0].strip()
-                    next_plan_filename = directive[len('chain'):].strip()
+                elif txt_lower.startswith('chain'):
+                    next_plan_filename = command[len('chain'):].strip()
                     if not next_plan_filename.endswith('.txt'):
                         next_plan_filename += '.txt'
                     plan_items.append(('chain', next_plan_filename))
-                if txt_lower.startswith('flats'):
+                elif txt_lower.startswith('flats'):
                     if this_plan_id[-2:].lower() != '_z':
                         print('>>>>> WARNING: flats directive encountered but plan_id is' +
-                              this_plan_id + ', not the usual "Z".')
+                              this_plan_id + ', not the usual "_Z".')
                     plan_items.append(('flats',))
+                elif txt_lower.startswith('burn'):
+                    value = command[len('burn'):].strip()
+                    this_fov_name, ra_string, dec_string = tuple(value.rsplit(maxsplit=2))
+                    plan_items.append(('burn', this_fov_name.strip(),
+                                       ra_string.strip(), dec_string.strip()))
+                elif txt_lower.startswith('stare'):
+                    value = command[len('stare'):].strip()
+                    repeats_string, this_fov_name = tuple(value.split(maxsplit=1))
+                    plan_items.append(('stare', repeats_string.strip(), this_fov_name.strip()))
                 else:
                     # Treat as a fov_name, with warning if not in fov list.
                     fov_name = txt_as_read.strip()
-                    plan_items.append(('FOV: ', fov_name))
+                    plan_items.append(('fov', fov_name))
+                print(plan_items[-1:])
 
-    parsed_list.append(plan_items)  # Close out last plan.
+    parsed_list.append(plan_items)  # Close out the last plan.
 
-    summary_lines = []
+    summary_lines = ['SUMMARY for AN' + an_date_string]
     # Add summary header here.
     for plan in parsed_list:
         acp_plan_lines = []
+        print('\n***' + str(plan[0]))
+        for plan_item in plan[1:]:
+            print(str(plan_item))
         plan_id = (plan[0])[1]
         for item in plan:
-            new_summary_line, new_acp_plan_lines = make_lines_from_item(item, an, fov_dict)
-            summary_lines.append(new_summary_line)
+            new_summary_lines, new_acp_plan_lines, duration = \
+                make_lines_from_item(item, an, fov_dict)
+            summary_lines.extend(new_summary_lines)
             acp_plan_lines.extend(new_acp_plan_lines)
 
         # Done with this plan, so write acp_plan_lines to ACP plan file.
-        output_fullpath = os.path.join(output_directory, plan_id + '.txt')
+        filename = 'plan_' + plan_id + '.txt'
+        output_fullpath = os.path.join(output_directory, filename)
         print('PRINT lines for plan ' + plan_id + ' to ', output_fullpath)
-        # with open(output_fullpath) as this_file:
-        #     for line in acp_plan_lines:
-        #         this_file.write("{}\n".format(line))
+        with open(output_fullpath, 'w') as this_file:
+            this_file.write('\n'.join(acp_plan_lines))
 
     # Done with all parsing, so write summary_lines to Summary file.
     output_fullpath = os.path.join(output_directory, 'Summary_' + an.an_date_string + '.txt')
     print('PRINT all summary lines to ', output_fullpath)
-    # with open(output_fullpath) as this_file:
-    #     for line in summary_lines:
-    #         this_file.write("{}\n".format(line))
+    with open(output_fullpath, 'w') as this_file:
+        this_file.write('\n'.join(summary_lines))
 
 
 def make_lines_from_item(item, an, fov_dict):
-    summary_line = 'summary: ' + item[0]  # TEST DUMMY
-    acp_plan_lines = list('acp_plan: ' + item[0])  # TEST DUMMY
-    return summary_line, acp_plan_lines
+    """
+    :param item: one tuple from parsed_list.
+    :param an: Astronight object
+    :param fov_dict: FOV dictionary
+    :return: 3-tuple of summary_lines (list of strings, lines for summary file),
+                        acp_plan_lines (list of strings, >=1 lines for acp_plan now in action),
+                        duration (seconds, estimated time this item will require).
+    """
+    summary_lines = []  # default
+    acp_plan_lines = []  # default
+    duration = 0  # in seconds, default
+    item_type = item[0]
+    if item_type == 'Plan':
+        # Construct first line of each.
+        if item[2] is None:
+            text = '; PLAN ' + item[1]
+        else:
+            text = '; PLAN ' + item[1] + ' ; ' + item[2]
+        summary_lines = ['', 50*'-', 'Begin Plan ' + text]
+        acp_plan_lines.extend(an.acp_header_string().split('\n'))
+        acp_plan_lines.extend([';'])
+        duration = 0
+    elif item_type == 'chill':
+        summary_lines = acp_plan_lines = ['CHILL  ' + item[1]]
+        duration = 0
+    elif item_type == 'waituntil':
+        if item[1] == 'hhmm':
+            summary_lines = ['WAITUNTIL ' + item[2] + ' utc']
+            acp_plan_lines = ['#WAITUNTIL 1, ' + item[2] + ' ; utc']
+        elif item[1] == 'sun_degrees':
+            summary_lines = ['WAITUNTIL sun reaches ' + item[2] + ' degrees alt']
+            acp_plan_lines = ['#WAITUNTIL 1, ' + item[2] + ' ; deg sun alt']
+        else:
+            print("***** ERROR: WAITUNTIL item" + str(item) + 'not understood.')
+    elif item_type == 'quitat':
+        dt = datetime_utc_from_hhmm(item[1], an)
+        formatted_time = '{:%m/%d/%Y %H:%M}'.format(dt)
+        summary_lines = ['QUITAT ' + item[1] + ' utc']
+        acp_plan_lines = ['#QUITAT ' + formatted_time + ' ; utc']
+        duration = 0
+    elif item_type == 'afinterval':
+        summary_lines = ['AFINTERVAL ' + item[1]]
+        acp_plan_lines = [';', '#AFINTERVAL  ' + item[1]]
+        duration = 0
+    elif item_type == 'burn':
+        summary_lines = ['BURN ' + item[1]]
+        acp_plan_lines = [';', '#DITHER 0 ;', '#FILTER V,I ;', 'BINNING 1,1 ;', '#COUNT 1,1 ;',
+                          '#INTERVAL 240,240 ;', ';----> BURN for new FOV file.',
+                          item[1] + '\t' + item[2] + '\t' + item[3] + ' ;']
+        duration = 660
+    elif item_type == 'autofocus':
+        summary_lines = ['AUTOFOCUS']
+        acp_plan_lines = [';', '#AUTOFOCUS']
+        duration = 160
+    elif item_type == 'chain':
+        summary_lines = ['Chain out to plan file: \'' + item[1]]
+        acp_plan_lines = [';', '#CHAIN']
+    elif item_type == 'flats':
+        summary_lines = ['Flats']
+        acp_plan_lines = [';', '#SCREENFLATS flats_VRI_16.txt ;']
+    elif item_type == 'comment':
+        summary_lines = acp_plan_lines = [';' + item[1]]
+    elif item_type == 'stare':
+        summary_lines = ['Stare ' + item[1] + ' repeats at ' + item[2]]
+        acp_plan_lines = make_plan_entry_stare(fov_name=item[2], fov_dict=fov_dict,
+                                               num_repeats=item[1], an=an)
+    elif item_type == 'fov':
+        summary_lines = ['Observe ' + item[1]]
+        acp_plan_lines = make_plan_entry_fov(fov_name=item[1], fov_dict=fov_dict, an=an)
+    else:
+        print("***** ERROR: parsed_list item " + str(item) + 'not understood.')
+    return summary_lines, acp_plan_lines, duration
 
 
-def make_plan_header(an):
-    return an.acp_header_string().split('\n')  # Grab an's header string and return it as lines.
+def make_plan_entry_stare(fov_name, fov_dict, num_repeats, an):
+    return [';', '#REPEAT ' + num_repeats + ' ;', '#DITHER 0 ;', '#FILTER XXX ;',
+            '#BINNING XXX ;', '#COUNT XXX ;', '#INTERVAL XXX ;', ';----ACP COMMENTS',
+            fov_name + '\t' + 'RA' + '\t' + 'DEC']
 
 
-def make_plan_fov_entry(an, fov_name, fov_dict):
+def make_plan_entry_fov(fov_name, fov_dict, an):
     # Returns text plan lines for one fov observation.
     # For now, obs_style LPV needs estimated V mag to follow fov_name in its excel cell,
     #    e.g., "AU Aur / 12.5; then compute other mags and thus exp times from that.
     #    If this V mag is absent: (1) emit warning in summary, (2) assume mean V mag in summary,
     #    (3) write "XXX" for all exp times in its ACP plan entry.
-    pass
+    return [';', '#DITHER 0 ;', '#FILTER XXX ;',
+                          '#BINNING XXX ;', '#COUNT XXX ;', '#INTERVAL XXX ;', ';----ACP COMMENTS',
+                          fov_name + '\t' + 'RA' + '\t' + 'DEC']
+
 
 
 def make_flat_lines():

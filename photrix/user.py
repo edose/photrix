@@ -381,7 +381,7 @@ class Astronight:
                         dark_start_lst_string + '-' + dark_end_lst_string + ' LST\n'
         header_string += '; moon -- ' + moon_phase_string + ' ' + moon_radec_string + \
                          '   ' + dark_no_moon_string + '\n'
-        header_string += '; LST = UT + ' + lst_vs_utc_string + ' (middark)\n'
+        header_string += '; LST = UT + ' + lst_vs_utc_string + ' (middark)'
         return header_string
 
 
