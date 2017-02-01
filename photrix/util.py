@@ -324,9 +324,9 @@ def datetime_utc_from_hhmm(hhmm_string, an):
     mid_dark = an.local_middark_utc
     hour_hhmm = int(hhmm_string[0:2])
     minute_hhmm = int(hhmm_string[2:4])
-    test_dt = mid_dark.replace(hour=hour_hhmm, minute=minute_hhmm)
+    test_dt = mid_dark.replace(hour=hour_hhmm, minute=minute_hhmm, second=0, microsecond=0)
     delta_days = round((test_dt - mid_dark).total_seconds() / (24*3600))
-    best_dt = test_dt + timedelta(days=delta_days)
+    best_dt = test_dt - timedelta(days=delta_days)
     return best_dt
 
 

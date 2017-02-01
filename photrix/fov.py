@@ -10,7 +10,7 @@ __author__ = "Eric Dose :: Bois d'Arc Observatory, Kansas"
 FOV_DIRECTORY = "C:/Dev/Photometry/FOV/"
 VALID_FOV_OBSERVING_STYLES = ["Standard", "Stare", "Monitor", "LPV", "Burn"]
 CURRENT_SCHEMA_VERSION = "1.4"
-SINE_FRACTION = 0.5
+LPV_MAG_SINE_FRACTION = 0.5
 VR_FRACTION_OF_VI = 0.5
 
 
@@ -226,7 +226,7 @@ class Fov:
     def calc_priority_score(self, days):
         return self.priority * self.calc_gap_score(days)
 
-    def estimate_mira_mags(self, jd):
+    def estimate_lpv_mags(self, jd):
         if self.period <= 0 or self.mag_V_bright >= self.mag_V_faint:
             return None
         jd_bright, jd_faint = self.JD_bright, self.JD_faint
@@ -254,7 +254,8 @@ class Fov:
         #  Now, calculate linear and sine components and blend them (each filter).
         linear_mag_fract = time_fract
         sine_mag_fract = (1 + math.sin((time_fract-0.5)*math.pi)) / 2
-        mag_fract = SINE_FRACTION * sine_mag_fract + (1 - SINE_FRACTION) * linear_mag_fract
+        mag_fract = LPV_MAG_SINE_FRACTION * sine_mag_fract + \
+                    (1 - LPV_MAG_SINE_FRACTION) * linear_mag_fract
         #  Render mag in each filter.
         mags = dict()
         mags['V'] = v_start + mag_fract * v_change

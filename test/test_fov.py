@@ -142,70 +142,70 @@ def test_fov_mira():
     assert [star.star_id for star in fov2.aavso_stars] == \
            ['117', 'AU Aur', '141', '154', '132', '146', '124', '118', '155', '107', '112']
 
-    # Test .estimate_mira_mags().
+    # Test .estimate_lpv_mags().
     jd = fov2.JD_bright
-    mags_bright = fov2.estimate_mira_mags(jd)
+    mags_bright = fov2.estimate_lpv_mags(jd)
     assert mags_bright['V'] == fov2.mag_V_bright
     assert mags_bright['R'] == fov2.mag_V_bright - 0.5*fov2.color_VI_bright
     assert mags_bright['I'] == fov2.mag_V_bright - fov2.color_VI_bright
     jd = fov2.JD_faint
-    mags_faint = fov2.estimate_mira_mags(jd)
+    mags_faint = fov2.estimate_lpv_mags(jd)
     assert mags_faint['V'] == fov2.mag_V_faint
     assert mags_faint['R'] == fov2.mag_V_faint - 0.5*fov2.color_VI_faint
     assert mags_faint['I'] == fov2.mag_V_faint - fov2.color_VI_faint
     jd = fov2.JD_bright + 0.5 * (fov2.JD_faint - fov2.JD_bright)  # mid-dimming
-    mags_jd = fov2.estimate_mira_mags(jd)
+    mags_jd = fov2.estimate_lpv_mags(jd)
     assert mags_jd['V'] == mags_bright['V'] + 0.5*(mags_faint['V']-mags_bright['V'])
     assert mags_jd['R'] == mags_bright['R'] + 0.5*(mags_faint['R']-mags_bright['R'])
     assert mags_jd['I'] == mags_bright['I'] + 0.5*(mags_faint['I']-mags_bright['I'])
     jd = fov2.JD_faint + 0.5 * (fov2.JD_bright+fov2.period - fov2.JD_faint)  # mid-brightening
-    mags_jd = fov2.estimate_mira_mags(jd)
+    mags_jd = fov2.estimate_lpv_mags(jd)
     assert mags_jd['V'] == mags_faint['V'] + 0.5*(mags_bright['V']-mags_faint['V'])
     assert mags_jd['R'] == mags_faint['R'] + 0.5*(mags_bright['R']-mags_faint['R'])
     assert mags_jd['I'] == mags_faint['I'] + 0.5*(mags_bright['I']-mags_faint['I'])
 
     # Test much later dates than JD_bright etc, but same phase.
     jd = fov2.JD_bright + 11*fov2.period
-    mags_bright = fov2.estimate_mira_mags(jd)
+    mags_bright = fov2.estimate_lpv_mags(jd)
     assert mags_bright['V'] == fov2.mag_V_bright
     assert mags_bright['R'] == fov2.mag_V_bright - 0.5*fov2.color_VI_bright
     assert mags_bright['I'] == fov2.mag_V_bright - fov2.color_VI_bright
     jd = fov2.JD_faint + 11*fov2.period
-    mags_faint = fov2.estimate_mira_mags(jd)
+    mags_faint = fov2.estimate_lpv_mags(jd)
     assert mags_faint['V'] == fov2.mag_V_faint
     assert mags_faint['R'] == fov2.mag_V_faint - 0.5*fov2.color_VI_faint
     assert mags_faint['I'] == fov2.mag_V_faint - fov2.color_VI_faint
     jd = fov2.JD_bright + 0.5 * (fov2.JD_faint - fov2.JD_bright) + 11*fov2.period  # mid-dimming
-    mags_jd = fov2.estimate_mira_mags(jd)
+    mags_jd = fov2.estimate_lpv_mags(jd)
     assert mags_jd['V'] == mags_bright['V'] + 0.5*(mags_faint['V']-mags_bright['V'])
     assert mags_jd['R'] == mags_bright['R'] + 0.5*(mags_faint['R']-mags_bright['R'])
     assert mags_jd['I'] == mags_bright['I'] + 0.5*(mags_faint['I']-mags_bright['I'])
     jd = fov2.JD_faint + 0.5 * (fov2.JD_bright+fov2.period - fov2.JD_faint) + \
         11*fov2.period  # mid-brightening
-    mags_jd = fov2.estimate_mira_mags(jd)
+    mags_jd = fov2.estimate_lpv_mags(jd)
     assert mags_jd['V'] == mags_faint['V'] + 0.5*(mags_bright['V']-mags_faint['V'])
     assert mags_jd['R'] == mags_faint['R'] + 0.5*(mags_bright['R']-mags_faint['R'])
     assert mags_jd['I'] == mags_faint['I'] + 0.5*(mags_bright['I']-mags_faint['I'])
 
     # Test much earlier dates than JD_bright etc, but same phase.
     jd = fov2.JD_bright - 23*fov2.period
-    mags_bright = fov2.estimate_mira_mags(jd)
+    mags_bright = fov2.estimate_lpv_mags(jd)
     assert mags_bright['V'] == fov2.mag_V_bright
     assert mags_bright['R'] == fov2.mag_V_bright - 0.5*fov2.color_VI_bright
     assert mags_bright['I'] == fov2.mag_V_bright - fov2.color_VI_bright
     jd = fov2.JD_faint - 23*fov2.period
-    mags_faint = fov2.estimate_mira_mags(jd)
+    mags_faint = fov2.estimate_lpv_mags(jd)
     assert mags_faint['V'] == fov2.mag_V_faint
     assert mags_faint['R'] == fov2.mag_V_faint - 0.5*fov2.color_VI_faint
     assert mags_faint['I'] == fov2.mag_V_faint - fov2.color_VI_faint
     jd = fov2.JD_bright + 0.5 * (fov2.JD_faint - fov2.JD_bright) - 23*fov2.period  # mid-dimming
-    mags_jd = fov2.estimate_mira_mags(jd)
+    mags_jd = fov2.estimate_lpv_mags(jd)
     assert mags_jd['V'] == mags_bright['V'] + 0.5*(mags_faint['V']-mags_bright['V'])
     assert mags_jd['R'] == mags_bright['R'] + 0.5*(mags_faint['R']-mags_bright['R'])
     assert mags_jd['I'] == mags_bright['I'] + 0.5*(mags_faint['I']-mags_bright['I'])
     jd = fov2.JD_faint + 0.5 * (fov2.JD_bright+fov2.period - fov2.JD_faint) - \
         23*fov2.period  # mid-brightening
-    mags_jd = fov2.estimate_mira_mags(jd)
+    mags_jd = fov2.estimate_lpv_mags(jd)
     assert mags_jd['V'] == mags_faint['V'] + 0.5*(mags_bright['V']-mags_faint['V'])
     assert mags_jd['R'] == mags_faint['R'] + 0.5*(mags_bright['R']-mags_faint['R'])
     assert mags_jd['I'] == mags_faint['I'] + 0.5*(mags_bright['I']-mags_faint['I'])
@@ -214,7 +214,7 @@ def test_fov_mira():
     from math import sin, pi
     fract = 0.15
     jd = fov2.JD_bright + fract * (fov2.JD_faint - fov2.JD_bright)
-    mags_jd = fov2.estimate_mira_mags(jd)
+    mags_jd = fov2.estimate_lpv_mags(jd)
     linear_part = fract
     sine_part = (1 + sin((fract-0.5) * pi)) / 2
     mag_fract = (0.5 * linear_part) + (0.5 * sine_part)
@@ -224,7 +224,7 @@ def test_fov_mira():
 
     fract = 0.66
     jd = fov2.JD_faint + fract * (fov2.JD_bright - fov2.JD_faint)
-    mags_jd = fov2.estimate_mira_mags(jd)
+    mags_jd = fov2.estimate_lpv_mags(jd)
     linear_part = fract
     sine_part = (1 + sin((fract-0.5) * pi)) / 2
     mag_fract = (0.5 * linear_part) + (0.5 * sine_part)

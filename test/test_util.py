@@ -377,6 +377,24 @@ def test_time_hhmm():
     assert util.time_hhmm(dt) == '0001'
 
 
+def test_datetime_utc_from_hhmm():
+    an = Astronight('20170130', 'BDO_Kansas')
+    assert util.datetime_utc_from_hhmm('0000', an) == \
+           datetime(2017, 1, 31, 0, 0, 0, 0).replace(tzinfo=timezone.utc)
+    assert util.datetime_utc_from_hhmm('0600', an) == \
+           datetime(2017, 1, 31, 6, 0, 0, 0).replace(tzinfo=timezone.utc)
+    assert util.datetime_utc_from_hhmm('0700', an) == \
+           datetime(2017, 1, 31, 7, 0, 0, 0).replace(tzinfo=timezone.utc)
+    assert util.datetime_utc_from_hhmm('1200', an) == \
+           datetime(2017, 1, 31, 12, 0, 0, 0).replace(tzinfo=timezone.utc)
+    assert util.datetime_utc_from_hhmm('1800', an) == \
+           datetime(2017, 1, 31, 18, 0, 0, 0).replace(tzinfo=timezone.utc)
+    assert util.datetime_utc_from_hhmm('1900', an) == \
+           datetime(2017, 1, 30, 19, 0, 0, 0).replace(tzinfo=timezone.utc)
+    assert util.datetime_utc_from_hhmm('2359', an) == \
+           datetime(2017, 1, 30, 23, 59, 0, 0).replace(tzinfo=timezone.utc)
+
+
 def test_isfloat():
     assert util.isfloat('-25') is True
     assert util.isfloat('+34.4') is True
