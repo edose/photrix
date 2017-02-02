@@ -1,6 +1,8 @@
 import os
 import pandas as pd
 import pytest
+from collections import namedtuple
+import random
 
 from photrix import planning
 # from photrix import util
@@ -95,7 +97,7 @@ def test_filter_df_fov_available():
                                           min_moon_degrees=0, remove_unobservables=False)
     moon_deg_expected = [143, 45, 45, 45, 118, 74, 25, 88]
     seconds_expected = [8693, 22905, 22905, 22905, 4323, 35846, 28034, 0]
-    print('\n', df)
+    # print('\n', df)
     assert all([list(df['moon_deg'])[i] == pytest.approx(moon_deg_expected[i], abs=1)
                 for i in range(len(df))])
     assert all([list(df['seconds'])[i] == pytest.approx(seconds_expected[i], abs=60)
@@ -143,7 +145,7 @@ def test_filter_df_fov_available():
     # Test normal case, no moon effect.
     df = planning.filter_df_fov_available(df_all, an_string='20170113', site_name='BDO_Kansas',
                                           min_moon_degrees=70, remove_unobservables=True)
-    print('\n', df)
+    # print('\n', df)
     moon_deg_expected = [100, 65, 65, 65, 83, 90]
     seconds_expected = [8423, 2674, 2674, 2674, 44439, 24531]
     assert all([list(df['moon_deg'])[i] == pytest.approx(moon_deg_expected[i], abs=1)
@@ -152,6 +154,56 @@ def test_filter_df_fov_available():
                 for i in range(len(df))])
 
 
+def test_reorder_actions():
+    Plan = namedtuple('Plan', ['plan_id', 'action_list'])
+    Action = namedtuple('Action', ['action_type', 'action_data'])
+    action_list_1_ordered = [Action(action_type='Plan', action_data=3),
+                             Action(action_type='Chill', action_data=2),
+                             Action(action_type='Waituntil', action_data='x'),
+                             Action(action_type='Quitat', action_data=14.3),
+                             Action(action_type='AFINTERVAL', action_data=90),
+                             Action(action_type='autofocus', action_data=None),
+                             Action(action_type='fov', action_data='AU Aur'),
+                             Action(action_type='Stare', action_data='ST Tri'),
+                             Action(action_type='Burn', action_data='Burner'),
+                             Action(action_type='Comment', action_data='this is a comment'),
+                             Action(action_type='Chain', action_data='AN_B.txt')]
+    plan_1_ordered = Plan(plan_id='111', action_list=action_list_1_ordered)
+    action_list_2_ordered = [Action(action_type='Plan', action_data=3),
+                             Action(action_type='Quitat', action_data=14.3),
+                             Action(action_type='AFINTERVAL', action_data=90),
+                             Action(action_type='Comment', action_data='this is a comment'),
+                             Action(action_type='fov', action_data='AU Aur'),
+                             Action(action_type='flats', action_data=None),
+                             Action(action_type='SHUTDOWN', action_data=None)]
+    plan_2_ordered = Plan(plan_id='22222', action_list=action_list_2_ordered)
+    plan_list_ordered = [plan_1_ordered, plan_2_ordered]
+
+    n_trials = 20
+    for i_trial in range(n_trials):
+            # Can't use random.sample directly: keep all fov, stare, and burn in original order.
+            indices_ordered = [0, 1, 2, 3, 4, 'observations', 10]
+            indices_disordered = random.sample(indices_ordered, len(indices_ordered))
+            index_obs = indices_disordered.index('observations')
+            indices_disordered[index_obs:index_obs+1] = [5, 6, 7, 8, 9]
+            list_1_disordered = [action_list_1_ordered[i] for i in indices_disordered]
+
+            indices_ordered = [0, 1, 2, 'observations', 6]
+            indices_disordered = random.sample(indices_ordered, len(indices_ordered))
+            index_obs = indices_disordered.index('observations')
+            indices_disordered[index_obs:index_obs+1] = [3, 4, 5]
+            list_2_disordered = [action_list_2_ordered[i] for i in indices_disordered]
+
+            plan_list_disordered = [Plan(plan_id=plan_list_ordered[0].plan_id,
+                                         action_list=list_1_disordered),
+                                    Plan(plan_id=plan_list_ordered[1].plan_id,
+                                         action_list=list_2_disordered)]
+            plan_list_reordered = planning.reorder_actions(plan_list_disordered)
+            assert plan_list_reordered[0].plan_id == plan_list_ordered[0].plan_id
+            assert plan_list_reordered[0].action_list == plan_list_reordered[0].action_list
+            assert plan_list_reordered[1].plan_id == plan_list_ordered[1].plan_id
+            assert plan_list_reordered[1].action_list == plan_list_reordered[1].action_list
+            # print('loop ' + str(i_trial) + ' ok.')
 
 #
 # def test_aavso_webobs():

@@ -376,23 +376,33 @@ def test_time_hhmm():
     dt = datetime(2016, 1, 31, 0, 0, 30, 1).replace(tzinfo=timezone.utc)
     assert util.time_hhmm(dt) == '0001'
 
+    # Test .az_alt_at_datetime_utc():
+    aldebaran = util.RaDec('4:35:55.31', '+16:30:30.249')
+    mira = util.RaDec('02:19:20.804', '-2:58:43.606')
+    hip_113116 = util.RaDec('22:54:25.073', '84:20:46.620')
 
-def test_datetime_utc_from_hhmm():
-    an = Astronight('20170130', 'BDO_Kansas')
-    assert util.datetime_utc_from_hhmm('0000', an) == \
-           datetime(2017, 1, 31, 0, 0, 0, 0).replace(tzinfo=timezone.utc)
-    assert util.datetime_utc_from_hhmm('0600', an) == \
-           datetime(2017, 1, 31, 6, 0, 0, 0).replace(tzinfo=timezone.utc)
-    assert util.datetime_utc_from_hhmm('0700', an) == \
-           datetime(2017, 1, 31, 7, 0, 0, 0).replace(tzinfo=timezone.utc)
-    assert util.datetime_utc_from_hhmm('1200', an) == \
-           datetime(2017, 1, 31, 12, 0, 0, 0).replace(tzinfo=timezone.utc)
-    assert util.datetime_utc_from_hhmm('1800', an) == \
-           datetime(2017, 1, 31, 18, 0, 0, 0).replace(tzinfo=timezone.utc)
-    assert util.datetime_utc_from_hhmm('1900', an) == \
-           datetime(2017, 1, 30, 19, 0, 0, 0).replace(tzinfo=timezone.utc)
-    assert util.datetime_utc_from_hhmm('2359', an) == \
-           datetime(2017, 1, 30, 23, 59, 0, 0).replace(tzinfo=timezone.utc)
+    long, lat = '-95:53:18', '+38:55:29'  # Bois d'Arc Obs, Kansas
+    dt = datetime(2016, 1, 31, 0, 9, 30, 780000).replace(tzinfo=timezone.utc)
+    az, alt = util.az_alt_at_datetime_utc(long, lat, aldebaran, dt)  # in degrees
+    assert az == pytest.approx(util.hex_degrees_as_degrees('118:27:06'), abs=0.5)
+    assert alt== pytest.approx(util.hex_degrees_as_degrees('+53:30:20'), abs=0.5)
+    az, alt = util.az_alt_at_datetime_utc(long, lat, mira, dt)  # in degrees
+    assert az == pytest.approx(util.hex_degrees_as_degrees('181:40:22'), abs=0.5)
+    assert alt == pytest.approx(util.hex_degrees_as_degrees('+48:09:18'), abs=0.5)
+    az, alt = util.az_alt_at_datetime_utc(long, lat, hip_113116, dt)  # in degrees
+    assert az == pytest.approx(util.hex_degrees_as_degrees('354:02:03'), abs=0.5)
+    assert alt == pytest.approx(util.hex_degrees_as_degrees('+42:09:15'), abs=0.5)
+
+    dt = datetime(2016, 6, 13, 3, 17, 53, 780000).replace(tzinfo=timezone.utc)
+    az, alt = util.az_alt_at_datetime_utc(long, lat, aldebaran, dt)  # in degrees
+    assert az == pytest.approx(util.hex_degrees_as_degrees('323:35:35'), abs=0.5)
+    assert alt== pytest.approx(util.hex_degrees_as_degrees('-26:10:56'), abs=0.5)
+    az, alt = util.az_alt_at_datetime_utc(long, lat, mira, dt)  # in degrees
+    assert az == pytest.approx(util.hex_degrees_as_degrees('0:42:33'), abs=0.5)
+    assert alt == pytest.approx(util.hex_degrees_as_degrees('-53:58:40'), abs=0.5)
+    az, alt = util.az_alt_at_datetime_utc(long, lat, hip_113116, dt)  # in degrees
+    assert az == pytest.approx(util.hex_degrees_as_degrees('5:22:23'), abs=0.5)
+    assert alt == pytest.approx(util.hex_degrees_as_degrees('+35:21:32'), abs=0.5)
 
 
 def test_isfloat():
