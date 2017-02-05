@@ -146,7 +146,7 @@ class Astronight:
             .site : this site (Site object)
             ._observer : this site and this astronight (ephem.Observer object)
             .ts_dark : Timespan(twilight_dusk, twilight_dawn) for this astronight.
-            .local_middark_ut : local mid-dark time, this astronight, in UTC time (datetime object)
+            .local_middark_ut : local mid-dark time, this astronight, in UTC (datetime object)
             .local_middark_jd : local mid-dark time, this astronight, in Julian date (float)
             .local_middark_lst : local mid-dark time, this astronight, LST in degrees (float)
             .moon_radec : moon location at middark (RaDec object)
@@ -172,6 +172,13 @@ class Astronight:
             timedelta(hours=+24)
 
         sun = ephem.Sun()
+        site_obs.horizon = '0'
+        sunset_utc = site_obs.previous_setting(sun,
+            start=approx_midnight_utc).datetime().replace(tzinfo=timezone.utc)
+        sunrise_utc = site_obs.next_rising(sun,
+            start=approx_midnight_utc).datetime().replace(tzinfo=timezone.utc)
+        self.ts_nosun = Timespan(sunset_utc, sunrise_utc)
+
         site_obs.horizon = str(self.site.twilight_sun_alt)
         sun.compute(site_obs)
         twilight_dusk = site_obs.previous_setting(sun,
@@ -228,7 +235,7 @@ class Astronight:
            Set to >=180 to ignore moon phase (i.e., moon must be down to observe at all).
            [User may want to set this value by using a Lorentzian fn, as RTML does,
               using (possibly auto-computed) distance and days-from-full-moon values.]
-        :return: Timespan object of start and end times (UT) that observing is allowed.
+        :return: Timespan object of start and end times (UTC) that observing is allowed.
         """
         if min_alt is None:
             min_alt = self.site.min_altitude
@@ -304,8 +311,8 @@ class Astronight:
 
     def acp_header_string(self):
         """ Returns an info string to include atop an ACP plan file, as:
-            ; sunset-rise 0033-1145 UT , -11 deg alt @ 0119-1055 UT  //  LST = cdt + 1128.
-            ; moon 15% @ (~22h04,-10) rise 0936 UT
+            ; sunset-rise 0033-1145 UTC , -11 deg alt @ 0119-1055 UTC  //  LST = cdt + 1128.
+            ; moon 15% @ (~22h04,-10) rise 0936 UTC
         Usage: s = an.acp_header_string()
         """
         # TODO: redo this method with: (1) template from more recent ACP plans, and
@@ -314,13 +321,11 @@ class Astronight:
         site_obs = ephem.Observer()
         site_obs.lat, site_obs.lon = str(self.site.latitude), str(self.site.longitude)
         site_obs.elevation = self.site.elevation
-        sun = ephem.Sun(site_obs)
+        # sun = ephem.Sun(site_obs)
         # moon = ephem.Moon(site_obs)
 
         # Handle sun data:
-        site_obs.horizon = '0'
-        sunset_utc = site_obs.previous_setting(sun, self.local_middark_utc)\
-            .datetime().replace(tzinfo=timezone.utc)
+        sunset_utc = self.ts_nosun.start
         sunset_utc_string = sunset_utc.strftime('%H%M')
         dark_start_utc_string = self.ts_dark.start.strftime('%H%M')
         site_obs.date = self.ts_dark.start
@@ -329,8 +334,7 @@ class Astronight:
         dark_start_lst_string = '{0:02d}'.format(int(dark_start_lst_minutes / 60)) + \
                        '{0:02d}'.format(dark_start_lst_minutes % 60)
 
-        sunrise_utc = site_obs.next_rising(sun, self.local_middark_utc)\
-            .datetime().replace(tzinfo=timezone.utc)
+        sunrise_utc = self.ts_nosun.end
         sunrise_utc_string = sunrise_utc.strftime('%H%M')
         dark_end_utc_string = self.ts_dark.end.strftime('%H%M')
         site_obs.date = self.ts_dark.end
@@ -359,9 +363,9 @@ class Astronight:
         else:
             dark_no_moon_string = 'no moon: ' + \
                                   self.ts_dark_no_moon.start.strftime('%H%M') + '-' + \
-                                  self.ts_dark_no_moon.end.strftime('%H%M') + ' UT'
+                                  self.ts_dark_no_moon.end.strftime('%H%M') + ' UTC'
 
-        # Handle LST vs UT:
+        # Handle LST vs UTC:
         lst_middark_seconds = self.local_middark_lst / 15 * 3600
         utc_middark_seconds = self.local_middark_utc.hour * 3600 + \
                               self.local_middark_utc.minute * 60 + \
@@ -374,14 +378,14 @@ class Astronight:
 
         # Construct ACP header string:
         header_string = '; sun --- down: ' + \
-                        sunset_utc_string + '-' + sunrise_utc_string + ' UT,   ' + \
+                        sunset_utc_string + '-' + sunrise_utc_string + ' UTC,   ' + \
                         'dark(' + '{0:+2d}'.format(round(self.site.twilight_sun_alt)) + \
                         u'\N{DEGREE SIGN}' + '): ' + \
-                        dark_start_utc_string + '-' + dark_end_utc_string + ' UT  = ' + \
+                        dark_start_utc_string + '-' + dark_end_utc_string + ' UTC  = ' + \
                         dark_start_lst_string + '-' + dark_end_lst_string + ' LST\n'
         header_string += '; moon -- ' + moon_phase_string + ' ' + moon_radec_string + \
                          '   ' + dark_no_moon_string + '\n'
-        header_string += '; LST = UT + ' + lst_vs_utc_string + ' (middark)'
+        header_string += '; LST = UTC + ' + lst_vs_utc_string + ' (middark)'
         return header_string
 
 

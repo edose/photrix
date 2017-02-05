@@ -1,13 +1,15 @@
 import os
 import os.path
-import numpy as np
-import pandas as pd
+from math import floor
 from datetime import datetime, timezone, timedelta
 from collections import namedtuple
+
+import numpy as np
+import pandas as pd
 import ephem
 
-from photrix.util import RaDec, datetime_utc_from_jd, time_hhmm, datetime_utc_from_hhmm, \
-    ra_as_hours, dec_as_hex
+from photrix.util import RaDec, datetime_utc_from_jd, time_hhmm, ra_as_hours, dec_as_hex,\
+    az_alt_at_datetime_utc
 from photrix.fov import make_fov_dict, FovError
 from photrix.user import Astronight, Instrument
 from photrix.web import get_aavso_webobs_raw_table
@@ -29,6 +31,7 @@ MIN_ROWS_ONE_STARE = 10
 MAX_DAYS_ONE_STARE = 0.5
 
 ABSOLUTE_MAX_EXPOSURE_TIME = 600  # seconds
+AUTOFOCUS_DURATION = 180  # seconds, includes slew & filter wheel changes
 
 
 def make_df_fov(fov_directory=FOV_DIRECTORY, fov_names_selected=None):
@@ -388,7 +391,7 @@ def get_an_priority(fov, an, local_obs_cache):
     #
 
 
-def plan_night(excel_path='c:/24hrs/Scratch Plan.xlsx', site_name='BDO_Kansas',
+def plan_night(excel_path='c:/24hrs/Planning.xlsx', site_name='BDO_Kansas',
                instrument_name='Borea', fov_dict=None, an_start_hhmm=None,
                output_directory=DEFAULT_PLAN_DIRECTORY):
     """
@@ -411,86 +414,127 @@ def plan_night(excel_path='c:/24hrs/Scratch Plan.xlsx', site_name='BDO_Kansas',
 
     reordered_plan_list = reorder_actions(raw_plan_list)
 
-    plan_list_with_durations = insert_raw_durations(reordered_plan_list, fov_dict, instrument)
+    plan_list = add_raw_durations_and_lines(reordered_plan_list, an, fov_dict, instrument)
 
+    plan_list = add_timetable(plan_list, an, an_start_hhmm)
 
-
-
-    # Calculate timeline and action status, add to each action in each plan:
-    # Develop projected timeline (starting time for each action in entire night):
-    if an_start_hhmm is None:
-        an_start_dt = an.ts_dark.start
-    else:
-        an_start_dt = datetime_utc_from_hhmm(an_start_hhmm, an)
-    running_dt = an_start_dt
-    for i_plan in range(len(plan_list)):
-        this_plan = plan_list[i_plan]  # a Plan namedtuple
-
-        # Scan this plan for #WAITUNTIL or #QUITAT, which alter timelines directly:
-        quitat_dt = None
-        waituntil_dt = None
-        for this_action in this_plan.action_list:  # an Action namedtuple
-            if this_action.action_type == 'waituntil':
-                if this_action.parsed_action[1] == 'hhmm':
-                    waituntil_dt = datetime_utc_from_hhmm(this_action.parsed_action[2], an)
-                elif this_action.parsed_action[1] == 'sun_degrees':
-                    sun_degrees = this_action.parsed_action[2]
-                    site_obs = ephem.Observer()
-                    site_obs.lat, site_obs.lon = str(an.site.latitude), str(an.site.longitude)
-                    site_obs.elevation = an.site.elevation
-                    sun = ephem.Sun(site_obs)
-                    site_obs.horizon = str(sun_degrees)
-                    waituntil_dt = site_obs.previous_setting(sun, an.local_middark_utc) \
-                        .datetime().replace(tzinfo=timezone.utc)
-            elif this_action.action_type == 'quitat':
-                quitat_dt = datetime_utc_from_hhmm(this_action.parsed_action[1], an)
-
-        # Set starting time for this plan:
-        if waituntil_dt is not None:
-            if waituntil_dt > running_dt:
-                running_dt = waituntil_dt
-        # Now construct starting time and completion status for each action in this plan:
-        for i_action in range(len(this_plan.action_list)):
-            this_action = this_plan.action_list[i_action]  # an Action namedtuple
-            action_start_dt = running_dt
-            action_expected_end_dt = running_dt + timedelta(seconds=this_action.raw_duration)
-            if quitat_dt is None:
-                running_dt = action_expected_end_dt
-                if action_expected_end_dt > an.ts_dark.end:
-                    action_new_status = 'DAWN'
-                else:
-                    action_new_status = 'ok'
-            else:
-                if action_expected_end_dt > quitat_dt:
-                    if running_dt >= quitat_dt:
-                        action_new_status = 'SKIPPED'
-                    else:
-                        running_dt = quitat_dt
-                        action_new_status = 'QUITAT'
-                else:
-                    running_dt = action_expected_end_dt
-                    action_new_status = 'ok'
-            new_action = this_action._replace(status=action_new_status, start_utc=action_start_dt)
-            this_plan.action_list[i_action] = new_action
-        new_plan = this_plan._replace(action_list=this_plan.action_list)
-        plan_list[i_plan] = new_plan
+    plan_list = add_altitudes(plan_list, an, fov_dict)
 
     write_acp_plans(plan_list, output_directory)
 
     write_summary(plan_list, an, output_directory)
 
 
+def parse_excel(excel_path, site_name='BDO_Kansas'):
+    """
+    Parses sketch Excel file and returns a list of actions constituting one night's observations.
+    :param excel_path: full path to Excel file holding all info for one night's observations.
+    :param site_name: a Site object for location of observations.
+    :return:
+    """
+    df = pd.read_excel(excel_path).dropna(axis=0, how='all').dropna(axis=1, how='all')
+    nrow = len(df)
+    ncol = len(df.columns)
+    parsed_list = []  # nested list, one element per ACP plan.
+    this_plan_id = ''
+    plan_actions = []
+    an_date_string = str(df.iloc[0, 0]).strip()
+    if 20170101 < int(an_date_string) < 20201231:  # max prob should be related to today's date.
+        an = Astronight(an_date_string, site_name)
+    else:
+        print('>>>>> STOPPING: an_date_string '" + an_date_string + "' SEEMS UNREASONABLE.')
+        return
+    # print('an_date_string: ' + an_date_string)  # TEST
+
+    for irow in range(1, nrow):
+        for icol in range(ncol):
+            cell = df.iloc[irow, icol]
+            if isinstance(cell, str):
+                do_this_cell = True
+            else:
+                do_this_cell = ~np.isnan(cell)
+            if do_this_cell:
+                # Extract and process substrings from this cell:
+                cell_str_as_read = str(cell).strip()
+                cell_str_lower = cell_str_as_read.lower()
+                split_str = cell_str_as_read.split(';', maxsplit=1)
+                command = split_str[0].strip()
+                if len(split_str) > 1:
+                    comment = split_str[1].rstrip()
+                else:
+                    comment = None
+                # print(cell_str_as_read)
+
+                # Determine action type and add action to plan_actions:
+                if cell_str_lower.startswith('plan'):
+                    # Close previous plan if any, probably with chain to next plan:
+                    if len(plan_actions) > 0:
+                        parsed_list.append(plan_actions)
+                        plan_actions = []
+                    # Start next plan:
+                    this_plan_id = an_date_string + '_' + command[len('plan'):].strip()
+                    plan_actions.append(('Plan', this_plan_id, comment))  # append tuple
+                elif cell_str_as_read.startswith(';'):
+                    plan_actions.append(('comment', comment))
+                elif cell_str_lower.startswith('afinterval'):
+                    minutes = command[len('afinterval'):].strip()
+                    plan_actions.append(('afinterval', minutes))
+                elif cell_str_lower.startswith('autofocus'):
+                    plan_actions.append(('autofocus', '#AUTOFOCUS'))  # i.e., directly from user
+                elif cell_str_lower.startswith('chill'):
+                    degrees = command[len('chill'):].strip()
+                    plan_actions.append(('chill', degrees))
+                elif cell_str_lower.startswith('quitat'):
+                    hhmm = command[len('quitat'):].strip().replace(':', '')
+                    plan_actions.append(('quitat', hhmm))
+                elif cell_str_lower.startswith('waituntil'):
+                    value = command[len('waituntil'):].strip().replace(':', '')
+                    if float(value) < 0:
+                        plan_actions.append(('waituntil', 'sun_degrees', value))
+                    else:
+                        plan_actions.append(('waituntil', 'hhmm', value))
+                elif cell_str_lower.startswith('chain'):
+                    next_plan_filename = 'plan_' + an_date_string + '_' + \
+                                         command[len('chain'):].strip().upper()
+                    if not next_plan_filename.endswith('.txt'):
+                        next_plan_filename += '.txt'
+                    plan_actions.append(('chain', next_plan_filename))
+                elif cell_str_lower.startswith('flats'):
+                    if this_plan_id[-2:].lower() != '_z':
+                        print('>>>>> WARNING: flats directive encountered but plan_id is' +
+                              this_plan_id + ', not the usual "_Z".')
+                    plan_actions.append(('flats',))
+                elif cell_str_lower.startswith('burn'):
+                    value = command[len('burn'):].strip()
+                    this_fov_name, ra_string, dec_string = tuple(value.rsplit(maxsplit=2))
+                    plan_actions.append(('burn', this_fov_name.strip(),
+                                         ra_string.strip(), dec_string.strip()))
+                elif cell_str_lower.startswith('stare'):
+                    value = command[len('stare'):].strip()
+                    repeats_string, this_fov_name = tuple(value.split(maxsplit=1))
+                    plan_actions.append(('stare', repeats_string.strip(), this_fov_name.strip()))
+                else:
+                    # Treat as a fov_name, with warning if not in fov list.
+                    fov_name = cell_str_as_read.strip()
+                    plan_actions.append(('fov', fov_name))
+                # print(plan_actions[-1:])
+
+    parsed_list.append(plan_actions)  # Close out the last plan.
+    return parsed_list, an
+
+
 def make_raw_plan_list(parsed_list, an):
     # Construct raw master plan_list (with as-yet incomplete actions):
     Plan = namedtuple('Plan', ['plan_id', 'action_list'])
     Action = namedtuple('Action', ['action_type', 'parsed_action', 'an_priority',
-                                   'raw_duration', 'status', 'start_utc', 'altitude_deg',
+                                   'raw_duration', 'n_afinterval_autofocus',
+                                   'status', 'start_utc', 'altitude_deg',
                                    'summary_lines', 'acp_plan_lines'])
     raw_plan_list = []  # will be the master container (a list of Plan namedtuples)
     for parsed_plan in parsed_list:
-        print('\n***' + str(parsed_plan[0]))
-        for plan_action in parsed_plan[1:]:
-            print(str(plan_action))
+        # print('\n***' + str(parsed_plan[0]))
+        # for plan_action in parsed_plan[1:]:
+        #     print(str(plan_action))
 
         plan_id = (parsed_plan[0])[1]
         action_list = []  # will be list of Action namedtuples for this plan only.
@@ -502,6 +546,7 @@ def make_raw_plan_list(parsed_list, an):
                                  parsed_action=parsed_action,  # store for later use
                                  an_priority=0.0,  # overwrite later
                                  raw_duration=0.0,  # overwrite later
+                                 n_afinterval_autofocus=0,  # possibly overwrite later
                                  status='no status',  # overwrite later
                                  start_utc=an.ts_dark.start,  # datetime, overwrite later
                                  altitude_deg=0.0,  # overwrite this later
@@ -541,41 +586,309 @@ def reorder_actions(raw_plan_list):
     return reordered_plan_list
 
 
-def insert_raw_durations(plan_list, fov_dict, instrument):
-    for plan in plan_list:
-        for action in plan.action_list:
+def add_raw_durations_and_lines(plan_list, an, fov_dict, instrument):
+    for i_plan in range(len(plan_list)):  # a Plan namedtuple
+        this_plan = plan_list[i_plan]
+        for i_action in range(len(this_plan.action_list)):  # an Action namedtuple
+            action = this_plan.action_list[i_action]
             this_type = action.action_type.lower()
+            parsed_action = action.parsed_action
             if this_type == 'plan':
-                action.raw_duration = 60
+                if parsed_action[2] is None:
+                    text = parsed_action[1]
+                else:
+                    text = parsed_action[1] + ' ; ' + parsed_action[2]
+                summary_lines = ['', 55 * '-', 'Begin Plan ' + text]
+                acp_plan_lines = an.acp_header_string().split('\n') + [';']
+                raw_duration = 60
             elif this_type == 'chill':
-                action.raw_duration = 0
+                summary_lines = ['CHILL  ' + parsed_action[1]]
+                acp_plan_lines = ['#CHILL  ' + parsed_action[1]]
+                raw_duration = 0
             elif this_type == 'waituntil':
-                action.raw_duration = None  # special case: no duration but executes a delay
+                if parsed_action[1] == 'hhmm':
+                    summary_lines = ['WAITUNTIL ' + parsed_action[2] + ' utc']
+                    acp_plan_lines = ['#WAITUNTIL 1, ' + parsed_action[2] + ' ; utc']
+                elif parsed_action[1] == 'sun_degrees':
+                    summary_lines = ['WAITUNTIL sun reaches ' +
+                                     parsed_action[2] + u'\N{DEGREE SIGN}' + ' alt']
+                    acp_plan_lines = ['#WAITUNTIL 1, ' + parsed_action[2] + ' ; deg sun alt']
+                else:
+                    print("***** ERROR: WAITUNTIL action" + str(parsed_action) +
+                          ' is not understood.')
+                    summary_lines, acp_plan_lines = [], []
+                raw_duration = 0  # special case: no duration but executes a delay
             elif this_type == 'quitat':
-                action.raw_duration = None  # special case: no duration but executes a delay
+                dt = an.datetime_utc_from_hhmm(parsed_action[1])
+                formatted_time = '{:%m/%d/%Y %H:%M}'.format(dt)
+                summary_lines = ['QUITAT ' + parsed_action[1] + ' utc']
+                acp_plan_lines = ['#QUITAT ' + formatted_time + ' ; utc']
+                raw_duration = 0  # special case: no duration but may terminate the plan
             elif this_type == 'afinterval':
-                action.raw_duration = 0  # but prob inserts AUTOFOCUS lines which do have duration
+                summary_lines = ['AFINTERVAL ' + parsed_action[1]]
+                acp_plan_lines = [';', '#AFINTERVAL  ' + parsed_action[1]]
+                raw_duration = 0  # but prob inserts AUTOFOCUS lines which do have duration
             elif this_type == 'autofocus':
-                action.raw_duration = 180  # includes slew & filter wheel changes
+                summary_lines = ['AUTOFOCUS']
+                acp_plan_lines = [';', '#AUTOFOCUS']
+                raw_duration = AUTOFOCUS_DURATION
             elif this_type == 'comment':
-                action.raw_duration = 0
+                summary_lines = [';' + parsed_action[1]]
+                acp_plan_lines = [';' + parsed_action[1]]
+                raw_duration = 0
+            elif this_type == 'burn':
+                summary_lines = ['BURN ' + parsed_action[1] + '  ' +
+                                 parsed_action[2] + '  ' + parsed_action[3]]
+                acp_plan_lines = [';', '#DITHER 0 ;', '#FILTER V,I ;', '#BINNING 1,1 ;',
+                                  '#COUNT 1,1 ;', '#INTERVAL 240,240 ;',
+                                  ';----> BURN for new FOV file.',
+                                  parsed_action[1] + '\t' +
+                                  parsed_action[2] + '\t' + parsed_action[3] + ' ;']
+                raw_duration = 11 * 60
             elif this_type == 'fov':
-                # TODO: do these raw durations (prob. copy in from previous code)
-                action.raw_duration = 555  # <--------- CODE THIS !!!
+                fov_name = parsed_action[1]
+                summary_lines = ['Observe ' + fov_name]
+                filters, counts, exp_times = make_obs_exposure_data(fov_name, an,
+                                                                    fov_dict, instrument)
+                sum_exp_times = sum([counts[i]*exp_times[i] for i in range(len(counts))])
+                n_exposures = sum(counts)
+                raw_duration = 75 + 15 * len(filters) + 15 * n_exposures + sum_exp_times
+                duration_comment = ' --> ' + str(round(raw_duration / 60.0, 1)) + ' min'
+                this_fov = fov_dict[fov_name]
+                acp_plan_lines = [';', '#DITHER 0 ;',
+                                  '#FILTER ' + ','.join(filters) + ' ;',
+                                  '#BINNING ' + ','.join(len(filters)*['1']) + ' ;',
+                                  '#COUNT ' + ','.join([str(c) for c in counts]) + ' ;',
+                                  '#INTERVAL ' + ','.join([str(round(e)) for e in exp_times]) +
+                                  ' ; ' + duration_comment,
+                                  ';----' + this_fov.acp_comments, fov_name + '\t' +
+                                  ra_as_hours(this_fov.ra) + '\t' + dec_as_hex(this_fov.dec)]
             elif this_type == 'stare':
-                action.raw_duration = 666  # <--------- CODE THIS !!!
+                n_repeats, fov_name = int(parsed_action[1]), parsed_action[2]
+                summary_lines = ['Stare ' + str(n_repeats) + ' repeats at ' + fov_name]
+                filters, counts, exp_times = make_obs_exposure_data(fov_name, an,
+                                                                    fov_dict, instrument)
+                sum_exp_times_per_repeat = sum([counts[i] *
+                                                exp_times[i] for i in range(len(counts))])
+                n_exposures = n_repeats * sum(counts)
+                repeat_duration = 15 * len(filters) + 15 * sum(counts) + sum_exp_times_per_repeat
+                raw_duration = 75 + n_repeats * repeat_duration
+                duration_comment = str(round(repeat_duration / 60.0, 1)) + ' min/repeat --> ' + \
+                                   str(round(raw_duration / 60.0, 1)) + ' min (raw)'
+                this_fov = fov_dict[fov_name]
+                acp_plan_lines = [';', '#REPEAT ' + str(n_repeats) + ';',
+                                  '#DITHER 0 ;',
+                                  '#FILTER ' + ','.join(filters) + ' ;',
+                                  '#BINNING ' + ','.join(len(filters)*['1']) + ' ;',
+                                  '#COUNT ' + ','.join([str(c) for c in counts]) + ' ;',
+                                  '#INTERVAL ' + ','.join([str(round(e)) for e in exp_times]) +
+                                  ' ; ' + duration_comment,
+                                  ';----' + this_fov.acp_comments, fov_name + '\t' +
+                                  ra_as_hours(this_fov.ra) + '\t' + dec_as_hex(this_fov.dec)]
             elif this_type == 'flats':
-                action.raw_duration = 777  # <--------- CODE THIS !!!
+                flats_filename = 'flats_VRI_16.txt'
+                summary_lines = ['Flats: ' + flats_filename]
+                acp_plan_lines = [';', '#SCREENFLATS ' + flats_filename + ' ;']
+                raw_duration = 777  # <--------- CODE THIS !!!
             elif this_type == 'darks':
-                action.raw_duration = 888  # <--------- CODE THIS !!!
+                summary_lines = ['dummy']
+                acp_plan_lines = ['dummy']
+                raw_duration = 888  # <--------- CODE THIS !!!
             elif this_type == 'chain':
-                action.raw_duration = 0  # though the plan chained to will have a duration
+                summary_lines = ['Chain to \'' + parsed_action[1] + '\'']
+                acp_plan_lines = [';', '#CHAIN ' + parsed_action[1]]
+                raw_duration = 0  # though the plan chained to will have a duration
             elif this_type == 'shutdown':
-                action.raw_duration = 480  # a good guess
+                summary_lines = ['SHUTDOWN']
+                acp_plan_lines = [';', '#SHUTDOWN']
+                raw_duration = 480  # a good guess
             else:
                 print('*** WARNING: insert_raw_duration() cannot understand action \'' +
-                      action.action_type + 'in plan \'' + plan.plan_id + '\'')
+                      action.action_type + 'in plan \'' + this_plan.plan_id + '\'')
+                summary_lines, acp_plan_lines, raw_duration = [], [], None
+
+            # Add warning if plan's last action is not chain (except last plan):
+            this_plan_is_not_last = (i_plan < len(plan_list)-1)
+            this_action_is_last = (i_action == len(this_plan.action_list)-1)
+            this_action_should_be_chain = this_plan_is_not_last and this_action_is_last
+            if this_action_should_be_chain and this_type != 'chain':
+                summary_lines += \
+                    ['*** WARNING: plan does not end on #CHAIN but probably should do.']
+            new_action = action._replace(summary_lines=summary_lines,
+                                         acp_plan_lines=acp_plan_lines,
+                                         raw_duration=raw_duration)
+            this_plan.action_list[i_action] = new_action
     return plan_list
+
+
+def add_timetable(plan_list, an, an_start_hhmm):
+    """
+    Takes naive "raw durations" for Actions, and calculates and inserts realistic timetable data.
+    Also inserts imputed Autofocus actions as required by #AFINTERVAL directives.
+    :param plan_list: input list of Plan namedtuples
+    :param an:
+    :param an_start_hhmm: HHMM string denoting desired UTC start time, or None for dusk twilight.
+    :return: list of Plan namedtuples with 'status', 'start_utc', and 'altitude_deg' filled in.
+    """
+    # Calculate timeline and action status, add to each action in each plan:
+    # Develop projected timeline (starting time for each action in entire night):
+    if an_start_hhmm is None:
+        an_start_dt = an.ts_dark.start
+    else:
+        an_start_dt = an.datetime_utc_from_hhmm(an_start_hhmm)
+    running_dt = an_start_dt
+    for i_plan in range(len(plan_list)):
+        this_plan = plan_list[i_plan]  # a Plan namedtuple
+
+        # Scan this plan for #WAITUNTIL or #QUITAT, which alter timelines directly,
+        #    and for #AFINTERVAL, which is likely to insert AUTOFOCUS actions:
+        quitat_dt = None  # datetime utc
+        waituntil_dt = None  # datetime utc
+        afinterval_is_active = False
+        previous_autofocus_dt = None
+        for this_action in this_plan.action_list:  # an Action namedtuple
+            if this_action.action_type == 'waituntil':
+                if this_action.parsed_action[1] == 'hhmm':
+                    waituntil_dt = an.datetime_utc_from_hhmm(this_action.parsed_action[2])
+                elif this_action.parsed_action[1] == 'sun_degrees':
+                    sun_degrees = this_action.parsed_action[2]
+                    site_obs = ephem.Observer()
+                    site_obs.lat, site_obs.lon = str(an.site.latitude), str(an.site.longitude)
+                    site_obs.elevation = an.site.elevation
+                    sun = ephem.Sun(site_obs)
+                    site_obs.horizon = str(sun_degrees)
+                    waituntil_dt = site_obs.previous_setting(sun, an.local_middark_utc) \
+                        .datetime().replace(tzinfo=timezone.utc)
+            elif this_action.action_type == 'quitat':
+                quitat_dt = an.datetime_utc_from_hhmm(this_action.parsed_action[1])
+            elif this_action.action_type == 'afinterval':
+                afinterval_is_active = True
+                afinterval_timedelta = timedelta(seconds=float(this_action.parsed_action[1]) * 60)
+
+        # Set starting time for this plan:
+        if waituntil_dt is not None:
+            if waituntil_dt > running_dt:
+                running_dt = waituntil_dt
+
+        # Now construct starting time and completion status for each action in this plan:
+        observation_is_first_in_plan = True
+        for i_action in range(len(this_plan.action_list)):
+            this_action = this_plan.action_list[i_action]  # an Action namedtuple
+            action_start_dt = running_dt
+            action_timedelta = timedelta(seconds=this_action.raw_duration)
+            action_expected_end_dt = running_dt + action_timedelta
+            n_afinterval_autofocus = 0  # default
+
+            # If AFINTERVAL in play, then make an Afinterval_autofocus namedtuple & advance time.
+            if afinterval_is_active:
+                if this_action.action_type in ['fov', 'stare', 'burn']:
+                    if observation_is_first_in_plan:
+                        action_needs_pre_afinterval_autofocus = True
+                        n_afinterval_autofocus_during_action = floor(action_timedelta /
+                                                           (afinterval_timedelta -
+                                                            timedelta(seconds=AUTOFOCUS_DURATION)))
+                        n_afinterval_autofocus = 1 + n_afinterval_autofocus_during_action
+                        action_timedelta += timedelta(seconds=
+                                                      n_afinterval_autofocus *
+                                                      AUTOFOCUS_DURATION)  # overwrite
+                        action_expected_end_dt = running_dt + action_timedelta  # overwrite
+                        previous_autofocus_dt = action_start_dt + \
+                                                n_afinterval_autofocus_during_action *\
+                                                timedelta(seconds=AUTOFOCUS_DURATION)
+                        observation_is_first_in_plan = False
+                    else:
+                        n_afinterval_autofocus_during_action = floor((action_expected_end_dt -
+                                                        previous_autofocus_dt) /
+                                                        (afinterval_timedelta -
+                                                        timedelta(seconds=AUTOFOCUS_DURATION)))
+                        n_afinterval_autofocus = n_afinterval_autofocus_during_action
+                        action_timedelta += n_afinterval_autofocus * \
+                                            timedelta(seconds=AUTOFOCUS_DURATION)
+                        action_expected_end_dt = running_dt + action_timedelta  # overwrite
+                        previous_autofocus_dt += n_afinterval_autofocus *\
+                                                 timedelta(seconds=AUTOFOCUS_DURATION)
+
+            if quitat_dt is None:
+                running_dt = action_expected_end_dt
+                if action_expected_end_dt > an.ts_nosun.end:
+                    action_new_status = 'SUN UP!'
+                elif action_expected_end_dt > an.ts_dark.end:
+                    action_new_status = 'twilight'
+                else:
+                    action_new_status = 'ok'
+            else:
+                if action_expected_end_dt > quitat_dt:
+                    if running_dt >= quitat_dt:
+                        action_new_status = 'SKIPPED'
+                    else:
+                        running_dt = quitat_dt
+                        action_new_status = 'QUITAT'
+                else:
+                    running_dt = action_expected_end_dt
+                    action_new_status = 'ok'
+            new_action = this_action._replace(n_afinterval_autofocus=n_afinterval_autofocus,
+                                              status=action_new_status,
+                                              start_utc=action_start_dt)
+            this_plan.action_list[i_action] = new_action
+        new_plan = this_plan._replace(action_list=this_plan.action_list)
+        plan_list[i_plan] = new_plan
+    return plan_list
+
+
+def add_altitudes(plan_list, an, fov_dict):
+    for i_plan in range(len(plan_list)):
+        this_plan  = plan_list[i_plan]
+        for i_action in range(len(this_plan.action_list)):
+            this_action = this_plan.action_list[i_action]
+            if this_action.action_type.lower() in ['fov', 'stare', 'burn']:
+                longitude, latitude = an.site.longitude, an.site.latitude
+                if this_action.action_type.lower() == 'stare':
+                    fov_name = this_action.parsed_action[2]
+                else:
+                    fov_name = this_action.parsed_action[1]
+                this_fov = fov_dict[fov_name]
+                target_radec = RaDec(this_fov.ra, this_fov.dec)
+                datetime_utc = this_action.start_utc
+                altitude_deg = az_alt_at_datetime_utc(longitude, latitude,
+                                                      target_radec, datetime_utc)
+                new_action = this_action._replace(altitude_deg=altitude_deg)
+                this_plan.action_list[i_action] = new_action
+        new_plan = this_plan._replace(action_list=this_plan.action_list)
+        plan_list[i_plan] = new_plan
+    return plan_list
+
+
+def make_obs_exposure_data(fov_name, an, fov_dict, instrument):
+    """
+    Calculates exposure data for ONE REPEAT of given fov.
+    :param fov_name:
+    :param an:
+    :param fov_dict:
+    :param instrument:
+    :return: tuple of equal-length lists: (filters [str], counts [int], exp_times [float])
+    """
+    this_fov = fov_dict[fov_name]
+    obs_style = this_fov.observing_style
+    filters = []
+    counts = []
+    exp_times = []
+    mags = dict()
+    for obs in this_fov.observing_list:
+        filter, mag, count = obs
+        filters.append(filter)
+        counts.append(count)
+        if obs_style.lower() in ['standard', 'monitor', 'stare']:
+            exp_time = calc_exp_time(mag, filter, instrument, this_fov)
+        elif obs_style.lower() == 'lpv':
+            if len(mags) == 0:
+                mags = this_fov.estimate_lpv_mags(an.local_middark_jd)  # dict (get on 1st obs only)
+            exp_time = calc_exp_time(mags[filter], filter, instrument, this_fov)
+        else:
+            print('****** WARNING: fov \'' + fov_name +
+                  '\' has unrecognized observing style \'' + obs_style + '\'.')
+            return None
+        exp_times.append(exp_time)
+    return filters, counts, exp_times  # types: [str], [int], [float]
 
 
 def write_acp_plans(plan_list, output_directory):
@@ -601,204 +914,64 @@ def write_acp_plans(plan_list, output_directory):
 
 def write_summary(plan_list, an, output_directory):
     # Unpack summary_lines:
-    summary_lines = ['SUMMARY for AN ' + an.an_date_string,
-                     'as generated by photrix at ' +
-                     '{:%Y-%M-%d %H:%M  UTC}'.format(datetime.now(timezone.utc)),
+    all_summary_lines = ['SUMMARY for AN ' + an.an_date_string,
+                         'as generated by photrix at ' +
+                         '{:%Y-%m-%d %H:%M  UTC}'.format(datetime.now(timezone.utc)),
                      an.acp_header_string()]
-    for this_plan in plan_list:
-        for this_action in this_plan.action_list:
-            prefix = this_action.status.rjust(8) + ' ' + time_hhmm(this_action.start_utc) + ' '
-            n_blank_prefixes = len(this_action.summary_lines) - 1
-            if this_action.action_type.lower() == 'plan':
-                line_prefixes = n_blank_prefixes * [len(prefix) * ' '] + [prefix]
+    for i_plan in range(len(plan_list)):
+        this_plan = plan_list[i_plan]
+        for i_action in range(len(this_plan.action_list)):
+            this_action = this_plan.action_list[i_action]
+            action_summary_lines = this_action.summary_lines.copy()  # modify copy, later replace.
+
+            # Make summary line prefix, and put it on correct summary line for this action:
+            status_str = this_action.status.rjust(8)
+            start_hhmm_str = time_hhmm(this_action.start_utc)
+            if this_action.status == 'SKIPPED':
+                start_hhmm_str = len(start_hhmm_str) * ' '
+
+            # Add '+' to hhmm if it actually refers to next day.
+            next_day_string = ' '  # default
+            if i_action >= 1:
+                prev_start_utc = this_plan.action_list[i_action - 1].start_utc
+            elif i_action == 0 and i_plan >= 1:
+                prev_plan = plan_list[i_plan-1]
+                prev_start_utc = prev_plan.action_list[len(prev_plan.action_list)-1].start_utc
             else:
-                line_prefixes = [prefix] + n_blank_prefixes * [len(prefix) * ' ']
-            prefixed_summary_lines = [line_prefixes[i] + this_action.summary_lines[i]
-                                      for i in range(len(this_action.summary_lines))]
-            summary_lines.extend(prefixed_summary_lines)
+                prev_start_utc = None
+            if prev_start_utc is not None:
+                if this_action.start_utc.date() > prev_start_utc.date():
+                    next_day_string = '+'
+
+            # Error if plan chains to itself, or if chained-to plan file does not exist:
+            if this_action.action_type.lower() == 'chain':
+                chain_target_filename = this_action.parsed_action[1].lower()
+                if chain_target_filename == 'plan_' + this_plan.plan_id.lower() + '.txt':
+                    action_summary_lines += ['*** ERROR: Plan attempts to chain to itself.']
+                else:
+                    target_plan_exists = False
+                    for plan in plan_list:
+                        this_plan_filename = 'plan_' + plan.plan_id.lower() + '.txt'
+                        if this_plan_filename == chain_target_filename:
+                            target_plan_exists = True
+                    if not target_plan_exists:
+                        action_summary_lines += ['*** ERROR: Chain-to plan does not exist.']
+
+            # Construct and add prefix, add to summary lines:
+            prefix = status_str + ' ' + start_hhmm_str + next_day_string + ' '
+            lines_without_prefixes = len(action_summary_lines) - 1
+            if this_action.action_type.lower() == 'plan':
+                line_prefixes = lines_without_prefixes * [len(prefix) * ' '] + [prefix]  # last line
+            else:
+                line_prefixes = [prefix] + lines_without_prefixes * [len(prefix) * ' ']  # 1st line
+            prefixed_summary_lines = [line_prefixes[i] + action_summary_lines[i]
+                                      for i in range(len(action_summary_lines))]
+            all_summary_lines.extend(prefixed_summary_lines)
     # Write Summary file:
     output_fullpath = os.path.join(output_directory, 'Summary_' + an.an_date_string + '.txt')
     print('PRINT all summary lines to ', output_fullpath)
     with open(output_fullpath, 'w') as this_file:
-        this_file.write('\n'.join(summary_lines))
-
-
-def parse_excel(excel_path='c:/24hrs/planning.xlsx', site_name='BDO_Kansas'):
-    """
-    Parses sketch Excel file and returns a list of actions constituting one night's observations.
-    :param excel_path: full path to Excel file holding all info for one night's observations.
-    :param site_name: a Site object for location of observations.
-    :return:
-    """
-    df = pd.read_excel(excel_path).dropna(axis=0, how='all').dropna(axis=1, how='all')
-    nrow = len(df)
-    ncol = len(df.columns)
-    parsed_list = []  # nested list, one element per ACP plan.
-    this_plan_id = ''
-    plan_actions = []
-    an_date_string = str(df.iloc[0, 0]).strip()
-    if 20170101 < int(an_date_string) < 20201231:  # max prob should be related to today's date.
-        an = Astronight(an_date_string, site_name)
-    else:
-        print('>>>>> STOPPING: an_date_string '" + an_date_string + "' SEEMS UNREASONABLE.')
-        return
-    print('an_date_string: ' + an_date_string)  # TEST
-
-    for irow in range(1, nrow):
-        for icol in range(ncol):
-            cell = df.iloc[irow, icol]
-            if isinstance(cell, str):
-                do_this_cell = True
-            else:
-                do_this_cell = ~np.isnan(cell)
-            if do_this_cell:
-                # Extract and process substrings from this cell:
-                cell_str_as_read = str(cell).strip()
-                cell_str_lower = cell_str_as_read.lower()
-                split_str = cell_str_as_read.split(';', maxsplit=1)
-                command = split_str[0].strip()
-                if len(split_str) > 1:
-                    comment = split_str[1].rstrip()
-                else:
-                    comment = None
-                print(cell_str_as_read)
-
-                # Determine action type and add action to plan_actions:
-                if cell_str_lower.startswith('plan'):
-                    # Close previous plan if any, probably with chain to next plan:
-                    if len(plan_actions) > 0:
-                        parsed_list.append(plan_actions)
-                        plan_actions = []
-                    # Start next plan:
-                    this_plan_id = an_date_string + '_' + command[len('plan'):].strip()
-                    plan_actions.append(('Plan', this_plan_id, comment))  # append tuple
-                elif cell_str_as_read.startswith(';'):
-                    plan_actions.append(('comment', comment))
-                elif cell_str_lower.startswith('afinterval'):
-                    minutes = command[len('afinterval'):].strip()
-                    plan_actions.append(('afinterval', minutes))
-                elif cell_str_lower.startswith('autofocus'):
-                    plan_actions.append(('autofocus',))
-                elif cell_str_lower.startswith('chill'):
-                    degrees = command[len('chill'):].strip()
-                    plan_actions.append(('chill', degrees))
-                elif cell_str_lower.startswith('quitat'):
-                    hhmm = command[len('quitat'):].strip().replace(':', '')
-                    plan_actions.append(('quitat', hhmm))
-                elif cell_str_lower.startswith('waituntil'):
-                    value = command[len('waituntil'):].strip().replace(':', '')
-                    if float(value) < 0:
-                        plan_actions.append(('waituntil', 'sun_degrees', value))
-                    else:
-                        plan_actions.append(('waituntil', 'hhmm', value))
-                elif cell_str_lower.startswith('chain'):
-                    next_plan_filename = 'plan_' + an_date_string + '_' + \
-                                         command[len('chain'):].strip().upper()
-                    if not next_plan_filename.endswith('.txt'):
-                        next_plan_filename += '.txt'
-                    plan_actions.append(('chain', next_plan_filename))
-                elif cell_str_lower.startswith('flats'):
-                    if this_plan_id[-2:].lower() != '_z':
-                        print('>>>>> WARNING: flats directive encountered but plan_id is' +
-                              this_plan_id + ', not the usual "_Z".')
-                    plan_actions.append(('flats',))
-                elif cell_str_lower.startswith('burn'):
-                    value = command[len('burn'):].strip()
-                    this_fov_name, ra_string, dec_string = tuple(value.rsplit(maxsplit=2))
-                    plan_actions.append(('burn', this_fov_name.strip(),
-                                         ra_string.strip(), dec_string.strip()))
-                elif cell_str_lower.startswith('stare'):
-                    value = command[len('stare'):].strip()
-                    repeats_string, this_fov_name = tuple(value.split(maxsplit=1))
-                    plan_actions.append(('stare', repeats_string.strip(), this_fov_name.strip()))
-                else:
-                    # Treat as a fov_name, with warning if not in fov list.
-                    fov_name = cell_str_as_read.strip()
-                    plan_actions.append(('fov', fov_name))
-                print(plan_actions[-1:])
-
-    parsed_list.append(plan_actions)  # Close out the last plan.
-    return parsed_list, an
-
-
-def make_lines_from_one_action(action, an, fov_dict, instrument):
-    """
-    :param action: one tuple from parsed_list, representing one action.
-    :param an: Astronight object.
-    :param fov_dict: FOV dictionary.
-    :param instrument: Instrument object.
-    :return: 3-tuple of summary_lines (list of strings, lines for summary file),
-                        acp_plan_lines (list of strings, >=1 lines for acp_plan now in action),
-                        duration (seconds, estimated time this action will require).
-    """
-    summary_lines = []  # default
-    acp_plan_lines = []  # default
-    raw_duration = 0  # in seconds, default
-    action_type = action[0]
-    if action_type == 'Plan':
-        # Construct first line of each.
-        if action[2] is None:
-            text = action[1]
-        else:
-            text = action[1] + ' ; ' + action[2]
-        summary_lines = ['', 55*'-', 'Begin Plan ' + text]
-        acp_plan_lines.extend(an.acp_header_string().split('\n'))
-        acp_plan_lines.extend([';'])
-        raw_duration = 0
-    elif action_type == 'chill':
-        summary_lines = ['CHILL  ' + action[1]]
-        acp_plan_lines = ['#CHILL  ' + action[1]]
-        raw_duration = 0
-    elif action_type == 'waituntil':
-        if action[1] == 'hhmm':
-            summary_lines = ['WAITUNTIL ' + action[2] + ' utc']
-            acp_plan_lines = ['#WAITUNTIL 1, ' + action[2] + ' ; utc']
-        elif action[1] == 'sun_degrees':
-            summary_lines = ['WAITUNTIL sun reaches ' + action[2] + ' degrees alt']
-            acp_plan_lines = ['#WAITUNTIL 1, ' + action[2] + ' ; deg sun alt']
-        else:
-            print("***** ERROR: WAITUNTIL action" + str(action) + ' is not understood.')
-    elif action_type == 'quitat':
-        dt = datetime_utc_from_hhmm(action[1], an)
-        formatted_time = '{:%m/%d/%Y %H:%M}'.format(dt)
-        summary_lines = ['QUITAT ' + action[1] + ' utc']
-        acp_plan_lines = ['#QUITAT ' + formatted_time + ' ; utc']
-        raw_duration = 0
-    elif action_type == 'afinterval':
-        summary_lines = ['AFINTERVAL ' + action[1]]
-        acp_plan_lines = [';', '#AFINTERVAL  ' + action[1]]
-        raw_duration = 0
-    elif action_type == 'burn':
-        summary_lines = ['BURN ' + action[1]]
-        acp_plan_lines = [';', '#DITHER 0 ;', '#FILTER V,I ;', '#BINNING 1,1 ;', '#COUNT 1,1 ;',
-                          '#INTERVAL 240,240 ;', ';----> BURN for new FOV file.',
-                          action[1] + '\t' + action[2] + '\t' + action[3] + ' ;']
-        raw_duration = 660
-    elif action_type == 'autofocus':
-        summary_lines = ['AUTOFOCUS']
-        acp_plan_lines = [';', '#AUTOFOCUS']
-        raw_duration = 160
-    elif action_type == 'chain':
-        summary_lines = ['Chain to \'' + action[1] + '\'']
-        acp_plan_lines = [';', '#CHAIN ' + action[1]]
-    elif action_type == 'flats':
-        summary_lines = ['Flats']
-        acp_plan_lines = [';', '#SCREENFLATS flats_VRI_16.txt ;']
-    elif action_type == 'comment':
-        summary_lines = acp_plan_lines = [';' + action[1]]
-    elif action_type == 'stare':
-        summary_lines = ['Stare ' + action[1] + ' repeats at ' + action[2]]
-        acp_plan_lines, raw_duration = make_plan_obs_lines(fov_name=action[2], fov_dict=fov_dict,
-                                                           an=an, instrument=instrument,
-                                                           num_repeats=int(action[1]))
-    elif action_type == 'fov':
-        summary_lines = ['Observe ' + action[1]]
-        acp_plan_lines, raw_duration = \
-            make_plan_obs_lines(fov_name=action[1], fov_dict=fov_dict, an=an,
-                                instrument=instrument, num_repeats=1)
-    else:
-        print("***** ERROR: parsed_list action " + str(action) + 'not understood.')
-    return summary_lines, acp_plan_lines, raw_duration
+        this_file.write('\n'.join(all_summary_lines))
 
 
 def make_plan_obs_lines(fov_name, fov_dict, an, instrument, num_repeats=1):
@@ -849,7 +1022,7 @@ def make_plan_obs_lines(fov_name, fov_dict, an, instrument, num_repeats=1):
 
     acp_string = [';', '#DITHER 0 ;',
                   '#FILTER ' + ','.join(filters) + ' ;',
-                  '#BINNING ' + ','.join(binnings) + ' ;',
+                  '#BINNING ' + ','.join(len(filters)*['1']) + ' ;',
                   '#COUNT ' + ','.join(counts) + ' ;',
                   '#INTERVAL ' + ','.join(exp_times) + ' ; ' + duration_comment,
                   ';----' + this_fov.acp_comments,
