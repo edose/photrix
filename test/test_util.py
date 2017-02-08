@@ -100,6 +100,21 @@ def test_dec_as_hex():
     assert util.dec_as_hex(-255) is None
 
 
+def test_degrees_as_hex():
+    assert util.degrees_as_hex(0.0) == "+00:00:00.00"
+    assert util.degrees_as_hex(0.0) == util.degrees_as_hex(0.0, 2)  # default
+    assert util.degrees_as_hex(+90.0) == "+90:00:00.00"
+    assert util.degrees_as_hex(-90.0) == "-90:00:00.00"
+    assert util.degrees_as_hex(0.001) == "+00:00:03.60"
+    assert util.degrees_as_hex(-0.001) == "-00:00:03.60"
+    assert util.degrees_as_hex(-69.125) == "-69:07:30.00"
+    assert util.degrees_as_hex(69.125) == "+69:07:30.00"
+    assert util.degrees_as_hex(90.001) == "+90:00:03.60"
+    assert util.degrees_as_hex(-90.001, 4) == "-90:00:03.6000"
+    assert util.degrees_as_hex(255) == "+255:00:00.00"
+    assert util.degrees_as_hex(-255, 6) == "-255:00:00.000000"
+
+
 def test_weighted_mean():
     assert util.weighted_mean([3], [7]) == 3
     assert util.weighted_mean([1, 3, 8], [0, 3, 9]) == 81/12

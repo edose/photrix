@@ -5,7 +5,7 @@ from collections import Counter
 from datetime import datetime, timezone
 from photrix.util import *
 
-__author__ = "Eric Dose :: Bois d'Arc Observatory, Kansas"
+__author__ = "Eric Dose :: New Mexico Mira Project, Albuquerque"
 
 FOV_DIRECTORY = "C:/Dev/Photometry/FOV/"
 VALID_FOV_OBSERVING_STYLES = ["Standard", "Stare", "Monitor", "LPV", "Burn"]

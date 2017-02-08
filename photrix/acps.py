@@ -1,6 +1,6 @@
 from photrix.user import Instrument
 
-__author__ = "Eric Dose :: Bois d'Arc Observatory, Kansas"
+__author__ = "Eric Dose :: New Mexico Mira Project, Albuquerque"
 
 
 # package photrix.ACPS: generate RTML for ACP Scheduler

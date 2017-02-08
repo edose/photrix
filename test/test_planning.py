@@ -93,8 +93,8 @@ def test_filter_df_fov_by_fov_priority():
 def test_filter_df_fov_available():
     df_all = planning.make_df_fov(fov_directory=TEST_FOV_DIRECTORY)
     # Test normal case, no moon effect.
-    df = planning.filter_df_fov_available(df_all, an_string='20160919', site_name='BDO_Kansas',
-                                          min_moon_degrees=0, remove_unobservables=False)
+    df = planning.complete_df_fov_an(df_all, an_string='20160919', site_name='BDO_Kansas',
+                                     min_moon_degrees=0, remove_unobservables=False)
     moon_deg_expected = [143, 45, 45, 45, 118, 74, 25, 88]
     seconds_expected = [8693, 22905, 22905, 22905, 4323, 35846, 28034, 0]
     # print('\n', df)
@@ -104,8 +104,8 @@ def test_filter_df_fov_available():
                 for i in range(len(df))])
 
     # Test normal case, big moon effect.
-    df = planning.filter_df_fov_available(df_all, an_string='20160919', site_name='BDO_Kansas',
-                                          min_moon_degrees=80, remove_unobservables=False)
+    df = planning.complete_df_fov_an(df_all, an_string='20160919', site_name='BDO_Kansas',
+                                     min_moon_degrees=80, remove_unobservables=False)
     moon_deg_expected = [143, 45, 45, 45, 118, 74, 25, 88]
     seconds_expected = [8693, 0, 0, 0, 4323, 4776, 0, 0]
     assert all([list(df['moon_deg'])[i] == pytest.approx(moon_deg_expected[i], abs=1)
@@ -117,8 +117,8 @@ def test_filter_df_fov_available():
     # Test case: 6 months before previous case (for opposite fov availabilities):
     df_all = planning.make_df_fov(fov_directory=TEST_FOV_DIRECTORY)
     # Test normal case, no moon effect.
-    df = planning.filter_df_fov_available(df_all, an_string='20160319', site_name='BDO_Kansas',
-                                          min_moon_degrees=65, remove_unobservables=True)
+    df = planning.complete_df_fov_an(df_all, an_string='20160319', site_name='BDO_Kansas',
+                                     min_moon_degrees=65, remove_unobservables=True)
     moon_deg_expected = [97, 70, 70, 70, 62, 86, 96]
     seconds_expected = [19589, 15848, 15878, 15878, 2165, 36198, 5120]
     assert all([list(df['moon_deg'])[i] == pytest.approx(moon_deg_expected[i], abs=1)
@@ -130,8 +130,8 @@ def test_filter_df_fov_available():
     # Test case: near-new moon (moon 3% phase, no factor at all whatever targets' sky position):
     df_all = planning.make_df_fov(fov_directory=TEST_FOV_DIRECTORY)
     # Test normal case, no moon effect.
-    df = planning.filter_df_fov_available(df_all, an_string='20161226', site_name='BDO_Kansas',
-                                          min_moon_degrees=120, remove_unobservables=True)
+    df = planning.complete_df_fov_an(df_all, an_string='20161226', site_name='BDO_Kansas',
+                                     min_moon_degrees=120, remove_unobservables=True)
     moon_deg_expected = [37, 148, 148, 148, 78, 109, 146, 118]
     seconds_expected = [4122, 40384, 40384, 40384, 19071, 45262, 29656, 27029]
     assert all([list(df['moon_deg'])[i] == pytest.approx(moon_deg_expected[i], abs=1)
@@ -143,8 +143,8 @@ def test_filter_df_fov_available():
     # Test case: moon very near at least one FOV:
     df_all = planning.make_df_fov(fov_directory=TEST_FOV_DIRECTORY)
     # Test normal case, no moon effect.
-    df = planning.filter_df_fov_available(df_all, an_string='20170113', site_name='BDO_Kansas',
-                                          min_moon_degrees=70, remove_unobservables=True)
+    df = planning.complete_df_fov_an(df_all, an_string='20170113', site_name='BDO_Kansas',
+                                     min_moon_degrees=70, remove_unobservables=True)
     # print('\n', df)
     moon_deg_expected = [100, 65, 65, 65, 83, 90]
     seconds_expected = [8423, 2674, 2674, 2674, 44439, 24531]
@@ -205,124 +205,25 @@ def test_reorder_actions():
             assert plan_list_reordered[1].action_list == plan_list_reordered[1].action_list
             # print('loop ' + str(i_trial) + ' ok.')
 
-#
-# def test_aavso_webobs():
-#     # This function tests only class AavsoWebobs, that is,
-#     #    it assumes correct operation of photrix.web.get_aavso_webobs_raw_table().
-#
-#     # Test NON-STARE case 1.
-#     # Use dataframe stored as .csv file, rather than using web now:
-#     data_fullpath = os.path.join(TEST_DATA_DIRECTORY, "ST_Tri_192.csv")
-#     df192 = pd.read_csv(data_fullpath, index_col=0)
-#     aw = planning.AavsoWebobs(dataframe=df192, filters='V', stare=False)
-#     assert len(aw.table) == len(df192)
-#     assert aw.star_id.lower() == 'ST Tri'.lower()
-#     assert aw.filters == ['V']
-#     aw_filters_lower = [f.lower() for f in aw.filters]
-#     subtable_expected = aw.table[[f.lower() in aw_filters_lower for f in aw.table['filter']]]
-#     assert list(aw.subtable['jd']) == list(subtable_expected['jd'])
-#     assert list(aw.subtable['filter']) == list(subtable_expected['filter'])
-#     assert aw.star_id == df192['target_name'].iloc[0]
-#     assert aw.stare is False
-#     irow_latest_jd = list(aw.subtable['jd']).index(max(aw.subtable['jd']))
-#     assert aw.latest_jd == subtable_expected['jd'].iloc[irow_latest_jd]
-#     assert aw.latest_mag == subtable_expected['mag'].iloc[irow_latest_jd]
-#     assert aw.latest_mag_filter == subtable_expected['filter'].iloc[irow_latest_jd]
-#
-#     # NON-STARE case 2: no data for given filter:
-#     aw = planning.AavsoWebobs(dataframe=df192, filters='not a filter', stare=False)
-#     assert aw.stare is False
-#     assert aw.latest_jd is None
-#     assert aw.latest_mag is None
-#     assert aw.latest_mag_filter is None
-#
-#     # NON-STARE case 3: two filters, both with data:
-#     aw = planning.AavsoWebobs(dataframe=df192, filters=['V', 'R'], stare=False)
-#     assert aw.stare is False
-#     assert aw.latest_jd == pytest.approx(2457373.766, abs=0.001)
-#     assert aw.latest_mag == pytest.approx(14.027, abs=0.001)
-#     assert aw.latest_mag_filter == 'V'
-#     aw = planning.AavsoWebobs(dataframe=df192, filters=['R', 'V'], stare=False)
-#     assert aw.stare is False
-#     assert aw.latest_jd == pytest.approx(2457373.766, abs=0.001)
-#     assert aw.latest_mag == pytest.approx(14.027, abs=0.001)
-#     assert aw.latest_mag_filter == 'V'
-#
-#     # NON-STARE case 4: two filters, one of which has no data:
-#     aw = planning.AavsoWebobs(dataframe=df192, filters=['not a filter', 'R'], stare=False)
-#     assert aw.stare is False
-#     assert aw.latest_jd == pytest.approx(2455190.9, abs=0.001)
-#     assert aw.latest_mag == pytest.approx(13.578, abs=0.001)  # 13.578
-#     assert aw.latest_mag_filter == 'R'
-#     aw = planning.AavsoWebobs(dataframe=df192, filters=['R', 'not a filter'], stare=False)
-#     assert aw.stare is False
-#     assert aw.latest_jd == pytest.approx(2455190.9, abs=0.001)
-#     assert aw.latest_mag == pytest.approx(13.578, abs=0.001)  # 13.578
-#     assert aw.latest_mag_filter == 'R'
-#
-#     # Test STARE cases, using df192 (but not aw) from above section:
-#     # STARE case 1: use df192 as is, V filter.
-#     aw = planning.AavsoWebobs(dataframe=df192, filters='V', stare=True)
-#     assert aw.stare is True
-#     assert aw.latest_jd == pytest.approx(2457373.766, abs=0.001)
-#     assert aw.latest_mag == pytest.approx(14.027, abs=0.001)
-#     assert aw.latest_mag_filter == 'V'
-#
-#     # STARE case 2: truncated dataframe, giving different latest observation:
-#     df192_trunc = df192[10:]  # drop latest 10 observations
-#     aw = planning.AavsoWebobs(dataframe=df192_trunc, filters='V', stare=True)
-#     assert aw.stare is True
-#     assert aw.latest_jd == pytest.approx(2457373.738, abs=0.001)
-#     assert aw.latest_mag == pytest.approx(14.013, abs=0.001)
-#     assert aw.latest_mag_filter == 'V'
-#
-#     # STARE case 3: full dataframe, different filter (which is used only in later obs):
-#     aw = planning.AavsoWebobs(dataframe=df192, filters='I', stare=True)
-#     assert aw.stare is True
-#     assert aw.latest_jd == pytest.approx(2457373.769, abs=0.001)
-#     assert aw.latest_mag == pytest.approx(13.531, abs=0.001)
-#     assert aw.latest_mag_filter == 'I'
-#
-#     # STARE case 4: full dataframe, different filter (which is used only in earlier obs):
-#     aw = planning.AavsoWebobs(dataframe=df192, filters='R', stare=True)
-#     assert aw.stare is True
-#     assert aw.latest_jd == pytest.approx(2455190.9, abs=0.001)
-#     assert aw.latest_mag == pytest.approx(13.578, abs=0.001)  # 13.578
-#     assert aw.latest_mag_filter == 'R'
-#
-#     # STARE case 5: three filters, two of which have valid stares:
-#     df192_trunc = df192[-30:]  # keep oldest 30 observations
-#     aw = planning.AavsoWebobs(dataframe=df192_trunc, filters=['V', 'R', 'not a filter'],
-#                               stare=True)
-#     assert aw.stare is True
-#     assert aw.latest_jd == pytest.approx(2455190.892, abs=0.001)
-#     assert aw.latest_mag == pytest.approx(13.867, abs=0.001)
-#     assert aw.latest_mag_filter == 'V'
-#     df192_trunc = df192[-29:]  # keep oldest 29 observations
-#     aw = planning.AavsoWebobs(dataframe=df192_trunc, filters=['V', 'R'], stare=True)
-#     assert aw.stare is True
-#     assert aw.latest_jd == pytest.approx(2455190.892, abs=0.001)
-#     assert aw.latest_mag == pytest.approx(13.619, abs=0.001)
-#     assert aw.latest_mag_filter == 'R'
-#
-#     # STARE case 6: a filter with no data (gives empty set):
-#     aw = planning.AavsoWebobs(dataframe=df192, filters='not a filter', stare=True)
-#     assert aw.stare is True
-#     assert aw.latest_jd is None
-#     assert aw.latest_mag is None
-#     assert aw.latest_mag_filter is None
-#
-#     # STARE case 7: two filters, only one has enough data for a valid stare.
-#     df192_trunc = df192[:30]  # keep latest 30 observations
-#     aw = planning.AavsoWebobs(dataframe=df192_trunc, filters=['V', 'I'], stare=True)
-#     assert aw.stare is True
-#     assert aw.latest_jd == pytest.approx(2457373.766, abs=0.001)
-#     assert aw.latest_mag == pytest.approx(14.027, abs=0.001)
-#     assert aw.latest_mag_filter == 'V'
-#
-#
-# def test_get_an_priority():
-#     fov = Fov('ST Tri')
-#     an = Astronight('20160301', 'BDO_Kansas')
-#     an_priority = planning.get_an_priority(fov=fov, an=an, stare=False)
+
+def test_class_aavso_webobs():
+    # This function tests only class AavsoWebobs, that is,
+    #    it assumes correct operation of photrix.web.get_aavso_webobs_raw_table().
+
+    # Use dataframe stored as .csv file, rather than using web now:
+    data_fullpath = os.path.join(TEST_DATA_DIRECTORY, "ST_Tri_192.csv")
+    df192 = pd.read_csv(data_fullpath, index_col=0)
+    aw = planning.AavsoWebobs(dataframe=df192)
+    assert len(aw.table) == len(df192)
+    assert aw.star_id == df192['target_name'].iloc[0]
+
+
+def test_class_local_obs_cache():
+    # First, make a small df_fov_avail.
+    df_fov = planning.make_df_fov()
+    df_fov_avail = planning.complete_df_fov_an(df_fov, an_string='20170127',
+                                               site_name='BDO_Kansas', min_moon_degrees=60,
+                                               remove_unobservables=True)
+    df_fov = df_fov.iloc[0:20]
+
 

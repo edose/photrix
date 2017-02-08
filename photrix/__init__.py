@@ -1,1 +1,1 @@
-__author__ = "Eric Dose :: Bois d'Arc Observatory, Kansas"
+__author__ = "Eric Dose :: New Mexico Mira Project, Albuquerque"

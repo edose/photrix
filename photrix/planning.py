@@ -9,12 +9,12 @@ import pandas as pd
 import ephem
 
 from photrix.util import RaDec, datetime_utc_from_jd, time_hhmm, ra_as_hours, dec_as_hex,\
-    az_alt_at_datetime_utc
+    az_alt_at_datetime_utc, degrees_as_hex, jd_from_datetime_utc
 from photrix.fov import make_fov_dict, FovError
 from photrix.user import Astronight, Instrument
 from photrix.web import get_aavso_webobs_raw_table
 
-__author__ = "Eric Dose :: Bois d'Arc Observatory, Kansas"
+__author__ = "Eric Dose :: New Mexico Mira Project, Albuquerque"
 
 FOV_DIRECTORY = "C:/Dev/Photometry/FOV/"
 FOV_OBSERVING_STYLES = ["Standard", "Stare", "Monitor", "LPV", "Burn"]
@@ -22,6 +22,8 @@ MIN_AVAILABLE_SECONDS = 900
 MIN_MOON_DEGREES_DEFAULT = 45
 FITS_DIRECTORY = "J:/Astro/Images"
 DEFAULT_PLAN_DIRECTORY = 'C:/Astro/Plans'
+DT_FMT = '%Y-%m-%d %H:%M:%S.%f%z'  # kludge around py inconsistency in datetime formats
+
 
 PHOTRIX_ROOT_DIRECTORY = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LOCAL_OBS_CACHE_FULLPATH = os.path.join(PHOTRIX_ROOT_DIRECTORY, "local_obs_cache.csv")
@@ -29,6 +31,7 @@ LOCAL_OBS_CACHE_FULLPATH = os.path.join(PHOTRIX_ROOT_DIRECTORY, "local_obs_cache
 AAVSO_WEBOBS_ROWS_TO_GET = 100
 MIN_ROWS_ONE_STARE = 10
 MAX_DAYS_ONE_STARE = 0.5
+UPDATE_TOLERANCE_DAYS = 0.25
 
 ABSOLUTE_MAX_EXPOSURE_TIME = 600  # seconds
 AUTOFOCUS_DURATION = 180  # seconds, includes slew & filter wheel changes
@@ -102,8 +105,8 @@ def filter_df_fov_by_fov_priority(df_fov, min_fov_priority=None, include_std_fov
         return df_fov[fov_priority_ok]
 
 
-def filter_df_fov_available(df_fov, an_string=None, site_name="BDO_Kansas",
-                            min_moon_degrees=MIN_MOON_DEGREES_DEFAULT, remove_unobservables=True):
+def complete_df_fov_an(df_fov, an_string=None, site_name="BDO_Kansas",
+                       min_moon_degrees=MIN_MOON_DEGREES_DEFAULT, remove_unobservables=True):
     if an_string is None or site_name == "":
         return df_fov
     an = Astronight(an_string, site_name)
@@ -116,8 +119,10 @@ def filter_df_fov_available(df_fov, an_string=None, site_name="BDO_Kansas",
     df_fov['moon_deg'] = 0.0  # "
     df_fov['start'] = an.local_middark_utc  # dummy value to be overwritten later.
     df_fov['end'] = df_fov['start']  # "
+    df_fov['mid'] = df_fov['start']  # "
     df_fov['seconds'] = 0.0  # "
     df_fov['available'] = ' - '.join(2*[4*' '])  # "
+    df_fov['an_priority'] = 0.0  # dummy value
 
     for ind in df_fov.index:
         ts_obs = an.ts_observable(df_fov.loc[ind, 'radec'], min_alt=an.site.min_altitude,
@@ -125,22 +130,30 @@ def filter_df_fov_available(df_fov, an_string=None, site_name="BDO_Kansas",
         df_fov.loc[ind, 'moon_deg'] = df_fov.loc[ind, 'radec'].degrees_from(an.moon_radec)
         df_fov.loc[ind, 'start'] = ts_obs.start
         df_fov.loc[ind, 'end'] = ts_obs.end
+        df_fov.loc[ind, 'mid'] = ts_obs.midpoint
         df_fov.loc[ind, 'seconds'] = ts_obs.seconds
         if ts_obs.seconds > 0:
             df_fov.loc[ind, 'available'] = ' - '.join([time_hhmm(ts_obs.start),
                                                        time_hhmm(ts_obs.end)])
+    loc = LocalObsCache()
+    loc.update_fov_entries(fov_list=df_fov['fov_name'])
+    for ind in df_fov.index:
+        df_fov.loc[ind, 'an_priority'] = loc.calc_an_priority(df_fov.loc[ind, 'fov_name'], an)
+    # df_fov = df_fov[df_fov['an_priority'] <= 0.0]
+
     if remove_unobservables:
         # df_fov = df_fov[(df_fov['seconds'] >= MIN_AVAILABLE_SECONDS) &
         #                 (df_fov['moon_deg'] >= min_moon_degrees)]
         df_fov = df_fov[(df_fov['seconds'] >= MIN_AVAILABLE_SECONDS)]
-    return df_fov
+
+    return df_fov.sort_values(by=['midpoint', 'an_priority'])
 
 
 class LocalObsCache:
     """
     Holds a cache dataframe of most recent relevant observations for ~all FOVs.
     Can hold only one dataframe row per fov (however many filters constitute a previous obs).
-    Will go to AAVSO webobs to refresh a database row if fov's main target looks too old.
+    Will query AAVSO webobs site to refresh a database row if fov's main target looks too old.
     Cache dataframe columns are:
         fov_name [string]
         main_target [string]
@@ -151,110 +164,166 @@ class LocalObsCache:
         obs_mag_filter: filter in which obs_mag was measured [string]
     """
     def __init__(self, fov_dict=None):
-        # Read in local cache if it exists, create an empty cache df.
+        # Read in local cache if it exists.
         if os.path.isfile(LOCAL_OBS_CACHE_FULLPATH):
-            self.df_cache = pd.read_csv(LOCAL_OBS_CACHE_FULLPATH, index_col=0)
+            self.df_cache = self._read_cache_from_csv()
+            need_to_create_empty_cache = self.df_cache is None
         else:
-            #  Create *empty* Dataframe with correct dtypes (incl. timezone-aware datetimes):
-            self.df_cache = pd.DataFrame({'fov_name': ['dummy'],
-                                          'main_target': ['dummy'],
-                                          'obs_style': ['dummy'],
-                                          'cache_datetime': [datetime.now(timezone.utc)],
-                                          'obs_datetime': [datetime.now(timezone.utc)],
-                                          'obs_mag': [0.0],
-                                          'obs_mag_filter': ['dummy']},
-                                         columns=['fov_name', 'main_target', 'obs_style',
-                                                  'cache_datetime', 'obs_datetime',
-                                                  'obs_mag', 'obs_mag_filter'])[:0]
-            self._write_to_csv()
+            need_to_create_empty_cache = True
+        if need_to_create_empty_cache:
+            #  Create *empty* dataframe with dtypes (incl. utc datetimes), write to cache file:
+            # self.df_cache = pd.DataFrame({'fov_name': ['dummy'],
+            #                               'main_target': ['dummy'],
+            #                               'obs_style': ['dummy'],
+            #                               'cache_datetime': [datetime.now(timezone.utc)],
+            #                               'obs_datetime': [datetime.now(timezone.utc)],
+            #                               'obs_mag': [0.0],
+            #                               'obs_mag_filter': ['dummy']},
+            #                              columns=['fov_name', 'main_target', 'obs_style',
+            #                                       'cache_datetime', 'obs_datetime',
+            #                                       'obs_mag', 'obs_mag_filter'])[:0]
+            #
+            self.df_cache = pd.DataFrame.from_items([('fov_name', ['dummy']),
+                                            ('main_target', ['dummy']),
+                                            ('obs_style', ['dummy']),
+                                            ('cache_datetime', [datetime.now(timezone.utc)]),
+                                            ('obs_datetime', [datetime.now(timezone.utc)]),
+                                            ('obs_mag', [0.0]),
+                                            ('obs_mag_filter', ['dummy'])])[:0]
+            self.df_cache.index.name = 'row_index'
+            csv_fullpath = self._write_cache_to_csv()  # empty cache to csv
+            print('LocalObsCache: wrote new, empty cache file to ' + csv_fullpath)
         if fov_dict is None:
             self.fov_dict = make_fov_dict()
+            print('LocalObsCache: made new fov_dict with ' +
+                  str(len(self.fov_dict)) + ' fov entries.')
         else:
             self.fov_dict = fov_dict
 
-    def update_fov_entry(self, fov_name, df_fov_avail, update_tolerance=0.25):
+    def update_one_fov_entry(self, fov_name, write_csv=False):
         """
-        Updates cache's entry for one fov: this class's workhorse method.
+        This class's engine. Updates cache's entry for one fov, if entry is too aged.
+        :param write_csv:
+        :param fov_name: [string]
+        :return: if cache was updated, datetime (UTC) of new obs; else None.
         """
         this_fov = self.fov_dict.get(fov_name)  # Fov object for this fov_name.
         if this_fov is None:
             raise FovError
         main_target = this_fov.main_target
-        self._curate_df_cache(fov_name, main_target)
+        # self._curate_df_cache(fov_name, main_target)
 
-        # Skip update of this fov if it's not in the list of fovs available this Astronight.
-        fov_available = fov_name.lower() in df_fov_avail['fov_name'].str.lower()
-        if not fov_available:
-            return
-
-        row_pre_exists = fov_name.lower() not in self.df_cache['fov_name'].str.lower()
+        # Skip update of this fov if its gap score is surely zero (due to very recent observations).
+        row_pre_exists = fov_name.lower() in list(self.df_cache['fov_name'].str.lower())
         if row_pre_exists:
             now = datetime.now(timezone.utc)
-            update_age = (now - self.df_cache.loc[fov_name, 'update_datetime']).total_seconds() \
+            update_age = (now - self.df_cache.loc[fov_name, 'cache_datetime']).total_seconds() \
                          / (24*3600)
-            entry_out_of_date = update_age > update_tolerance
+            entry_out_of_date = update_age > UPDATE_TOLERANCE_DAYS
             obs_age = (now - self.df_cache.loc[fov_name, 'obs_datetime']).total_seconds() \
                       / (24*3600)
             gap_score_surely_zero = obs_age < this_fov.gap_score_days[0]
         else:
             entry_out_of_date = True
             gap_score_surely_zero = False
-
         if gap_score_surely_zero:
-            return
+            return None
 
+        # Update from web if needed, now that we know fov is relevant.
         if entry_out_of_date:
-            recent_observations = AavsoWebobs(star_id=main_target)
             obs_style = this_fov.observing_style
             obs_style_lower = obs_style.lower()
-            target_type_lower = this_fov.main_target.lower()
-            latest_obs_data = None  # default if no matches.
-            if (obs_style_lower, target_type_lower) == ('lpv', 'mira'):
-                latest_obs_data = self._latest_single_obs(fov_name, obs_style, recent_observations,
-                                                          allow_filters=['V'])
-            if (obs_style_lower, target_type_lower) == ('lpv', 'lpv'):
-                latest_obs_data = self._latest_single_obs(fov_name, obs_style, recent_observations,
-                                                          allow_filters=['V', 'R'])
-            if obs_style_lower == 'monitor' and target_type_lower != 'astrometric':
-                latest_obs_data = self._latest_single_obs(fov_name, obs_style, recent_observations,
-                                                          allow_filters=['V', 'R'])
             if obs_style_lower == 'stare':
-                latest_obs_data = self._latest_stare_obs(fov_name, obs_style, recent_observations,
-                                                         allow_filters=['V', 'R'])
-            if latest_obs_data is not None:
+                num_obs = 200
+            else:
+                num_obs = 100
+            recent_observations = AavsoWebobs(star_id=main_target, num_obs=num_obs)  # from AAVSO
+            target_type_lower = this_fov.target_type.lower()
+            latest_obs_df = None  # default if no matches.
+            if (obs_style_lower, target_type_lower) == ('lpv', 'mira'):
+                latest_obs_df = self._latest_single_obs(fov_name, obs_style, recent_observations,
+                                                        allow_filters=['V'])
+            if (obs_style_lower, target_type_lower) == ('lpv', 'lpv'):
+                latest_obs_df = self._latest_single_obs(fov_name, obs_style, recent_observations,
+                                                        allow_filters=['V', 'R'])
+            if obs_style_lower == 'monitor' and target_type_lower != 'astrometric':
+                latest_obs_df = self._latest_single_obs(fov_name, obs_style, recent_observations,
+                                                        allow_filters=['V', 'R'])
+            if obs_style_lower == 'stare':
+                latest_obs_df = self._latest_stare_obs(fov_name, obs_style, recent_observations,
+                                                       allow_filters=['V', 'R'])
+            if latest_obs_df is not None:  # kludge to evade pandas bug on appending empty df.
                 if row_pre_exists:
-                    self.df_cache.loc[fov_name] = latest_obs_data
+                    self.df_cache = latest_obs_df.combine_first(self.df_cache)  # overwrites.
                 else:
-                    self.df_cache = self.df_cache.append(latest_obs_data, ignore_index=True)
-                    self.df_cache.index = self.df_cache['fov_name']
+                    if len(self.df_cache) >= 1:
+                        self.df_cache = self.df_cache.append(latest_obs_df)
+                    else:
+                        self.df_cache = latest_obs_df.copy()
+                if write_csv:
+                    self._write_cache_to_csv()
+                return latest_obs_df.iloc[0].loc['obs_datetime']  # obs datetime, to signal OK.
+        return None  # because no update was performed.
 
-    def update_all_available_fov_entries(self, df_fov, days_tolerance=0.25):
-        #  For each fov in fov_list, call update_fov_entry().
-        fov_list = list(set(df_fov['fov_name']))
+    def update_fov_entries(self, fov_list):
+        """
+        For each fov available this night (in df_fov_list), update the cache.
+        :param fov_list: list of fovs (typically fovs available this night, as df_fov['fov_name']).
+        :return: number of fovs updated (fn effect is to update this class's cache dataframe.
+        """
+        n_fovs_updated = 0
         for fov_name in fov_list:
-            self.update_fov_entry(fov_name, df_fov, days_tolerance)
+            obs_datetime_utc = self.update_one_fov_entry(fov_name)
+            if obs_datetime_utc is not None:
+                n_fovs_updated += 1
+        return n_fovs_updated
 
-    @staticmethod
-    def _latest_single_obs(fov_name, obs_style, recent_observations, allow_filters):
+    def _latest_single_obs(self, fov_name, obs_style, recent_observations, allow_filters):
+        """
+        Takes a AavsoWebObs object and returns a pandas dataframe ready for inclusion
+           in LocalCacheObs dataframe df_cache. Single-observation case (not stare).
+        :param fov_name: [string]
+        :param obs_style: [string] ('Monitor' or 'LPV')
+        :param recent_observations: recent observations for fov_name [AavsoWebObs object].
+        :param allow_filters: list of filters [string] to include in finding latest observation.
+        :return: dataframe of relevant data about latest stare observation for this fov_name.
+        """
+        latest_obs_df = None
         allow_filters_lower = [f.lower() for f in allow_filters]
         table_filters_lower = recent_observations.table['filter'].str.lower()
         rows_to_keep = [f.lower() in allow_filters_lower for f in table_filters_lower]
         if sum(rows_to_keep) <= 0:
             return None
         latest_obs = recent_observations.table[rows_to_keep].nlargest(1, 'jd').iloc[0]
-        return {'fov_name': [fov_name],
-                'main_target': [latest_obs.target_name],
-                'obs_style': [obs_style],
-                'update_datetime': [datetime.now(timezone.utc)],
-                'obs_datetime': [datetime_utc_from_jd(latest_obs.jd)],
-                'obs_mag': [latest_obs.mag],
-                'obs_mag_filter': [latest_obs.filter]}
+        latest_obs_df = pd.DataFrame.from_items([
+            ('fov_name', [fov_name]),
+            ('main_target', [self.fov_dict[fov_name].main_target]),
+            ('obs_style', [obs_style]),
+            ('cache_datetime', [datetime.now(timezone.utc)]),
+            ('obs_datetime', [datetime_utc_from_jd(latest_obs.jd)]),
+            ('obs_mag', [latest_obs.mag]),
+            ('obs_mag_filter', [latest_obs.loc['filter']])])
+        for column_name in ['cache_datetime', 'obs_datetime']:
+            latest_obs_df[column_name] = [x.to_pydatetime() for x in latest_obs_df[column_name]]
+        latest_obs_df.index = latest_obs_df['fov_name'].copy()
+        latest_obs_df.index.name = 'row_index'
+        return latest_obs_df
 
-    @staticmethod
-    def _latest_stare_obs(fov_name, obs_style, recent_observations, allow_filters):
-        latest_obs_data = None
+    def _latest_stare_obs(self, fov_name, obs_style, recent_observations, allow_filters):
+        """
+        Takes a AavsoWebObs object and returns a pandas dataframe ready for inclusion
+            in LocalCacheObs dataframe df_cache. Stare case (multiple observations in one night),
+            typically for eclipsers.
+        :param fov_name: [string]
+        :param obs_style: [string] (almost certainly == 'stare')
+        :param recent_observations: recent observations for fov_name [AavsoWebObs object].
+        :param allow_filters: list of filters [string] to include in finding latest observation.
+        :return: dataframe of relevant data about latest stare observation for this fov_name.
+        """
+        # Find latest qualifying stare in each filter, return latest observation of latest stare.
+        latest_stare_obs_df = None
         for this_filter in allow_filters:
-            obs_already_found_this_filter = False
+            stare_already_found_this_filter = False
             this_filter_lower = this_filter.lower()
             table_filters_lower = recent_observations.table['filter'].str.lower()
             rows_to_keep = [f.lower() == this_filter_lower for f in table_filters_lower]
@@ -263,35 +332,83 @@ class LocalObsCache:
             num_tests = len(table_this_filter) - MIN_ROWS_ONE_STARE + 1
             if num_tests >= 1:
                 for first_test_irow in range(0, num_tests):
-                    if not obs_already_found_this_filter:
+                    if not stare_already_found_this_filter:
                         test_latest_jd = table_this_filter['jd']\
                             .iloc[first_test_irow]
                         test_earliest_jd = table_this_filter['jd']\
                             .iloc[first_test_irow + MIN_ROWS_ONE_STARE - 1]
-                        if test_latest_jd - test_earliest_jd <= MAX_DAYS_ONE_STARE:
-                            obs_already_found_this_filter = True
-                            replace_latest_obs_data = False  # default
-                            if latest_obs_data is None:
-                                replace_latest_obs_data = True
-                            else:
-                                if test_latest_jd > latest_obs_data['jd']:
-                                    replace_latest_obs_data = True
-                            if replace_latest_obs_data:
-                                latest_obs = table_this_filter.iloc[first_test_irow]
-                                latest_obs_data = \
-                                    {'fov_name': [fov_name],
-                                     'main_target': [latest_obs.target_name],
-                                     'obs_style': [obs_style],
-                                     'update_datetime': [datetime.now(timezone.utc)],
-                                     'obs_datetime': [datetime_utc_from_jd(latest_obs.jd)],
-                                     'obs_mag': [latest_obs.mag],
-                                     'obs_mag_filter': [latest_obs.filter]}
-        return latest_obs_data
 
-    def _write_to_csv(self):
-        self.df_cache.to_csv(LOCAL_OBS_CACHE_FULLPATH, index=True)
+                        if test_latest_jd - test_earliest_jd <= MAX_DAYS_ONE_STARE:
+                            stare_already_found_this_filter = True
+                            if latest_stare_obs_df is None:
+                                need_to_replace = True
+                            else:
+                                candidate_datetime = datetime_utc_from_jd(test_latest_jd)
+                                existing_datetime = latest_stare_obs_df.loc[0, 'obs_datetime']
+                                need_to_replace = (candidate_datetime > existing_datetime)
+
+                            if need_to_replace:
+                                latest_stare_obs = table_this_filter.iloc[first_test_irow]
+                                latest_stare_obs_df = pd.DataFrame.from_items([
+                                     ('fov_name', [fov_name]),
+                                     ('main_target', [self.fov_dict[fov_name].main_target]),
+                                     ('obs_style', [obs_style]),
+                                     ('cache_datetime', [datetime.now(timezone.utc)]),
+                                     ('obs_datetime', [datetime_utc_from_jd(latest_stare_obs.jd)]),
+                                     ('obs_mag', [latest_stare_obs.mag]),
+                                     ('obs_mag_filter', [latest_stare_obs.loc['filter']])])
+                                for column_name in ['cache_datetime', 'obs_datetime']:
+                                    latest_stare_obs_df[column_name] = \
+                                        [x.to_pydatetime()
+                                         for x in latest_stare_obs_df[column_name]]
+                                latest_stare_obs_df.index = latest_stare_obs_df['fov_name'].copy()
+                                latest_stare_obs_df.index.name = 'row_index'
+        return latest_stare_obs_df
+
+    @staticmethod
+    def _read_cache_from_csv():
+        cache = pd.read_csv(LOCAL_OBS_CACHE_FULLPATH, index_col=0)
+        if len(cache) <= 0:
+            return None
+        for column_name in ['cache_datetime', 'obs_datetime']:
+            if column_name not in cache.columns:
+                return None
+            cache[column_name] = [datetime.strptime(s, '%Y-%m-%d %H:%M:%S.%f%z')
+                                  for s in cache[column_name]]
+            cache[column_name] = [s.to_pydatetime() for s in cache[column_name]]
+        return cache
+
+    def _write_cache_to_csv(self):
+        # Very specifically writes datetimes in format: '2017-02-07 03:34:45.786374+0000'
+        self.df_cache.to_csv(LOCAL_OBS_CACHE_FULLPATH, index=True, date_format=DT_FMT)
+        return LOCAL_OBS_CACHE_FULLPATH
+
+    def calc_an_priority(self, fov_name, an):
+        """
+        Calculates astronight priority for one fov.
+        :param fov_name:
+        :param an: Astronight object for the night in question.
+        :return: an_priority, from fov_priority and age of most recent obs.
+        """
+        # TODO: update and test.
+        this_fov = self.fov_dict[fov_name]
+        if this_fov.priority <= 0:
+            return 0
+        latest_obs = self.df_cache.loc[fov_name]
+        if latest_obs is None:
+            return 2 * this_fov.priority  # the maximum possible if no age accessible.
+        jd_latest_obs = jd_from_datetime_utc(latest_obs.obs_datetime)
+        age_days = an.local_middark_jd - jd_latest_obs
+        return this_fov.calc_priority_score(age_days)
 
     def _curate_df_cache(self, fov_name, main_target):
+        """
+        Cull damaged records from self.df_cache.
+           *** Deactivated 2017-02-07 pending manual debugging. ***
+        :param fov_name:
+        :param main_target:
+        :return: [nothing]
+        """
         # Curation: If main_target is corrupt, delete all cache lines for that fov.
         if main_target is None:
             rows_to_delete = self.df_cache['fov_name'].str.lower() == fov_name.lower()
@@ -300,48 +417,48 @@ class LocalObsCache:
 
         # Curation: If fov and target names don't match, delete all such fov and target lines.
         rows_with_wrong_target = \
-            self.df_cache['fov_name'].str.lower() == fov_name.lower() and \
-            self.df_cache['main_target'].str.lower() != main_target.lower()
+            (self.df_cache['fov_name'].str.lower() == fov_name.lower()) & \
+            (self.df_cache['main_target'].str.lower() != main_target.lower())
         rows_to_keep = [not row for row in rows_with_wrong_target]
         self.df_cache = self.df_cache[rows_to_keep]
         rows_with_wrong_fov = \
-            self.df_cache['main_target'].str.lower() == main_target.lower() and \
-            self.df_cache['fov_name'].str.lower() != self.this_fov_name.lower()
+            (self.df_cache['main_target'].str.lower() == main_target.lower()) & \
+            (self.df_cache['fov_name'].str.lower() != fov_name.lower())
         rows_to_keep = [not row for row in rows_with_wrong_fov]
         self.df_cache = self.df_cache[rows_to_keep]
 
 
 class AavsoWebobs:
     """
-    Holds dataframe for one star from AAVSO's webobs database.
+    Simple class: one object:one star. Holds dataframe for one star from AAVSO's webobs database.
     Also updates local cache file (to unneeded future calls to webobs).
     For Observation Styles: LPV, Monitor, and Stare; no need for Standard or Burn.
     Usage: table = AavsoWebobs("AU Aur") [for one obs/night], or
            table = AavsoWebobs("ST Tri", stare=True) [for at least 10 obs/night in filter].
     """
-    def __init__(self, star_id=None, dataframe=None):
+    def __init__(self, star_id=None, num_obs=AAVSO_WEBOBS_ROWS_TO_GET, dataframe=None):
         if dataframe is not None:
             self.table = dataframe  # typically for testing only.
             self.star_id = self.table['target_name'].iloc[0]
         else:
-            self.table = get_aavso_webobs_raw_table(star_id,
-                                                    AAVSO_WEBOBS_ROWS_TO_GET)  # production case
+            self.table = get_aavso_webobs_raw_table(star_id, num_obs=num_obs)  # normal case
             self.star_id = star_id
 
 
 def get_an_priority(fov, an, local_obs_cache):
+    #TODO: outdated...need to update for local_obs_cache (or other source of obs age).
     if fov.priority <= 0:
         return 0
     obs = local_obs_cache[fov.fov_name]
     if obs is None:
-        return 2 * fov.priority  # the maximum possible
+        return 2 * fov.priority  # the maximum possible if no age accessible.
     jd_obs = obs['jd']
     days = an.local_middark_jd - jd_obs
     return fov.calc_priority_score(days)
 
 
-# def get_local_aavso_reports(report_dir=None, earliest_an=None):
-#     pass
+def get_local_aavso_reports(report_dir=None, earliest_an=None):
+    pass
     #     report_dict = {}
     #     for root, dirs, files in os.walk('J:/Astro/Images/C14/'):
     #         if root.endswith("Photometry"):
@@ -357,15 +474,17 @@ def get_an_priority(fov, an, local_obs_cache):
     #
     #
     #
-    # def get_local_obs_age_dict(fov_dict=None, report_dir=None, target_an=None, limit_days=366):
-    #     # TODO: finish writing get_local_obs_age_dict()
-    #     """
-    #     report_dir: directory in which all relevant AAVSO reports reside, as
-    #       "J:/Astro/2016/Photometry".
-    #     target_an: target astronight from which to count days, as "20151216".
-    #     limit_days: days into the past to look up old AAVSO reports.
-    #     Returns dict of (fov_name, days_since_last_local_obs).
-    #     """
+
+def get_local_obs_age_dict(fov_dict=None, report_dir=None, target_an=None, limit_days=366):
+        # TODO: finish writing get_local_obs_age_dict()
+        """
+        report_dir: directory in which all relevant AAVSO reports reside, as
+          "J:/Astro/2016/Photometry".
+        target_an: target astronight from which to count days, as "20151216".
+        limit_days: days into the past to look up old AAVSO reports.
+        Returns dict of (fov_name, days_since_last_local_obs).
+        """
+        pass
     #     if report_dir is not None and limit_days >= 1:
     #         fov_age_dict = {name: None for name in fov_dict.keys()}  # empty dict to start
     #         #  TODO: get report_list <- [report_text] for every eligible AAVSO report,
@@ -847,11 +966,12 @@ def add_altitudes(plan_list, an, fov_dict):
                 else:
                     fov_name = this_action.parsed_action[1]
                 this_fov = fov_dict[fov_name]
+                longitude_hex, latitude_hex = degrees_as_hex(longitude), degrees_as_hex(latitude)
                 target_radec = RaDec(this_fov.ra, this_fov.dec)
                 datetime_utc = this_action.start_utc
-                altitude_deg = az_alt_at_datetime_utc(longitude, latitude,
+                az_deg, alt_deg = az_alt_at_datetime_utc(longitude_hex, latitude_hex,
                                                       target_radec, datetime_utc)
-                new_action = this_action._replace(altitude_deg=altitude_deg)
+                new_action = this_action._replace(altitude_deg=alt_deg)
                 this_plan.action_list[i_action] = new_action
         new_plan = this_plan._replace(action_list=this_plan.action_list)
         plan_list[i_plan] = new_plan
@@ -924,7 +1044,7 @@ def write_summary(plan_list, an, output_directory):
             this_action = this_plan.action_list[i_action]
             action_summary_lines = this_action.summary_lines.copy()  # modify copy, later replace.
 
-            # Make summary line prefix, and put it on correct summary line for this action:
+            # Make summary line prefix parts:
             status_str = this_action.status.rjust(8)
             start_hhmm_str = time_hhmm(this_action.start_utc)
             if this_action.status == 'SKIPPED':
@@ -943,6 +1063,12 @@ def write_summary(plan_list, an, output_directory):
                 if this_action.start_utc.date() > prev_start_utc.date():
                     next_day_string = '+'
 
+            # Make degrees altitude prefix part.
+            if this_action.action_type.lower() in ['fov', 'stare', 'burn']:
+                alt_string = '{:2d}'.format(int(round(this_action.altitude_deg)))
+            else:
+                alt_string = '  '
+
             # Error if plan chains to itself, or if chained-to plan file does not exist:
             if this_action.action_type.lower() == 'chain':
                 chain_target_filename = this_action.parsed_action[1].lower()
@@ -958,7 +1084,7 @@ def write_summary(plan_list, an, output_directory):
                         action_summary_lines += ['*** ERROR: Chain-to plan does not exist.']
 
             # Construct and add prefix, add to summary lines:
-            prefix = status_str + ' ' + start_hhmm_str + next_day_string + ' '
+            prefix = status_str + ' ' + start_hhmm_str + next_day_string + ' ' + alt_string + ' '
             lines_without_prefixes = len(action_summary_lines) - 1
             if this_action.action_type.lower() == 'plan':
                 line_prefixes = lines_without_prefixes * [len(prefix) * ' '] + [prefix]  # last line

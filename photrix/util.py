@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 import math
 import ephem
 
-__author__ = "Eric Dose :: Bois d'Arc Observatory, Kansas"
+__author__ = "Eric Dose :: New Mexico Mira Project, Albuquerque"
 
 
 class Timespan:
@@ -214,18 +214,28 @@ def dec_as_hex(dec_degrees):
     """
     if (dec_degrees < -90) | (dec_degrees > +90):
         return None
-    if dec_degrees < 0:
-        sign_str = "-"
+    dec_string = degrees_as_hex(dec_degrees, seconds_decimal_places=2)
+    return dec_string
+
+
+def degrees_as_hex(angle_degrees, seconds_decimal_places=2):
+    """
+    :param angle_degrees: any angle as degrees
+    :return: same angle in hex notation, unbounded.
+    """
+    if angle_degrees < 0:
+        sign = "-"
     else:
-        sign_str = "+"
-    abs_degrees = abs(dec_degrees)
+        sign = "+"
+    abs_degrees = abs(angle_degrees)
     milliseconds = round(abs_degrees * 3600 * 1000)
     degrees, remainder = divmod(milliseconds, 3600 * 1000)
     minutes, remainder = divmod(remainder, 60 * 1000)
     seconds = round(remainder / 1000, 2)
-    format_string = "{0}{1:02d}:{2:02d}:{3:05.2f}"
-    dec_str = format_string.format(sign_str, int(degrees), int(minutes), seconds)
-    return dec_str
+    format_string = '{0}{1:02d}:{2:02d}:{3:0' + str(int(seconds_decimal_places)+3) + \
+                    '.0' + str(int(seconds_decimal_places)) + 'f}'
+    hex_string = format_string.format(sign, int(degrees), int(minutes), seconds)
+    return hex_string
 
 
 def weighted_mean(values, weights, return_stdev=False):

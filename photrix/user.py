@@ -6,7 +6,7 @@ import ephem
 from copy import copy
 from photrix.util import Timespan, RaDec, hex_degrees_as_degrees
 
-__author__ = "Eric Dose :: Bois d'Arc Observatory, Kansas"
+__author__ = "Eric Dose :: New Mexico Mira Project, Albuquerque"
 
 PHOTRIX_ROOT_DIRECTORY = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SITE_DIRECTORY = os.path.join(PHOTRIX_ROOT_DIRECTORY, "site")
