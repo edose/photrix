@@ -17,7 +17,7 @@ MIN_MOON_DIST = 45  # in degrees
 class Site:
     """
     Object: holds site info (no instrument or AN info), read from a json site file.
-    Usage: site = Site("BDO_Kansas")
+    Usage: site = Site("DSW")
     Attributes (string unless otherwise noted):
         .name : site's name
         .filename : json file name
@@ -139,10 +139,10 @@ class Astronight:
     def __init__(self, an_date_string, site_name):
         """
         Object: relevant info specific to one observing night at one site.
-        Usage: an = Astronight("20160102", "BDO_Kansas")
+        Usage: an = Astronight("20160102", "DSW")
         Attributes (string unless otherwise noted):
             .an_date_string : as "20161011"
-            .site_name : as "BDO_Kansas"
+            .site_name : as "DSW"
             .site : this site (Site object)
             ._observer : this site and this astronight (ephem.Observer object)
             .ts_dark : Timespan(twilight_dusk, twilight_dawn) for this astronight.
@@ -296,6 +296,33 @@ class Astronight:
         Usage: ts = an.when_FOV_observable(FOV, min_alt, min_moon_dist)
         """
         return self.ts_observable(RaDec(fov.ra, fov.dec), min_alt, min_moon_dist)
+
+    def transit(self, target_radec):
+        """
+        Returns datetime object containing RaDec's transit closest to this Astronight's mid-dark.
+        :param target_radec: sky location (RaDec object)
+        :return: closest transit of this RA/Dec (datetime UTC)
+        """
+        obs = ephem.Observer()  # for local use.
+        obs.lat, obs.lon = str(self.site.latitude), str(self.site.longitude)
+        obs.elevation = self.site.elevation
+        obs.horizon = '0'  # not needed
+        obs.date = self.local_middark_utc
+        target_ephem = ephem.FixedBody()  # so named to suggest restricting its use to ephem.
+        target_ephem._epoch = '2000'
+        target_ephem._ra, target_ephem._dec = target_radec.as_hex  # text: RA in hours, Dec in deg
+        target_ephem.compute(obs)
+        prev_transit = obs.previous_transit(target_ephem,
+                       start=self.local_middark_utc).datetime().replace(tzinfo=timezone.utc)
+        next_transit = obs.next_transit(target_ephem,
+                       start=self.local_middark_utc).datetime().replace(tzinfo=timezone.utc)
+        prev_delta = abs((prev_transit - self.local_middark_utc).total_seconds())
+        next_delta = abs((next_transit - self.local_middark_utc).total_seconds())
+        if prev_delta < next_delta:
+            best_transit = prev_transit
+        else:
+            best_transit = next_transit
+        return best_transit
 
     def datetime_utc_from_hhmm(self, hhmm_string):
         mid_dark = self.local_middark_utc

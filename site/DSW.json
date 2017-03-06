@@ -1,9 +1,9 @@
 {
-  "name": "BDO_Kansas",
-  "description": "Bois d'Arc Observatory, near Auburn Kansas, established Sept 2013",
-  "longitude": "-95:53:18",
-  "latitude": "+38:55:29",
-  "elevation": 350,
+  "name": "DSW",
+  "description": "Deep Sky West, south of Rowe, New Mexico",
+  "longitude": "-105:39:13",
+  "latitude": "+35:19:52",
+  "elevation": 2210,
   "min_altitude": 25,
   "twilight_sun_alt": -11
 }

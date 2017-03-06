@@ -28,6 +28,7 @@ def test_fov():
     assert fov1.main_target == "ST Tri"
     assert fov1.target_type == "Eclipser"
     assert fov1.period == 0.47905145
+    assert fov1.motive == 'Test only.'
     assert fov1.JD_bright == 2457360.57
     assert fov1.JD_faint == 2457360.69
     assert fov1.JD_second == 2457360.45
@@ -119,6 +120,7 @@ def test_fov_mira():
     assert fov2.main_target == "AU Aur"
     assert fov2.target_type == "Mira"
     assert fov2.period == 400
+    assert fov2.motive == 'Test only: AU Aur.'
     assert fov2.JD_bright == 2456520
     assert fov2.JD_faint == 2456720
     assert fov2.observing_style == "LPV"
@@ -258,6 +260,7 @@ def test_fov_init_delta_scuti():
     assert f.main_target == "ASAS J162540+1912.3"
     assert f.target_type == "Delta Scuti"
     assert f.period == float("0.0571721")
+    assert f.motive == 'Test only.'
     assert f.JD_bright == float("2457614.69717")
     assert f.JD_faint == float("2457614.67845")
     assert f.mag_V_bright == 12.38
@@ -296,6 +299,7 @@ def test_fov_init_z_cam():
     assert f.main_target == "NSV 14581"
     assert f.target_type == "Z Cam"
     assert f.period == float("0.194334535")
+    assert f.motive == 'Test only.'
     assert f.JD_bright == float("2452888.328")
     assert f.JD_faint == float("2452888.4255")
     assert f.mag_V_bright == 14
@@ -330,6 +334,7 @@ def test_fov_init_exoplanet():
     assert f.format_version == CURRENT_SCHEMA_VERSION
     assert f.main_target == "HAT-P-3"
     assert f.target_type == "Exoplanet"
+    assert f.motive == 'Test only.'
     assert f.observing_style == "Stare"
     assert f.alert is None
     assert len(f.observing_list) == 4
@@ -360,6 +365,7 @@ def test_fov_init_standard():
     assert f.chart == "X15687X"
     assert f.fov_date == "12/20/2015"
     assert f.period is None
+    assert f.motive == 'Test only, Std_SA100.'
     assert f.JD_bright is None
     assert f.JD_faint is None
     assert f.mag_V_bright is None
@@ -391,7 +397,7 @@ def test_all_fov_names():
     all_names = fov.all_fov_names(fov_directory=TEST_FOV_DIRECTORY)
     assert isinstance(all_names, list)
     assert isinstance(all_names[0], str)
-    assert len(all_names) == 7
+    assert len(all_names) == 8
     assert "ST Tri" in all_names
 
 
@@ -400,10 +406,10 @@ def test_make_fov_dict(fov_directory=TEST_FOV_DIRECTORY):
     fov_dict = fov.make_fov_dict(fov_directory)
     assert isinstance(fov_dict, dict)
     assert all([isinstance(f, fov.Fov) for f in list(fov_dict.values())])
-    assert len(fov_dict) == 7
+    assert len(fov_dict) == 8
     assert "ST Tri" in fov_dict.keys()
     # Partial dictionary.
-    fov_dict = fov.make_fov_dict(fov_directory, \
+    fov_dict = fov.make_fov_dict(fov_directory,
                                  fov_names_selected=["ST Tri", "AU Aur", "ST Tri"])
     assert isinstance(fov_dict, dict)
     assert all([isinstance(f, fov.Fov) for f in list(fov_dict.values())])

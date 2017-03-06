@@ -338,9 +338,8 @@ def test_jd_from_datetime_utc():
     datetime_j2000 = datetime(2000, 1, 1, 0, 0, 0).replace(tzinfo=timezone.utc)
     assert util.jd_from_datetime_utc(datetime_j2000) == pytest.approx(2451544.5, abs=one_second)
 
-    datetime_now = datetime.now(timezone.utc)
-    jd_now = util.jd_from_datetime_utc(datetime_now)  # tested just above.
-    assert util.jd_from_datetime_utc() == pytest.approx(jd_now, abs=one_second)
+    assert util.jd_from_datetime_utc(None) is None
+    assert util.jd_from_datetime_utc() is None
 
     datetime_1 = datetime(2017, 1, 9, 15, 23, 53).replace(tzinfo=timezone.utc)
     assert util.jd_from_datetime_utc(datetime_1) == pytest.approx(2457763.14158398, abs=one_second)
@@ -377,19 +376,19 @@ def test_datetime_utc_from_jd():
 
 def test_time_hhmm():
     dt = datetime(2016, 1, 1, 23, 34, 45, 454545).replace(tzinfo=timezone.utc)
-    assert util.time_hhmm(dt) == '2335'
+    assert util.hhmm_from_datetime_utc(dt) == '2335'
     dt = datetime(2016, 1, 1, 23, 34, 29, 999999).replace(tzinfo=timezone.utc)
-    assert util.time_hhmm(dt) == '2334'
+    assert util.hhmm_from_datetime_utc(dt) == '2334'
     dt = datetime(2016, 1, 1, 23, 59, 31, 454545).replace(tzinfo=timezone.utc)
-    assert util.time_hhmm(dt) == '0000'
+    assert util.hhmm_from_datetime_utc(dt) == '0000'
     dt = datetime(2016, 1, 31, 0, 0, 0, 0).replace(tzinfo=timezone.utc)
-    assert util.time_hhmm(dt) == '0000'
+    assert util.hhmm_from_datetime_utc(dt) == '0000'
     dt = datetime(2016, 1, 31, 0, 0, 30, 0).replace(tzinfo=timezone.utc)  # banker's rounding.
-    assert util.time_hhmm(dt) == '0000'
+    assert util.hhmm_from_datetime_utc(dt) == '0000'
     dt = datetime(2016, 1, 31, 0, 1, 30, 0).replace(tzinfo=timezone.utc)  # banker's rounding.
-    assert util.time_hhmm(dt) == '0002'
+    assert util.hhmm_from_datetime_utc(dt) == '0002'
     dt = datetime(2016, 1, 31, 0, 0, 30, 1).replace(tzinfo=timezone.utc)
-    assert util.time_hhmm(dt) == '0001'
+    assert util.hhmm_from_datetime_utc(dt) == '0001'
 
     # Test .az_alt_at_datetime_utc():
     aldebaran = util.RaDec('4:35:55.31', '+16:30:30.249')
@@ -452,3 +451,28 @@ def test_float_or_none():
     assert util.float_or_none('-') is None
     assert util.float_or_none('+') is None
     assert util.float_or_none('(3)') is None
+
+
+def test_find_minima_in_timespan():
+    # Test normal case:
+    ts1 = util.Timespan(datetime(2017, 2, 10, 1, 30, 0).replace(tzinfo=timezone.utc),
+                        datetime(2017, 2, 10, 10, 30, 0).replace(tzinfo=timezone.utc))
+    min1_utc_list = util.find_minima_in_timespan(2455336.44, 0.3641393156, ts1)  # DE CVn 1'min
+    assert len(min1_utc_list) == 1
+    assert util.jd_from_datetime_utc(min1_utc_list[0]) == pytest.approx(2457794.74452, abs=0.0001)
+    min2_utc_list = util.find_minima_in_timespan(2455336.26, 0.3641393156, ts1)  # DE CVn 2'min
+    assert len(min2_utc_list) == 2
+    assert util.jd_from_datetime_utc(min2_utc_list[0]) == pytest.approx(2457794.56452, abs=0.0001)
+    assert util.jd_from_datetime_utc(min2_utc_list[1]) == pytest.approx(2457794.92866, abs=0.0001)
+
+    # Case: no mins in timespan:
+    ts1 = util.Timespan(datetime(2017, 2, 10, 7, 0, 0).replace(tzinfo=timezone.utc),
+                        datetime(2017, 2, 10, 8, 30, 0).replace(tzinfo=timezone.utc))
+    min1_utc_list = util.find_minima_in_timespan(2455336.44, 0.3641393156, ts1)  # DE CVn 1'min
+    assert len(min1_utc_list) == 0
+    min2_utc_list = util.find_minima_in_timespan(2455336.26, 0.3641393156, ts1)  # DE CVn 2'min
+    assert len(min2_utc_list) == 0
+
+    # Case: missing data:
+    assert util.find_minima_in_timespan(None, 0.3641393156, ts1) is None
+    assert util.find_minima_in_timespan(2455336.44, None, ts1) is None

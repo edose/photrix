@@ -1,5 +1,7 @@
 from datetime import datetime, timedelta, timezone
 import math
+from math import floor
+
 import ephem
 
 __author__ = "Eric Dose :: New Mexico Mira Project, Albuquerque"
@@ -305,7 +307,7 @@ def get_phase(jd, jd_epoch, period):
 
 def jd_from_datetime_utc(datetime_utc=None):
     if datetime_utc is None:
-        datetime_utc = datetime.now(timezone.utc)
+        return None
     datetime_j2000 = datetime(2000, 1, 1, 0, 0, 0).replace(tzinfo=timezone.utc)
     jd_j2000 = 2451544.5
     seconds_since_j2000 = (datetime_utc - datetime_j2000).total_seconds()
@@ -321,7 +323,7 @@ def datetime_utc_from_jd(jd=None):
     return datetime_j2000 + timedelta(seconds=seconds_since_j2000)
 
 
-def time_hhmm(datetime_utc):
+def hhmm_from_datetime_utc(datetime_utc):
     minutes = round(datetime_utc.hour*60  # NB: banker's rounding (nearest even)
                     + datetime_utc.minute
                     + datetime_utc.second/60
@@ -363,3 +365,19 @@ def float_or_none(string):
     except ValueError:
         return None
 
+
+def find_minima_in_timespan(jd_min_reference, period, timespan):
+    if jd_min_reference is None or period is None:
+        return None
+    jd_ts_start = jd_from_datetime_utc(timespan.start)
+    jd_ts_end = jd_from_datetime_utc(timespan.end)
+    n_prior = floor((jd_ts_start - jd_min_reference) / period)
+    jd_min_prior = jd_min_reference + n_prior * period
+    utc_list = []
+    for i in range(10):
+        jd_test = jd_min_prior + i * period
+        if jd_test > jd_ts_end:
+            return utc_list
+        if jd_test >= jd_ts_start:
+            utc_list.append(datetime_utc_from_jd(jd_test))
+    return utc_list

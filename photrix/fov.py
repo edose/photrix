@@ -43,6 +43,7 @@ class Fov:
         # ---------- Main-target section.
         self.main_target = Fov._directive_value(lines, "#MAIN_TARGET")
         self.target_type = Fov._directive_value(lines, "#TARGET_TYPE")
+        self.motive = Fov._directive_value(lines, '#MOTIVE')
         words = Fov._directive_words(lines, "#PERIOD")
         if words is not None:
             self.period = float(words[0])

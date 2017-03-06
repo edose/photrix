@@ -6,7 +6,7 @@
 ;---------- Main-Target Section
 #MAIN_TARGET        AU Aur
 #TARGET_TYPE        Mira
-#MOTIVE             Test only.
+#MOTIVE             Test only: AU Aur.
 #PERIOD             400  ;  in days
 ; JD, MAG, COLOR as: @brightest @faintest, in that order
 #JD                 2456520 2456720  ;      [LCG]

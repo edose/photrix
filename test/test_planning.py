@@ -221,9 +221,8 @@ def test_class_aavso_webobs():
 def test_class_local_obs_cache():
     # First, make a small df_fov_avail.
     df_fov = planning.make_df_fov()
-    df_fov_avail = planning.complete_df_fov_an(df_fov, an_string='20170127',
-                                               site_name='BDO_Kansas', min_moon_degrees=60,
-                                               remove_unobservables=True)
+    df_fov_avail = planning.complete_df_fov_an(df_fov, an_string='20170127', site_name='BDO_Kansas',
+                                               min_moon_degrees=60, remove_unobservables=True)
     df_fov = df_fov.iloc[0:20]
 
 

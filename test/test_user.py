@@ -412,6 +412,21 @@ def test_Astronight():
     assert datetime_utc_from_hhmm_OK('0600', an)
     assert datetime_utc_from_hhmm_OK('0900', an)
 
+    # Test transit():
+    site_string = "DSW"
+    an1 = user.Astronight("20170101", site_string)
+    an2 = user.Astronight("20170601", site_string)
+    porrima = RaDec('12:41:38.954', '-01:26:56.733')
+    assert abs((an1.transit(porrima) - datetime(2017, 1, 2, 12, 55, 43, 509000,
+                                                tzinfo=timezone.utc)).total_seconds()) <= 60
+    assert abs((an2.transit(porrima) - datetime(2017, 6, 2, 3, 2, 3, 209000,
+                                                tzinfo=timezone.utc)).total_seconds()) <= 60
+    st_tri = RaDec('2:41:33', '35:43:31')
+    assert abs((an1.transit(st_tri) - datetime(2017, 1, 2, 2, 57, 27, 210000,
+                                                tzinfo=timezone.utc)).total_seconds()) <= 60
+    assert abs((an2.transit(st_tri) - datetime(2017, 6, 2, 16, 59, 48, 210000,
+                                                tzinfo=timezone.utc)).total_seconds()) <= 60
+
 
 # ----- HELPER FUNCTIONS. --------------------------------------------------------------------
 def datetime_utc_from_hhmm_OK(hhmm_string, an):

@@ -6,7 +6,7 @@
 ;---------- Main-Target Section
 #MAIN_TARGET        Standard
 #TARGET_TYPE        Standard
-#MOTIVE             Test only.
+#MOTIVE             Test only, Std_SA100.
 ;---------- Observing Section
 #OBSERVING_STYLE    Standard   V=11.5  R=11.2  I=10.2
 #ACP_DIRECTIVES     #DITHER 0|#FILTER V,R,I|#BINNING 1,1,1|#COUNT 1,1,1|#INTERVAL 60,60,60
