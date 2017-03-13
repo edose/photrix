@@ -214,7 +214,7 @@ class Astronight:
                 start=moonset_2).datetime().replace(tzinfo=timezone.utc)
             ts_moon_up_2 = Timespan(moonrise_2, moonset_2)
             self.ts_dark_no_moon = self.ts_dark.subtract(ts_moon_up_1).subtract(ts_moon_up_2)
-    # TODO: Prep all other solar-system bodies, using their RaDecs at local mid-dark.
+    # TODO: Prep all other solar-system bodies, using their RaDecs at local mid-dark (low priority).
     # jupiter = ephem.Jupiter(obs)
     # self.jupiter_radec = RaDec(str(jupiter.ra), str(jupiter.dec))
     # saturn = ephem.Saturn(obs)
@@ -327,6 +327,8 @@ class Astronight:
     def datetime_utc_from_hhmm(self, hhmm_string):
         mid_dark = self.local_middark_utc
         hour_hhmm = int(hhmm_string[0:2])
+        if hour_hhmm < 0 or hour_hhmm > 23:
+            iii   = 4
         minute_hhmm = int(hhmm_string[2:4])
         test_dt = mid_dark.replace(hour=hour_hhmm, minute=minute_hhmm, second=0, microsecond=0)
         delta_days = round((test_dt - mid_dark).total_seconds() / (24 * 3600))  # adjust if needed.
@@ -342,9 +344,6 @@ class Astronight:
             ; moon 15% @ (~22h04,-10) rise 0936 UTC
         Usage: s = an.acp_header_string()
         """
-        # TODO: redo this method with: (1) template from more recent ACP plans, and
-        #                              (2) the better facilities in current Astronight class.
-
         site_obs = ephem.Observer()
         site_obs.lat, site_obs.lon = str(self.site.latitude), str(self.site.longitude)
         site_obs.elevation = self.site.elevation
