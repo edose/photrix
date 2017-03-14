@@ -250,11 +250,11 @@ def test_Astronight():
     ts_obs = an.ts_observable(altais, min_moon_dist=0, min_alt=25)
     # print("altais / any moon >> ", ts_obs, "\n\n\n")
     assert abs((ts_obs.start - an.ts_dark.start).total_seconds()) <= 60
-    assert abs((ts_obs.end - datetime(2016, 9, 20, 9, 47, 48, 586041,
-                tzinfo=timezone.utc)).total_seconds()) <= 60
+    assert abs((ts_obs.end - datetime(2016, 9, 20, 8, 38, 36, 48834,
+                tzinfo=timezone.utc)).total_seconds()) <= 60  # @ HA=7
     ts_obs = an.ts_observable(hip_22783, min_moon_dist=0, min_alt=25)
     # print("hip_22783 / any moon >> ", ts_obs, "\n\n\n")
-    assert abs((ts_obs.start - datetime(2016, 9, 20, 3, 23, 32, 838379,
+    assert abs((ts_obs.start - datetime(2016, 9, 20, 4, 20, 9, 834898,
                 tzinfo=timezone.utc)).total_seconds()) <= 60
     assert abs((ts_obs.end - an.ts_dark.end).total_seconds()) <= 60
     ts_obs = an.ts_observable(mira, min_moon_dist=0, min_alt=25)
@@ -272,7 +272,10 @@ def test_Astronight():
     assert ts_obs.seconds == 0
     ts_obs = an.ts_observable(polaris, min_moon_dist=0, min_alt=25)
     # print("polaris / any moon >> ", ts_obs, "\n\n\n")
-    assert ts_obs == an.ts_dark
+    assert abs((ts_obs.start - datetime(2016, 9, 20, 2, 18, 56, 904009,
+                tzinfo=timezone.utc)).total_seconds()) <= 60
+    assert abs((ts_obs.end - an.ts_dark.end).total_seconds()) <= 60
+    # assert ts_obs == an.ts_dark
 
     # All targets, allow NO moon.
     ts_obs = an.ts_observable(altais, min_moon_dist=220, min_alt=25)
@@ -292,7 +295,10 @@ def test_Astronight():
     assert ts_obs.seconds == 0
     ts_obs = an.ts_observable(polaris, min_moon_dist=220, min_alt=25)
     # print("polaris / NO moon >> ", ts_obs, "\n\n\n")
-    assert ts_obs == an.ts_dark_no_moon
+    assert abs((ts_obs.start - datetime(2016, 9, 20, 2, 18, 56, 904009,
+                tzinfo=timezone.utc)).total_seconds()) <= 60
+    assert abs((ts_obs.end - an.ts_dark_no_moon.end).total_seconds()) <= 60
+    # assert ts_obs == an.ts_dark_no_moon
 
     # Continue testing .ts_observable():  --------------------------------------------------------
     # Same targets, new astronight with ~ opposite moon phase to previous astronight.
@@ -304,11 +310,11 @@ def test_Astronight():
     ts_obs = an.ts_observable(altais, min_moon_dist=0, min_alt=25)
     # print("altais / any moon >> ", ts_obs, "\n\n\n")
     assert abs((ts_obs.start - an.ts_dark.start).total_seconds()) <= 60
-    assert abs((ts_obs.end - datetime(2016, 10, 9, 8, 33, 5, 419491,
+    assert abs((ts_obs.end - datetime(2016, 10, 9, 7, 23, 52, 684662,
                tzinfo=timezone.utc)).total_seconds()) <= 60
     ts_obs = an.ts_observable(hip_22783, min_moon_dist=0, min_alt=25)
     # print("hip_22783 / any moon >> ", ts_obs, "\n\n\n")
-    assert abs((ts_obs.start - datetime(2016, 10, 9, 2, 8, 51, 471332,
+    assert abs((ts_obs.start - datetime(2016, 10, 9, 3, 5, 28, 819820,
                tzinfo=timezone.utc)).total_seconds()) <= 60
     assert abs((ts_obs.end - an.ts_dark.end).total_seconds()) <= 60
     ts_obs = an.ts_observable(mira, min_moon_dist=0, min_alt=25)
@@ -327,13 +333,16 @@ def test_Astronight():
     assert ts_obs.seconds == 0
     ts_obs = an.ts_observable(polaris, min_moon_dist=0, min_alt=25)
     # print("polaris / any moon >> ", ts_obs, "\n\n\n")
-    assert ts_obs == an.ts_dark
+    assert abs((ts_obs.start - datetime(2016, 10, 9, 1, 4, 39, 692713,
+               tzinfo=timezone.utc)).total_seconds()) <= 60
+    assert abs((ts_obs.end - an.ts_dark.end).total_seconds()) <= 60
+    # assert ts_obs == an.ts_dark
 
     # Case: allow NO moon:
     ts_obs = an.ts_observable(altais, min_moon_dist=220, min_alt=25)
     # print("altais / NO moon >> ", ts_obs, "\n\n\n")
     assert abs((ts_obs.start - an.ts_dark_no_moon.start).total_seconds()) <= 60
-    assert abs((ts_obs.end - datetime(2016, 10, 9, 8, 33, 5, 419491,
+    assert abs((ts_obs.end - datetime(2016, 10, 9, 7, 23, 52, 684662,
                tzinfo=timezone.utc)).total_seconds()) <= 60
     ts_obs = an.ts_observable(hip_22783, min_moon_dist=220, min_alt=25)
     # print("hip_22783 / NO moon >> ", ts_obs, "\n\n\n")
@@ -370,13 +379,21 @@ def test_Astronight():
     # Case: object circumpolar and during new moon:
     polaris = RaDec('02:31:49.133', '+89:15:50.598')  # circumpolar north
     ts_obs = an.ts_observable(polaris, min_moon_dist=0, min_alt=25)
-    assert ts_obs == an.ts_dark
+    assert abs((ts_obs.start - datetime(2016, 10, 1, 1, 35, 56, 993007,
+               tzinfo=timezone.utc)).total_seconds()) <= 60
+    assert abs((ts_obs.end - an.ts_dark.end).total_seconds()) <= 60
     ts_obs = an.ts_observable(polaris, min_moon_dist=220, min_alt=25)
-    assert ts_obs == an.ts_dark_no_moon
+    assert abs((ts_obs.start - datetime(2016, 10, 1, 1, 35, 56, 993007,
+               tzinfo=timezone.utc)).total_seconds()) <= 60
+    assert abs((ts_obs.end - an.ts_dark.end).total_seconds()) <= 60
     ts_obs = an.ts_observable(polaris, min_moon_dist=0, min_alt=2)
-    assert ts_obs == an.ts_dark
+    assert abs((ts_obs.start - datetime(2016, 10, 1, 1, 35, 56, 993007,
+               tzinfo=timezone.utc)).total_seconds()) <= 60
+    assert abs((ts_obs.end - an.ts_dark.end).total_seconds()) <= 60
     ts_obs = an.ts_observable(polaris, min_moon_dist=220, min_alt=2)
-    assert ts_obs == an.ts_dark_no_moon
+    assert abs((ts_obs.start - datetime(2016, 10, 1, 1, 35, 56, 993007,
+               tzinfo=timezone.utc)).total_seconds()) <= 60
+    assert abs((ts_obs.end - an.ts_dark.end).total_seconds()) <= 60
     ts_obs = an.ts_observable(polaris, min_moon_dist=0, min_alt=60)  # it's never this high.
     assert ts_obs.seconds == 0
     ts_obs = an.ts_observable(polaris, min_moon_dist=220, min_alt=60)

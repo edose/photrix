@@ -12,6 +12,7 @@ PHOTRIX_ROOT_DIRECTORY = os.path.dirname(os.path.dirname(os.path.abspath(__file_
 SITE_DIRECTORY = os.path.join(PHOTRIX_ROOT_DIRECTORY, "site")
 MOON_PHASE_NO_FACTOR = 0.05
 MIN_MOON_DIST = 45  # in degrees
+MAX_ABS_HOUR_ANGLE = 7  # hours from meridian limiting target availability (move to Site?)
 
 
 class Site:
@@ -287,6 +288,12 @@ class Astronight:
         # print("obj_avail_1", obj_avail_1)
         # print("obj_avail_2", obj_avail_2)
         ts_obj_avail = Timespan.longer(obj_avail_1, obj_avail_2, on_tie="earlier")
+
+        # Limit by Hour Angle (HA; important only for object near celestial pole).
+        dt_transit = self.transit(target_radec)
+        timedelta_ha = timedelta(hours=MAX_ABS_HOUR_ANGLE)
+        ts_ha = Timespan(start_utc=dt_transit-timedelta_ha, end_utc=dt_transit+timedelta_ha)
+        ts_obj_avail = ts_obj_avail.intersect(ts_ha)
         return ts_obj_avail
 
     def ts_fov_observable(self, fov, min_alt=None, min_moon_dist=None):
