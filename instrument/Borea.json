@@ -21,7 +21,7 @@
     "pixels_x": 3072,
     "pixels_y": 2048,
     "pixel_microns": 9,
-    "shortest_exposure": 0.5,
+    "shortest_exposure": 1,
     "saturation_adu": 54000
   },
 
