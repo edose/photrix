@@ -453,14 +453,14 @@ def test_float_or_none():
     assert util.float_or_none('(3)') is None
 
 
-def test_find_minima_in_timespan():
+def test_event_utcs_in_timespan():
     # Test normal case:
     ts1 = util.Timespan(datetime(2017, 2, 10, 1, 30, 0).replace(tzinfo=timezone.utc),
                         datetime(2017, 2, 10, 10, 30, 0).replace(tzinfo=timezone.utc))
-    min1_utc_list = util.find_minima_in_timespan(2455336.44, 0.3641393156, ts1)  # DE CVn 1'min
+    min1_utc_list = util.event_utcs_in_timespan(2455336.44, 0.3641393156, ts1)  # DE CVn 1'min
     assert len(min1_utc_list) == 1
     assert util.jd_from_datetime_utc(min1_utc_list[0]) == pytest.approx(2457794.74452, abs=0.0001)
-    min2_utc_list = util.find_minima_in_timespan(2455336.26, 0.3641393156, ts1)  # DE CVn 2'min
+    min2_utc_list = util.event_utcs_in_timespan(2455336.26, 0.3641393156, ts1)  # DE CVn 2'min
     assert len(min2_utc_list) == 2
     assert util.jd_from_datetime_utc(min2_utc_list[0]) == pytest.approx(2457794.56452, abs=0.0001)
     assert util.jd_from_datetime_utc(min2_utc_list[1]) == pytest.approx(2457794.92866, abs=0.0001)
@@ -468,11 +468,11 @@ def test_find_minima_in_timespan():
     # Case: no mins in timespan:
     ts1 = util.Timespan(datetime(2017, 2, 10, 7, 0, 0).replace(tzinfo=timezone.utc),
                         datetime(2017, 2, 10, 8, 30, 0).replace(tzinfo=timezone.utc))
-    min1_utc_list = util.find_minima_in_timespan(2455336.44, 0.3641393156, ts1)  # DE CVn 1'min
+    min1_utc_list = util.event_utcs_in_timespan(2455336.44, 0.3641393156, ts1)  # DE CVn 1'min
     assert len(min1_utc_list) == 0
-    min2_utc_list = util.find_minima_in_timespan(2455336.26, 0.3641393156, ts1)  # DE CVn 2'min
+    min2_utc_list = util.event_utcs_in_timespan(2455336.26, 0.3641393156, ts1)  # DE CVn 2'min
     assert len(min2_utc_list) == 0
 
     # Case: missing data:
-    assert util.find_minima_in_timespan(None, 0.3641393156, ts1) is None
-    assert util.find_minima_in_timespan(2455336.44, None, ts1) is None
+    assert util.event_utcs_in_timespan(None, 0.3641393156, ts1) is None
+    assert util.event_utcs_in_timespan(2455336.44, None, ts1) is None

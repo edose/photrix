@@ -366,16 +366,42 @@ def float_or_none(string):
         return None
 
 
-def find_minima_in_timespan(jd_min_reference, period, timespan):
-    if jd_min_reference is None or period is None:
+# def find_minima_in_timespan(jd_min_reference, period, timespan):
+#     if jd_min_reference is None or period is None:
+#         return None
+#     jd_ts_start = jd_from_datetime_utc(timespan.start)
+#     jd_ts_end = jd_from_datetime_utc(timespan.end)
+#     n_prior = floor((jd_ts_start - jd_min_reference) / period)
+#     jd_min_prior = jd_min_reference + n_prior * period
+#     utc_list = []
+#     for i in range(10):
+#         jd_test = jd_min_prior + i * period
+#         if jd_test > jd_ts_end:
+#             return utc_list
+#         if jd_test >= jd_ts_start:
+#             utc_list.append(datetime_utc_from_jd(jd_test))
+#     return utc_list
+
+
+def event_utcs_in_timespan(jd_reference, period, timespan):
+    """
+    Returns a list of UTC times of period events within a given Timespan.
+       A generalization of (and replacing) fn find_minima_in_timespan()
+    :param jd_reference: Julian Date of any occurence of the period event (e.g., Mira max) [float]
+    :param period: in days [float]
+    :param timespan: target timespan (start and end datetimes) [Timespan object]
+    :return: list of up to 10 UTCs of periodic events within the target timespan [list of datetimes]
+       Return None if jd_reference or period are invalid. Return empty list if no such events.
+    """
+    if jd_reference is None or period is None:
         return None
     jd_ts_start = jd_from_datetime_utc(timespan.start)
     jd_ts_end = jd_from_datetime_utc(timespan.end)
-    n_prior = floor((jd_ts_start - jd_min_reference) / period)
-    jd_min_prior = jd_min_reference + n_prior * period
+    n_prior = floor((jd_ts_start - jd_reference) / period)
+    jd_prior = jd_reference + n_prior * period
     utc_list = []
     for i in range(10):
-        jd_test = jd_min_prior + i * period
+        jd_test = jd_prior + i * period
         if jd_test > jd_ts_end:
             return utc_list
         if jd_test >= jd_ts_start:
