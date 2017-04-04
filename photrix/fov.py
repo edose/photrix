@@ -561,5 +561,24 @@ def fov_diag(fov_directory=FOV_DIRECTORY):
     print('---TOTAL =', sum(count.values()))
 
 
-
+def fovs_by_ra(fov_directory=FOV_DIRECTORY):
+    fov_dict = make_fov_dict(fov_directory=fov_directory)
+    fov_names = list(fov_dict.keys())
+    df_fov = pd.DataFrame({'fov_name': fov_names})  # 1 column ('fov_name') only.
+    df_fov['obs_style'] = [fov_dict[name].observing_style for name in fov_names]
+    df_fov['ra_hours'] = [fov_dict[name].ra/15.0 for name in fov_names]
+    dict_category = {'Stare':['Stare'], 'LPV/Monitor':['LPV', 'Monitor']}
+    print('\nFOV Counts as of ' + '{:%Y-%m-%d %H:%M  UTC}'.format(datetime.now(timezone.utc)))
+    for category, styles in dict_category.items():
+        styles_lower = [style.lower() for style in styles]
+        matches_style = [s.lower() in styles_lower for s in df_fov['obs_style']]
+        df_style = df_fov[matches_style]
+        ra_list = df_style['ra_hours']
+        hist = 24*[0]
+        for ra in ra_list:
+            int_ra = int(min(23.0, floor(ra)))
+            hist[int_ra] += 1
+        print('\n\nObs category \'' + category + '\' (' + str(len(ra_list)) + ' FOVs):')
+        for i_ra in range(24):
+            print('   ' + '{:2d}'.format(i_ra) + ': ' + '{:4d}'.format(hist[i_ra]))
 
