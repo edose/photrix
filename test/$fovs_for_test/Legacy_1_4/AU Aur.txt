@@ -1,0 +1,34 @@
+#FOV_NAME           AU Aur
+#FORMAT_VERSION     1.4  ;  FOV format version defined 6 Jan 2017
+#CENTER             04:54:15.0  +49:54:00  ;  (J2000)
+#CHART              X15865BK  ;  of the table, not the graphical chart
+#DATE               1/30/2016
+;---------- Main-Target Section
+#MAIN_TARGET        AU Aur
+#TARGET_TYPE        Mira
+#MOTIVE             Test only: AU Aur.
+#PERIOD             400  ;  in days
+; JD, MAG, COLOR as: @brightest @faintest, in that order
+#JD                 2456520 2456720  ;      [LCG]
+#MAG_V              10.2 12.7  ;      [LCG]
+#COLOR_VI           3.8 5  ;      [guess at min]
+;---------- Observing Section
+#OBSERVING_STYLE    LPV   V I
+#PRIORITY           8  ;  0=never, 4=default, 8=pet
+#GAP_SCORE_DAYS     4 8 20   ;  days@0x days@1x days@2x (Priority multiplier)
+#ACP_DIRECTIVES     #DITHER 0|#FILTER V,I|#BINNING 1,1|#COUNT 1,1|#INTERVAL 240,30
+#ACP_COMMENTS       Mira CARBON C6-7(N) V~10.2-12.6? very uncertain color, NO R COMPS
+;---------- AAVSO Sequence Section
+#PUNCH AU Aur :     9.33    2.71   ;   dNorth dEast of punch center vs target star, in arcsec
+#STARS:
+117	73.50643	50.14460	1_0|2_11.67|4_0|8_10.73|1024_0	C	8.16000	2.72000
+AU Aur	73.56229	49.90029	0	T	8.16000	2.72000	0	0	0
+141	73.61777	49.86426	1_0|2_14.077|4_0|8_0|1024_0	C	8.16000	2.72000
+154	73.53627	49.92672	1_0|2_15.43|4_0|8_0|1024_0	C	8.16000	2.72000
+132	73.66163	49.84143	1_0|2_13.231|4_0|8_12.317|1024_0	C	8.16000	2.72000
+146	73.62554	49.92344	1_0|2_14.555|4_0|8_0|1024_0	C	8.16000	2.72000
+124	73.59342	49.89679	1_0|2_12.425|4_0|8_11.213|1024_0	H	8.16000	2.72000
+118	73.72201	49.89578	1_12.769|2_11.817|4_0|8_11.076|1024_0	C	8.16000	2.72000
+155	73.56015	49.88810	1_0|2_15.512|4_0|8_0|1024_0	C	8.16000	2.72000
+107	73.28434	50.14508	1_11.154|2_10.655|4_0|8_10.136|1024_0	C	8.16000	2.72000
+112	73.62727	49.89473	1_11.692|2_11.15|4_0|8_10.482|1024_0	C	8.16000	2.72000
