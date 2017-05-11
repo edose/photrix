@@ -7,8 +7,8 @@
     "model": "Paramount MX+ on tripod",
     "slew_rate_ra": 4,
     "slew_rate_dec": 4,
-    "sec_to_speed_ra": 1,
-    "sec_to_speed_dec": 1
+    "sec_to_speed_ra": 3,
+    "sec_to_speed_dec": 3
   },
 
   "ota": {

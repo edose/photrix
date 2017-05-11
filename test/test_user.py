@@ -19,6 +19,11 @@ def test_Site():
     assert s.elevation == 350
     assert s.min_altitude == 25
     assert s.twilight_sun_alt == -9
+    assert s.extinction is not None
+    assert len(s.extinction) == 3
+    assert s.extinction['V'] == 0.167
+    assert s.extinction['R'] == 0.128
+    assert s.extinction['I'] == 0.103
 
 
 def test_Instrument():

@@ -2,13 +2,7 @@ from datetime import datetime, timezone, timedelta
 from math import isnan
 import pytest
 
-# Your choices for importing (at least in this test module):
 from photrix import util                  # call: util.ra_as_degrees()
-from photrix.user import Astronight
-# from photrix.util import *              # call: ra_as_degrees()
-# from photrix.util import ra_as_degrees  # call: ra_as_degrees()
-# import photrix.util as u                # call: u.ra_as_degrees()
-# from .context import photrix            # XXX I can't make this work with a context.py file.
 
 __author__ = "Eric Dose :: Bois d'Arc Observatory, Kansas"
 
@@ -476,3 +470,59 @@ def test_event_utcs_in_timespan():
     # Case: missing data:
     assert util.event_utcs_in_timespan(None, 0.3641393156, ts1) is None
     assert util.event_utcs_in_timespan(2455336.44, None, ts1) is None
+
+
+def test_mixed_model_fit_class():
+    import numpy as np
+    import pandas as pd
+    # First, construct test data frame:
+    points = 80
+    np.random.seed(1234)
+    d = {'A': np.random.randn(points),
+         'B': np.random.randn(points),
+         'C': np.random.randn(points),
+         'Ran': np.random.randint(0, 3, points),
+         'Dep': 0}
+    df = pd.DataFrame(d)
+    df['Dep'] = 17 + 1*df.A + 2*df.B + 4*df.C + 5*(df.Ran-1) + 1*np.random.randn(len(df))
+    categories = ['X', 'Y', 'Z']
+    df['Ran'] = [categories[r] for r in df['Ran']]
+    # Split test data into model and test blocks:
+    df_model = df[0:int(3*points/4)]
+    df_test = df[len(df_model):]
+
+    # Construct fit object & verify attributes:
+    fit = util.MixedModelFit(df_model, dep_var='Dep', fixed_vars=['A', 'B', 'C'], group_var='Ran')
+    assert fit.converged is True
+    assert fit.nobs == len(df_model)
+    assert fit.likelihood == pytest.approx(-95.7673)
+    assert fit.dep_var == 'Dep'
+    assert fit.fixed_vars == ['A', 'B', 'C']
+    assert fit.group_var == 'Ran'
+    assert isinstance(fit.coeffs, pd.Series)
+    assert list(fit.coeffs.index) == ['Intercept', 'A', 'B', 'C', 'groups RE']
+    assert list(fit.coeffs) == pytest.approx([16.648186, 0.946692, 1.959923, 4.069383, 22.381472],
+                                             abs=0.00001)
+    assert list(fit.stdev.index[:-1]) == list(fit.coeffs.index[:-1])
+    assert list(fit.stdev[:-1]) == pytest.approx([2.844632, 0.142185, 0.134386, 0.145358],
+                                                 abs=0.00001)
+    assert list(fit.fitted_values)[0:4] == pytest.approx([24.809899, 10.130408, 19.834543,
+                                                          7.758331], abs=0.00001)
+    assert list(fit.residuals)[0:2] == pytest.approx([0.490179, -0.786949], abs=0.00001)
+    assert list(fit.groups.index) == ['X', 'Y', 'Z']
+    assert list(fit.groups['groups']) == pytest.approx([-5.164649, 0.543793, 4.620857], abs=0.00001)
+    assert list(fit.group_values)[0:4] == pytest.approx([4.6208569767773913, 4.6208569767773913,
+                                                         0.54379250510498767, -5.1646494818793514],
+                                                        abs=0.00001)
+
+    # Verify predictions on model data:
+    assert list(fit.predict(df_model)) == pytest.approx(fit.fitted_values)
+    # Verify predictions on test data:
+    assert list(fit.predict(df_test[0:4])) == pytest.approx([16.706808844306536, 18.50420441664172,
+                                                            20.533844119080726, 18.952844883150998])
+
+
+
+
+
+

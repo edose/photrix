@@ -1,4 +1,4 @@
-from photrix.user import Instrument
+from .user import Instrument
 
 __author__ = "Eric Dose :: New Mexico Mira Project, Albuquerque"
 

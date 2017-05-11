@@ -5,5 +5,10 @@
   "latitude": "+35:19:52",
   "elevation": 2210,
   "min_altitude": 29,
-  "twilight_sun_alt": -9
+  "twilight_sun_alt": -9,
+  "extinction": {
+    "V": 0.167,
+    "R": 0.128,
+    "I": 0.103
+  }
 }

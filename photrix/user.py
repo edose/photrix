@@ -2,9 +2,11 @@ from math import pi
 from datetime import datetime, timedelta, timezone
 import os
 import json
+
 import ephem
 from copy import copy
-from photrix.util import Timespan, RaDec, hex_degrees_as_degrees
+
+from .util import Timespan, RaDec, hex_degrees_as_degrees
 
 __author__ = "Eric Dose :: New Mexico Mira Project, Albuquerque"
 
@@ -27,6 +29,7 @@ class Site:
         .elevation : of site, in meters (float)
         .min_altitude : in degrees (float)
         .twilight_sun_alt : in degrees (float)
+        .extinction: nominal / typical extinction, per filter band [dict of floats]
         .is_valid : True if attribute values appear valid (boolean)
     """
     def __init__(self, site_name, site_directory=SITE_DIRECTORY):
@@ -45,6 +48,7 @@ class Site:
         self.elevation = data.get("elevation", 500)  # in meters
         self.min_altitude = data.get("min_altitude", 0)
         self.twilight_sun_alt = data.get("twilight_sun_alt", -10)
+        self.extinction = data.get("extinction")  # dict of floats, key = filter name
 
         is_valid = (self.longitude is not None) and (self.latitude is not None)  # default
         if is_valid:

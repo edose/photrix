@@ -2,32 +2,32 @@ import os
 import os.path
 from collections import namedtuple
 from datetime import datetime, timezone, timedelta
-from math import floor, sqrt
+from math import floor, sqrt, ceil
 
 import ephem
 import numpy as np
 import pandas as pd
 
-from photrix.fov import make_fov_dict, FovError, Fov
-from photrix.user import Astronight, Instrument
-from photrix.util import RaDec, datetime_utc_from_jd, hhmm_from_datetime_utc, \
+from .fov import make_fov_dict, FovError, Fov
+from .user import Astronight, Instrument, MOON_PHASE_NO_FACTOR
+from .util import RaDec, datetime_utc_from_jd, hhmm_from_datetime_utc, \
     ra_as_hours, dec_as_hex, az_alt_at_datetime_utc, \
     degrees_as_hex, jd_from_datetime_utc, Timespan, event_utcs_in_timespan
-from photrix.web import get_aavso_webobs_raw_table
+from .web import get_aavso_webobs_raw_table
 
 __author__ = "Eric Dose :: New Mexico Mira Project, Albuquerque"
 
 FOV_DIRECTORY = "C:/Dev/Photometry/FOV/"
-FOV_OBSERVING_STYLES = ["Standard", "Stare", "Monitor", "LPV", "Burn"]
-STARE_EVENT_TYPES = {"eclipser": "minima", "exoplanet": "minima", "delta scuti": "maxima"}
+STARE_EVENT_TYPES = {"eclipser": "minima", "exoplanet": "minima",
+                     "delta scuti": "maxima", 'rr lyrae': 'maxima'}
 MIN_AVAILABLE_SECONDS_DEFAULT = 900
 MIN_AVAILABLE_SECONDS_STARE = 5400
 MIN_MOON_DEGREES_DEFAULT = 45
 MIN_MOON_DEGREES_STARE = 60
+STARE_AN_PRIORITY_DIVIDER = 7.5  # >= this goes into the normal Roster list; < goes to low-pri list.
 FITS_DIRECTORY = "J:/Astro/Images"
 DEFAULT_PLAN_DIRECTORY = 'C:/Astro/Plans'
 DT_FMT = '%Y-%m-%d %H:%M:%S.%f%z'  # kludge around py inconsistency in datetime formats
-
 
 PHOTRIX_ROOT_DIRECTORY = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LOCAL_OBS_CACHE_FULLPATH = os.path.join(PHOTRIX_ROOT_DIRECTORY, "local_obs_cache.csv")
@@ -38,6 +38,8 @@ MAX_DAYS_ONE_STARE = 0.5
 DEFAULT_UPDATE_TOLERANCE_DAYS = 0.166667  # 4 hours
 
 ABSOLUTE_MAX_EXPOSURE_TIME = 600  # seconds
+ABSOLUTE_MIN_EXPOSURE_TIME = 3  # seconds
+MIN_TOTAL_EXP_TIME_PER_FILTER = 9  # seconds, thus 3 exposures max per filter for LPVs
 
 PLAN_START_DURATION = 60  # seconds
 CHILL_DURATION = 60  # seconds; this may be overestimated
@@ -699,31 +701,30 @@ def make_an_roster(an_date_string, output_directory, site_name='DSW', instrument
         n_stars = len(this_fov.aavso_stars)
         this_fov_line = ',' + fov_name + ',' + fov_name + ', ' + available + ',' +\
                         "=\"" + transit_hhmm + "\"" + ',' + str(int(minutes)) +\
-                        ',' + '{:3d}'.format(n_stars)
+                        ',' + '{:3d}'.format(n_stars)  # formatting to placate Excel csv weirdness.
         lines_std.append(this_fov_line)
 
     # Handle obs_style = 'Stare':
-    lines_stare = ['\n\n\nSTARE roster for ' + an_date_string + ': ' + 50*'-',
-                   ',fov,fov, avail_utc,transit,min/rpt,   an_priority,,period,  events']
+    lines_stare_high_priority = \
+        ['\n\n\nSTARE roster for ' + an_date_string + ': ' + 50 * '-',
+         ',fov,fov, avail_utc,transit,min/rpt,   an_priority,,period,  events']
+    lines_stare_low_priority = \
+        ['\n\n\nSTARE roster (alternate; low-priority) for ' + an_date_string + ': ' + 50 * '-',
+         ',fov,fov, avail_utc,transit,min/rpt,   an_priority,,period,  events']
     df_fov_stare = filter_df_fov_by_obs_styles(df_fov, obs_style_list=['Stare'])
-    # TODO: Rather than removing FOVs with low priority, handle and report them in a separate list.
-    # Do this by delaying the filter_df_fov_by_fov_priority() call, processing each fov equally
-    #    through most of the code, then only in the last if block, write to one list or the other.
-    df_fov_stare = filter_df_fov_by_fov_priority(df_fov_stare,
-                                                 min_fov_priority=0.5, include_std_fovs=False)
+    # Process each fov equally through most of the code,
+    # then only in the last if block, write to one list or the other.
     df_fov_stare = complete_df_fov_an(df_fov_stare, user_update_tolerance_days,
                                       an_string=an_date_string, site_name=site_name,
                                       min_available_seconds=MIN_AVAILABLE_SECONDS_STARE,
                                       min_moon_degrees=MIN_MOON_DEGREES_STARE,
-                                      remove_zero_an_priority=True, remove_unobservables=True)
+                                      remove_zero_an_priority=False, remove_unobservables=True)
     for fov_index in df_fov_stare.index:
         row = df_fov_stare.loc[fov_index]
         fov_name = row.loc['fov_name']
         available = row.loc['available']
         this_fov = Fov(fov_name)
         transit_hhmm = hhmm_from_datetime_utc(an.transit(RaDec(this_fov.ra, this_fov.dec)))
-        # if str(fov_name).startswith('VSX'):
-        #     iii = 4
         _, _, _, target_overhead, repeat_duration = \
             make_fov_exposure_data(fov_name, an, fov_dict=None, instrument=instrument,
                                    exp_time_factor=exp_time_factor)
@@ -784,8 +785,12 @@ def make_an_roster(an_date_string, output_directory, site_name='DSW', instrument
             this_fov_line = ',' + fov_name + ',' + fov_name + ',' + available + ',' + \
                             "=\"" + transit_hhmm + "\"" + ',' + str(int(minutes)) + ',' +\
                             str(int(round(an_priority))) + ' ,' + an_priority_bars + ',' +\
-                            '{:7.3f}'.format(period) + ' ,' + events_string + ',' + motive
-            lines_stare.append(this_fov_line)
+                            '{:7.3f}'.format(period) + ' ,' + events_string + ',' + \
+                            "\"  " + motive + "\""  # formatting to placate Excel csv weirdness.
+            if an_priority >= STARE_AN_PRIORITY_DIVIDER:
+                lines_stare_high_priority.append(this_fov_line)
+            else:
+                lines_stare_low_priority.append(this_fov_line)
 
     # Handle obs_style = 'Monitor' or 'LPV':
     lines_mon_lpv = ['\n\n\nMONITOR / LPV roster for ' + an_date_string + ': ' + 50*'-',
@@ -813,11 +818,15 @@ def make_an_roster(an_date_string, output_directory, site_name='DSW', instrument
         motive = Fov(fov_name).motive
         this_fov_line = ',' + fov_name + ',' + fov_name + ', ' + available + ',' + \
                         "=\"" + transit_hhmm + "\"" + ',' + str(int(minutes)) + ',' +\
-                        str(int(round(an_priority))) + ' ,' + an_priority_bars + ',' + motive
+                        str(int(round(an_priority))) + ' ,' + an_priority_bars + ',' + \
+                        "\"  " + motive + "\""  # formatting to placate Excel csv weirdness.
         lines_mon_lpv.append(this_fov_line)
 
     # Assemble all output lines:
-    lines_all = lines_header + lines_std + lines_stare + lines_mon_lpv
+    lines_all = lines_header + \
+                lines_std + \
+                lines_stare_high_priority + lines_stare_low_priority +\
+                lines_mon_lpv
 
     # Write all lines to file:
     os.makedirs(output_directory, exist_ok=True)
@@ -982,9 +991,10 @@ def parse_excel(excel_path, site_name='DSW'):
                         plan_actions.append(('image', target_name, filter_entries,
                                              ra_string, dec_string))
                 else:
-                    # Treat as a fov_name, with warning if not in fov list.
+                    # Treat as a fov_name:
                     fov_name = cell_str_as_read.strip()
-                    plan_actions.append(('fov', fov_name))
+                    if len(fov_name) >= 2:
+                        plan_actions.append(('fov', fov_name))
                 # print(plan_actions[-1:])
 
     parsed_list.append(plan_actions)  # Close out the last plan.
@@ -1121,6 +1131,8 @@ def add_raw_durations_and_lines(plan_list, an, fov_dict, instrument, exp_time_fa
                 raw_duration = BURN_DURATION
             elif this_type == 'fov':
                 fov_name = parsed_action[1]
+                if fov_name == '':
+                    dummy = 0
                 summary_lines = ['fov ' + fov_name]
                 filters, counts, exp_times, target_overhead, repeat_duration = \
                     make_fov_exposure_data(fov_name, an, fov_dict, instrument,
@@ -1132,7 +1144,8 @@ def add_raw_durations_and_lines(plan_list, an, fov_dict, instrument, exp_time_fa
                                   '#FILTER ' + ','.join(filters) + ' ;',
                                   '#BINNING ' + ','.join(len(filters)*['1']) + ' ;',
                                   '#COUNT ' + ','.join([str(c) for c in counts]) + ' ;',
-                                  '#INTERVAL ' + ','.join([str(round(e)) for e in exp_times]) +
+                                  '#INTERVAL ' + ','.join([str(e).split('.0')[0]
+                                                           for e in exp_times]) +
                                   ' ; ' + duration_comment,
                                   ';----' + this_fov.acp_comments, fov_name + '\t' +
                                   ra_as_hours(this_fov.ra) + '\t' + dec_as_hex(this_fov.dec)]
@@ -1147,7 +1160,8 @@ def add_raw_durations_and_lines(plan_list, an, fov_dict, instrument, exp_time_fa
                                   '#FILTER ' + ','.join(filters) + ' ;',
                                   '#BINNING ' + ','.join(len(filters)*['1']) + ' ;',
                                   '#COUNT ' + ','.join([str(c) for c in counts]) + ' ;',
-                                  '#INTERVAL ' + ','.join([str(round(e)) for e in exp_times]) +
+                                  '#INTERVAL ' + ','.join([str(e).split('.0')[0]
+                                                           for e in exp_times]) +
                                   ' ; ' + duration_comment,
                                   ';---- User target from IMAGE directive -----',
                                   target_name + '\t' +
@@ -1168,7 +1182,8 @@ def add_raw_durations_and_lines(plan_list, an, fov_dict, instrument, exp_time_fa
                                   '#FILTER ' + ','.join(filters) + ' ;',
                                   '#BINNING ' + ','.join(len(filters)*['1']) + ' ;',
                                   '#COUNT ' + ','.join([str(c) for c in counts]) + ' ;',
-                                  '#INTERVAL ' + ','.join([str(round(e)) for e in exp_times]) +
+                                  '#INTERVAL ' + ','.join([str(e).split('.0')[0]
+                                                           for e in exp_times]) +
                                   ' ; ' + duration_comment,
                                   ';----' + this_fov.acp_comments, fov_name + '\t' +
                                   ra_as_hours(this_fov.ra) + '\t' + dec_as_hex(this_fov.dec)]
@@ -1203,7 +1218,7 @@ def add_raw_durations_and_lines(plan_list, an, fov_dict, instrument, exp_time_fa
             this_action_should_be_chain = this_plan_is_not_last and this_action_is_last
             if this_action_should_be_chain and this_type != 'chain':
                 summary_lines += \
-                    ['*** WARNING: plan does not end on #CHAIN but probably should do.']
+                    ['***** WARNING: this plan does not end on #CHAIN.']
             new_action = action._replace(summary_lines=summary_lines,
                                          acp_plan_lines=acp_plan_lines,
                                          raw_duration=raw_duration)
@@ -1405,6 +1420,8 @@ def make_fov_exposure_data(fov_name, an, fov_dict=None, instrument=None, exp_tim
                   '\' has unrecognized observing style \'' + obs_style + '\'.')
             return None
         exp_times.append(exp_time)
+    if obs_style.lower() != 'stare':
+        counts, exp_times = repeat_short_exp_times(counts, exp_times)
     target_overhead = NEW_TARGET_DURATION  # TODO: get this from instrument object
     repeat_duration = len(filters) * NEW_FILTER_DURATION + \
                       sum(counts) * NEW_EXPOSURE_DURATION + \
@@ -1440,6 +1457,7 @@ def make_image_exposure_data(filter_entries, instrument, exp_time_factor=1):
         filters.append(this_filter)
         counts.append(this_count)
         exp_times.append(this_exp_time)
+    counts, exp_times = repeat_short_exp_times(counts, exp_times)
     target_overhead = NEW_TARGET_DURATION  # TODO: get this from instrument object
     repeat_duration = len(filters) * NEW_FILTER_DURATION + \
                       sum(counts) * NEW_EXPOSURE_DURATION + \
@@ -1448,7 +1466,21 @@ def make_image_exposure_data(filter_entries, instrument, exp_time_factor=1):
     return filters, counts, exp_times, target_overhead, repeat_duration
 
 
+def repeat_short_exp_times(counts, exp_times):
+    for i in range(len(counts)):
+        if counts[i] * exp_times[i] < MIN_TOTAL_EXP_TIME_PER_FILTER:
+            counts[i] = ceil(MIN_TOTAL_EXP_TIME_PER_FILTER / exp_times[i])
+    return counts, exp_times
+
+
 def write_acp_plans(plan_list, output_directory, exp_time_factor):
+    # First, delete old ACP plan files:
+    filenames = os.listdir(output_directory)
+    for filename in filenames:
+        if filename.startswith("plan_") and filename.endswith(".txt"):
+            fullpath = os.path.join(output_directory, filename)
+            os.remove(fullpath)
+
     for this_plan in plan_list:
         # Unpack acp_plan_lines:
         plan_comment_string = this_plan.action_list[0].parsed_action[2]
@@ -1462,7 +1494,8 @@ def write_acp_plans(plan_list, output_directory, exp_time_factor):
                           ';     using exposure time factor = ' + '{:5.3f}'.format(exp_time_factor)]
         for this_action in this_plan.action_list:
             acp_plan_lines.extend(this_action.acp_plan_lines)
-        # Write ACP plan file:
+
+        # Write this ACP plan file:
         filename = 'plan_' + this_plan.plan_id + '.txt'
         output_fullpath = os.path.join(output_directory, filename)
         print('PRINT lines for plan ' + this_plan.plan_id + ' to ', output_fullpath)
@@ -1482,6 +1515,8 @@ def write_summary(plan_list, an, output_directory, exp_time_factor):
                          '{:%Y-%m-%d %H:%M  UTC}'.format(datetime.now(timezone.utc)),
                          '     using exposure time factor = ' + '{:5.3f}'.format(exp_time_factor),
                          an.acp_header_string()]
+    moon_is_a_factor = an.moon_phase > MOON_PHASE_NO_FACTOR  # for this astronight
+
     for i_plan in range(len(plan_list)):
         this_plan = plan_list[i_plan]
         for i_action in range(len(this_plan.action_list)):
@@ -1494,7 +1529,7 @@ def write_summary(plan_list, an, output_directory, exp_time_factor):
             if this_action.status == 'SKIPPED':
                 start_hhmm_str = len(start_hhmm_str) * ' '
 
-            # Add '+' to hhmm if it actually refers to next day.
+            # Add '+' to hhmm if it refers to next UTC day.
             next_day_string = ' '  # default
             if i_action >= 1:
                 prev_start_utc = this_plan.action_list[i_action - 1].start_utc
@@ -1507,11 +1542,29 @@ def write_summary(plan_list, an, output_directory, exp_time_factor):
                 if this_action.start_utc.date() > prev_start_utc.date():
                     next_day_string = '+'
 
-            # Make degrees altitude prefix part.
+            # Make degrees altitude prefix part:
             if this_action.action_type.lower() in ['fov', 'stare', 'burn', 'image']:
                 alt_string = '{:2d}'.format(int(round(this_action.altitude_deg)))
             else:
                 alt_string = '  '
+
+            # Warning if moon is closer than it should be.
+            if moon_is_a_factor:
+                act = this_action.action_type.lower()
+                if act in ['burn', 'image']:
+                    if act == 'burn':
+                        ra, dec = this_action.parsed_action[2], this_action.parsed_action[3]
+                    else:
+                        ra, dec = this_action.parsed_action[3], this_action.parsed_action[4]
+
+                    moon_dist = an.moon_radec.degrees_from(RaDec(ra, dec))  # in degrees
+                    if moon_dist < MIN_MOON_DEGREES_DEFAULT:
+                        action_summary_lines.append('***** WARNING: the above target\'s ' +
+                                                    'MOON DISTANCE = ' +
+                                                    str(int(round(moon_dist))) +
+                                                    u'\N{DEGREE SIGN}' + ', should be >= ' +
+                                                    str(MIN_MOON_DEGREES_DEFAULT) +
+                                                    u'\N{DEGREE SIGN}')
 
             # Error if plan chains to itself, or if chained-to plan file does not exist:
             if this_action.action_type.lower() == 'chain':
@@ -1544,64 +1597,6 @@ def write_summary(plan_list, an, output_directory, exp_time_factor):
         this_file.write('\n'.join(all_summary_lines))
 
 
-# def make_plan_obs_lines(fov_name, fov_dict, an, instrument, num_repeats=1):
-#     """
-#     Returns a list of strings representing one fov observation in an ACP plan, and duration/sec.
-#     :param fov_name: name of FOV to observe.
-#     :param fov_dict: fov_dictionary including this FOV.
-#     :param an: Astronight object for observing night.
-#     :param instrument: Instrument object for telescope on which to make object.
-#     :param num_repeats: number of repeats (for Stare observation style only).
-#     :return: 2-ple(list of strings for direct inclusion in ACP plan, entry raw duration in seconds).
-#     """
-#     this_fov = fov_dict[fov_name]
-#     obs_style = this_fov.observing_style
-#     filters = []
-#     binnings = []
-#     counts = []
-#     exp_times = []
-#     mags = dict()
-#     startup_duration = NEW_TARGET_DURATION
-#     repeat_duration = 0  # ???
-#     for obs in this_fov.observing_list:
-#         filter, mag, count = obs
-#         filters.append(filter)
-#         binnings.append('1')
-#         counts.append(str(count))
-#         if obs_style.lower() in ['standard', 'monitor', 'stare']:
-#             exp_time = calc_exp_time(mag, filter, instrument, this_fov.max_exposure)
-#         elif obs_style.lower() == 'lpv':
-#             if len(mags) == 0:
-#                 mags = this_fov.estimate_lpv_mags(an.local_middark_jd)  # dict (get on 1st obs only)
-#             exp_time = calc_exp_time(mags[filter], filter, instrument, this_fov.max_exposure)
-#         else:
-#             error_string = '****** WARNING: fov \'' + fov_name + \
-#                            '\' has unrecognized observing style \'' + obs_style + '\'.'
-#             return error_string, 0
-#         exp_time = round(exp_time)
-#         exp_times.append('{:.0f}'.format(exp_time))
-#         repeat_duration += NEW_FILTER_DURATION + count * (NEW_EXPOSURE_DURATION + exp_time)
-#
-#     print("test " + fov_name)
-#     total_duration = startup_duration + num_repeats * repeat_duration
-#     if num_repeats > 1:
-#         duration_comment = str(round(repeat_duration / 60.0, 1)) + ' min/repeat --> ' +\
-#                            str(round(total_duration / 3600.0, 1)) + ' hours'
-#     else:
-#         duration_comment = ' --> ' + str(round(total_duration / 60.0, 1)) + ' min'
-#
-#     acp_string = [';', '#DITHER 0 ;',
-#                   '#FILTER ' + ','.join(filters) + ' ;',
-#                   '#BINNING ' + ','.join(len(filters)*['1']) + ' ;',
-#                   '#COUNT ' + ','.join(counts) + ' ;',
-#                   '#INTERVAL ' + ','.join(exp_times) + ' ; ' + duration_comment,
-#                   ';----' + this_fov.acp_comments,
-#                   fov_name + '\t' + ra_as_hours(this_fov.ra) + '\t' + dec_as_hex(this_fov.dec)]
-#     if num_repeats > 1:
-#         acp_string.insert(1, '#REPEAT ' + str(num_repeats) + ' ;')
-#     return acp_string, total_duration
-
-
 def calc_exp_time(mag, filter, instrument, max_exp_time, exp_time_factor=1):
     # Raw exposure time from mag + properties of instrument (camera & filters).
     exp_time_from_mag = instrument.filters[filter]['reference_exposure_mag10'] *\
@@ -1614,7 +1609,16 @@ def calc_exp_time(mag, filter, instrument, max_exp_time, exp_time_factor=1):
     exp_time = sqrt(1.0 / (1.0 / exp_time**2 + 1.0 / ABSOLUTE_MAX_EXPOSURE_TIME**2))
 
     # Apply absolute minimum as soft asymptote:
-    exp_time = sqrt(exp_time**2 + instrument.camera['shortest_exposure']**2)
+    # as of 20170406, absolute minimum is from this module, not necessarily from instrument object.
+    # i.e., use more stringent of the two minima.
+    effective_minimum = max(ABSOLUTE_MIN_EXPOSURE_TIME, instrument.camera['shortest_exposure'])
+    exp_time = sqrt(exp_time**2 + effective_minimum**2)
+
+    # Apply rounding (at least 2 significant digits):
+    if exp_time >= 10.0:
+        exp_time = round(exp_time, 0)  # round to nearest second
+    else:
+        exp_time = round(exp_time, 1)  # round to nearest 0.1 second
 
     # Apply fov's hard maximum:
     if max_exp_time is not None:

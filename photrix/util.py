@@ -1,7 +1,10 @@
 from datetime import datetime, timedelta, timezone
 import math
-from math import floor
+from math import floor, sqrt
 
+import numpy as np
+import pandas as pd
+import statsmodels.regression.mixed_linear_model as sm  # statsmodels version >= 0.8 !
 import ephem
 
 __author__ = "Eric Dose :: New Mexico Mira Project, Albuquerque"
@@ -366,23 +369,6 @@ def float_or_none(string):
         return None
 
 
-# def find_minima_in_timespan(jd_min_reference, period, timespan):
-#     if jd_min_reference is None or period is None:
-#         return None
-#     jd_ts_start = jd_from_datetime_utc(timespan.start)
-#     jd_ts_end = jd_from_datetime_utc(timespan.end)
-#     n_prior = floor((jd_ts_start - jd_min_reference) / period)
-#     jd_min_prior = jd_min_reference + n_prior * period
-#     utc_list = []
-#     for i in range(10):
-#         jd_test = jd_min_prior + i * period
-#         if jd_test > jd_ts_end:
-#             return utc_list
-#         if jd_test >= jd_ts_start:
-#             utc_list.append(datetime_utc_from_jd(jd_test))
-#     return utc_list
-
-
 def event_utcs_in_timespan(jd_reference, period, timespan):
     """
     Returns a list of UTC times of period events within a given Timespan.
@@ -407,3 +393,89 @@ def event_utcs_in_timespan(jd_reference, period, timespan):
         if jd_test >= jd_ts_start:
             utc_list.append(datetime_utc_from_jd(jd_test))
     return utc_list
+
+
+class MixedModelFit:
+    """
+    Object: holds info for one mixed-model (py::statsmodel) fit. 
+    General in nature (not tied to astronomical usage).
+    Uses formula form, i.e., statsmodel::sm.MixedLM.from_formula()
+    """
+    def __init__(self, data, dep_var=None, fixed_vars=None, group_var=None):
+        """
+        Executes mixed-model fit & makes data available.
+        :param data: input data, one variable per column [pandas Dataframe]
+        :param dep_var: one column name as dependent 'Y' variable [string] 
+        :param fixed_vars: one or more column names as independent 'X' variable [string]
+        :param group_var: one column name as group (category; random-effect) variable [string]
+        Usage: fit = MixedModel(df_input, 'Y', ['X1', 'X2'], 'a_group_type']
+               fit = MixedModel(df_input, 'Y', 'X1', 'a_group_type'] (OK if only one indep var)
+        """
+        if not isinstance(data, pd.DataFrame):
+            print('Parameter \'data\' must be a pandas Dataframe of input data.')
+            return
+        if dep_var is None or fixed_vars is None or group_var is None:
+            print('Provide all parameters: dep_var, fixed_vars, and group_var.')
+            return
+        if not isinstance(dep_var, str) or not isinstance(group_var, str):
+            print('Parameters \'dep_var\' and \'group_var\' must both be strings.')
+            return
+        fixed_vars_valid = False  # default if not validated
+        if isinstance(fixed_vars, str):
+            fixed_vars = list(fixed_vars)
+            fixed_vars_valid = True
+        if isinstance(fixed_vars, list):
+            if len(fixed_vars) >= 1:
+                if all([isinstance(var, str) for var in fixed_vars]):
+                    fixed_vars_valid = True
+        if not fixed_vars_valid:
+            print('Parameter \'fixed_vars\' must be a string or a list of strings.')
+            return
+        formula = dep_var + ' ~ ' + ' + '.join(fixed_vars)
+
+        model = sm.MixedLM.from_formula(formula, groups=data[group_var], data=data)
+        fit = model.fit()
+
+        self.statsmodels_object = fit  # instance of class MixedLMResults (py pkg statsmodels)
+        self.converged = fit.converged  # bool
+        self.nobs = fit.nobs  # number of observations used in fit
+        self.likelihood = fit.llf
+        self.dep_var = dep_var
+        self.fixed_vars = fixed_vars
+        self.group_var = group_var
+
+        self.coeffs = fit.params    # pd.Series, includes 'Intercept  and 'groups'
+        self.stdev = fit.bse        # pd.Series,   "
+        self.tvalues = fit.tvalues  # pd.Series,   "
+
+        self.fitted_values = fit.fittedvalues  # pd.Series, one element per data point
+        self.residuals = fit.resid             # pd.Series    "
+        self.sigma = sqrt(sum(self.residuals**2)/(self.nobs-len(fixed_vars)-2))
+
+        self.groups = pd.DataFrame(fit.random_effects).transpose()  # DataFrame, 1 row/group
+        self.group_values = pd.merge(pd.DataFrame(data[group_var]), self.groups,
+                                     left_on=group_var, right_index=True,
+                                     how='left', sort=False)['groups']  # Series (a left-join)
+
+    def predict(self, data):
+        """
+        Takes new data and renders predicted dependent-variable values.
+        DOES include effect of groups (random effects), unlike py::statsmodels.
+        :param data: new input data used to render predictions. 
+           Extra (unused) columns OK; model selects only needed columns. [pandas DataFrame] 
+        :return: predictions of dependent-variable values matching rows of 'data' (pandas Series)
+        """
+
+        # Get predicted values on fixed effects only (per statsmodels' weird def. of 'predicted'):
+        fixed_effect_inputs = data[self.fixed_vars]  # 1 col per fixed effect variable
+        predicted_on_fixed_only = self.statsmodels_object.predict(exog=fixed_effect_inputs)
+
+        # Separate RE contib to pred values were already computed in MixedModels object 'fit':
+        random_effect_inputs = pd.DataFrame(data['Ran'])  # 1 col 'Ran' = the random-effect var
+        random_effect_coeffs = self.groups
+        predicted_on_random_only = pd.merge(random_effect_inputs, random_effect_coeffs,
+                                            left_on='Ran', right_index=True,
+                                            how='left', sort=False)['groups']  # Series (left-join)
+
+        total_prediction = predicted_on_fixed_only + predicted_on_random_only
+        return total_prediction
