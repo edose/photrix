@@ -29,25 +29,25 @@
     "V": {
       "reference_exposure_mag10": 22,
       "transform": {
-        "V-I": 0.02,
-        "B-V": 0,
-        "V-R": 0
+        "V-I": -0.0199,
+        "B-V": null,
+        "V-R": null
       }
     },
     "R": {
       "reference_exposure_mag10": 30,
       "transform": {
-        "V-I": 0.03,
-        "B-V": 0,
-        "V-R": 0
+        "V-I": 0.0398,
+        "B-V": null,
+        "V-R": null
       }
     },
     "I": {
       "reference_exposure_mag10": 70,
       "transform": {
-        "V-I": 0.025,
-        "B-V": 0,
-        "V-R": 0
+        "V-I": 0.0432,
+        "B-V": null,
+        "V-R": null
       }
     }
   }

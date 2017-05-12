@@ -444,8 +444,8 @@ class MixedModelFit:
         self.fixed_vars = fixed_vars
         self.group_var = group_var
 
-        self.coeffs = fit.params    # pd.Series, includes 'Intercept  and 'groups'
-        self.stdev = fit.bse        # pd.Series,   "
+        self.fe_coeffs = fit.fe_params    # pd.Series, includes 'Intercept
+        self.stdev = pd.concat([fit.bse_fe, fit.bse_re])  # to cover for bug in statsmodels output
         self.tvalues = fit.tvalues  # pd.Series,   "
 
         self.fitted_values = fit.fittedvalues  # pd.Series, one element per data point
@@ -453,9 +453,7 @@ class MixedModelFit:
         self.sigma = sqrt(sum(self.residuals**2)/(self.nobs-len(fixed_vars)-2))
 
         self.groups = pd.DataFrame(fit.random_effects).transpose()  # DataFrame, 1 row/group
-        self.group_values = pd.merge(pd.DataFrame(data[group_var]), self.groups,
-                                     left_on=group_var, right_index=True,
-                                     how='left', sort=False)['groups']  # Series (a left-join)
+        self.groups['FITSfile'] = self.groups.index  # add FITSfile row (not just as index)
 
     def predict(self, data):
         """

@@ -1,5 +1,7 @@
 import json
 import os
+from math import floor
+from datetime import datetime, timezone
 
 import pandas as pd
 
@@ -7,7 +9,6 @@ from .user import Instrument, Site
 from .util import MixedModelFit
 
 __author__ = "Eric Dose :: New Mexico Mira Project, Albuquerque"
-
 
 AN_TOP_DIRECTORY = 'J:/Astro/Images/C14'
 
@@ -39,7 +40,7 @@ class SkyModel:
                  instrument_name='Borea', site_name='DSW',
                  max_cat_mag_error=0.01, max_inst_mag_sigma=0.03, max_color_vi=+2.5,
                  saturation_adu=None,
-                 fit_sky_bias=True, fit_vignette=True, fit_xy=True,
+                 fit_sky_bias=True, fit_vignette=True, fit_xy=False,
                  fit_transform=False, fit_extinction=True):
         """
         Constructs a sky model using mixed-model regression on df_master.
@@ -79,18 +80,23 @@ class SkyModel:
         self.fit_xy = fit_xy
         self.fit_transform = fit_transform
         self.fit_extinction = fit_extinction
-        self.df_model = None  # data to/from regression, one row per input pt [pandas DataFrame]
-        # self.regression_results = None  # placeholder [MixedModelFit object]
-        self.df_star = None  # one row per unique model star [pandas DataFrame]
-        self.extinction = None  # scalar result
+        self.df_model = None    # data to/from regression, one row per input pt [pandas DataFrame]
+        self.mm_fit = None      # placeholder [MixedModelFit object]
+        self.df_star = None     # one row per unique model star [pandas DataFrame]
+        self.extinction = None  # scalar result, placeholder
         self.transform = None   # "
         self.vignette = None    # "
+        self.x = None           # "
+        self.y = None           # "
+        self.sky_bias = None    # "
+        self.converged = False  # "
+        self.n_obs = None       # "
+        self.n_images = None    # "
+        self.sigma = None       # "
+        self.cirrus = None      # "
 
-        # note: df_master is NOT part of the object being constructed here (much too large).
-        df_master = get_df_master(self.an_top_directory, self.an_rel_directory)
-
-        # Remove rows from df_master as specified by user in file omit.txt:
-        df, warning_lines = apply_omit_txt(df_master)
+        # Rows from df_master, as curated by user in file omit.txt:
+        df, warning_lines = apply_omit_txt(self.an_top_directory, self.an_rel_directory)
 
         # Remove rows for several ineligibilities:
         df = df[df['Filter'] == self.filter]
@@ -107,8 +113,8 @@ class SkyModel:
         self.df_model = df
 
         self._prep_and_do_regression()
-        self._build_output_tables()
-        self.make_plots(df_master)
+        self._build_output()
+        self.plots()
         # self.to_json_file()  # GIVE UP on JSON -- it can't handle DataFrames and Series.
         write_stare_comps_txt_stub(self.an_top_directory, self.an_rel_directory)
 
@@ -155,81 +161,218 @@ class SkyModel:
         json_dict['df_model'] = convert_pandas_to_json_compatible_dict(json_dict['df_model'])
         json_dict['df_star'] = convert_pandas_to_json_compatible_dict(json_dict['df_star'])
         # Convert pandas Series to dictionaries without json-illegal int64, etc.
-        json_dict['regression_results'].fitted_values = \
-            convert_pandas_to_json_compatible_dict(json_dict['regression_results'].fitted_values)
-        json_dict['regression_results'].group_values = \
-            convert_pandas_to_json_compatible_dict(json_dict['regression_results'].group_values)
-        json_dict['regression_results'].residuals = \
-            convert_pandas_to_json_compatible_dict(json_dict['regression_results'].residuals)
+        json_dict['mm_fit'].fitted_values = \
+            convert_pandas_to_json_compatible_dict(json_dict['mm_fit'].fitted_values)
+        json_dict['mm_fit'].group_values = \
+            convert_pandas_to_json_compatible_dict(json_dict['mm_fit'].group_values)
+        json_dict['mm_fit'].residuals = \
+            convert_pandas_to_json_compatible_dict(json_dict['mm_fit'].residuals)
 
         with open(json_fullpath, 'w') as f:
             json.dump(json_dict, f, indent=4)
 
     def _prep_and_do_regression(self):
-        # Build dep variable and new column (whose values may be adjusted below):
-        dep_var = 'DepVar'
-        self.df_model[dep_var] = self.df_model['InstMag'] - self.df_model['CatMag']
 
-        # Build fixed-effect variable list:
+        # Initiate dependent-variable offset, which will aggregate all such offset terms.
+        dep_var_offset = self.df_model['CatMag']
+
+        # Build fixed-effect (x) variable list:
         fixed_effect_vars = []
+
         if self.fit_transform:
             fixed_effect_vars.append('CI')
         else:
             instrument = Instrument(self.instrument_name)
             transform_vi = instrument.filters[self.filter]['transform']['V-I']
-            transform_adjustment = transform_vi * self.df_model['CI']
-            self.df_model[dep_var] -= transform_adjustment  # TODO: verify sign is correct.
+            dep_var_offset += transform_vi * self.df_model['CI']
+
         if self.fit_extinction:
             fixed_effect_vars.append('Airmass')
         else:
             site = Site(self.site_name)
             extinction = site.extinction[self.filter]
-            extinction_adjustment = extinction * self.df_model['Airmass']
-            self.df_model[dep_var] -= extinction_adjustment  # TODO: verify sign is correct.
+            dep_var_offset += extinction * self.df_model['Airmass']
+
         if self.fit_sky_bias:
             if sum([x != 0 for x in self.df_model['SkyBias']]) > int(len(self.df_model) / 2):
                 fixed_effect_vars.append('SkyBias')
+
         if self.fit_vignette:
             fixed_effect_vars.append('Vignette')
+
         if self.fit_xy:
             fixed_effect_vars.extend(['X1024', 'Y1024'])
 
         # Build groups ('random-effect') variable:
         group_var = 'FITSfile'  # cirrus effect is per-image
 
-        # Execute regression:
-        self.regression_results = MixedModelFit(data=self.df_model, dep_var=dep_var,
-                                                fixed_vars=fixed_effect_vars, group_var=group_var)
+        # Build dependent (y) variable:
+        dep_var_name = 'DepVar'
+        self.df_model[dep_var_name] = self.df_model['InstMag'] - dep_var_offset
 
-    def _build_output_tables(self):
-        # Add new columns to df_model:
-        self.df_model['Residual'] = self.regression_results.residuals
-        self.df_model['FittedValues'] = self.regression_results.fitted_values
+        # Execute regression:
+        self.mm_fit = MixedModelFit(data=self.df_model, dep_var=dep_var_name,
+                                    fixed_vars=fixed_effect_vars, group_var=group_var)
+
+    def _build_output(self):
+        """
+        Builds appropriate output attributes for external use. 
+        :return: None
+        """
+        # Add 1/obs regression data as new df_model columns:
+        self.df_model['Residual'] = self.mm_fit.residuals
+        # self.df_model['FittedDepVar'] = self.mm_fit.fitted_values
+        fitted_dep_var = self.mm_fit.fitted_values
+        dep_var_offset = self.df_model['InstMag'] - self.df_model['DepVar']
+        self.df_model['FittedInstMag'] = fitted_dep_var + dep_var_offset
 
         # Build df_star (star ID and count only):
         self.df_star = self.df_model[['Serial', 'ModelStarID']].groupby('ModelStarID').count()
+        self.df_star['ModelStarID'] = self.df_star.index
+
+        # Build image vector 'cirrus' (from Mixed Model random effect), 1 row per FITS file,
+        #    index = FITSfile, columns = FITSfile, JD_mid, groups (cirrus effect):
+        df_xref = self.df_model[['FITSfile', 'JD_mid']].drop_duplicates()
+        self.cirrus = pd.merge(self.mm_fit.groups, df_xref, on='FITSfile',
+                               how='left', sort=False).sort_values(by='JD_mid')
 
         # Extract and store scalar results:
-        # self.transform, .extinction, and .vignette.
         if self.fit_transform:
-            self.transform = self.regression_results.coeffs['CI']
+            self.transform = self.mm_fit.coeffs['CI']
         else:
             instrument = Instrument(self.instrument_name)
             self.transform = instrument.filters[self.filter]['transform']['V-I']
+
         if self.fit_extinction:
-            self.extinction = self.regression_results.coeffs['Airmass']
+            self.extinction = self.mm_fit.coeffs['Airmass']
         else:
             site = Site(self.site_name)
             self.extinction = site.extinction[self.filter]
-        self.vignette = self.regression_results.coeffs['Vignette'] if self.fit_vignette else 0.0
 
+        self.vignette = self.mm_fit.fe_coeffs['Vignette'] if self.fit_vignette is True else 0.0
+        self.x = self.mm_fit.fe_coeffs['X'] if self.fit_xy is True else 0.0
+        self.y = self.mm_fit.fe_coeffs['Y'] if self.fit_xy is True else 0.0
+        self.sky_bias = self.mm_fit.fe_coeffs['SkyBias'] if self.fit_sky_bias is True else 0.0
+        self.converged = self.mm_fit.converged
+        self.n_obs = len(self.df_model)
+        self.n_images = len(self.df_model['FITSfile'].drop_duplicates())
+        self.sigma = self.mm_fit.sigma
         print('\n', len(self.df_model), ' observations --> sigma=',
-              round((1000.0*self.regression_results.sigma), 1), ' mMag')
+              round((1000.0 * self.sigma), 1), ' mMag')
 
-    def make_plots(self, df_master=None):
-        if df_master is None:
-            df_master = get_df_master(self.an_top_directory, self.an_rel_directory)
-        pass  # make the make_plots here
+    def plots(self):
+        import numpy as np
+        import matplotlib.pyplot as plt
+        import matplotlib.ticker as ticker
+
+        # Set up plot grid and style parameters:
+        fig, axes = plt.subplots(ncols=4, nrows=3, figsize=(16, 10))  # (width, height) in "inches"
+        obs_is_std = [name.startswith('Std_') for name in self.df_model['FOV']]
+        obs_point_colors = ['darkgreen' if obs_is_std[i] is True else 'black'
+                            for i, x in enumerate(obs_is_std)]
+        image_is_std = [name.startswith('Std_') for name in self.cirrus['FITSfile']]
+        image_point_colors = ['darkgreen' if image_is_std[i] is True else 'black'
+                              for i, x in enumerate(image_is_std)]
+        jd_floor = floor(min(self.df_model['JD_mid']))
+        obs_jd_fract = self.df_model['JD_mid']-jd_floor
+        xlabel_jd = 'JD(mid)-' + str(jd_floor)
+        obs_residuals_mmag = self.df_model['Residual'] * 1000.0
+
+        def make_labels(ax, title, xlabel, ylabel, zero_line=True):
+            ax.set_title(title, y=0.89)
+            ax.set_xlabel(xlabel, labelpad=-27)
+            ax.set_ylabel(ylabel, labelpad=-8)
+            if zero_line is True:
+                ax.axhline(y=0, color='lightgray', linewidth=1, zorder=-100)
+
+        # Cirrus Plot (one point per image):
+        ax = axes[0, 0]
+        make_labels(ax, 'Image Cirrus Plot', xlabel_jd, 'mMag')
+        ax.scatter(x=self.cirrus['JD_mid']-jd_floor, y=self.cirrus['groups'] * 1000.0,
+                   alpha=0.6, color=image_point_colors)
+
+        # Sky background vs JD_mid:
+        ax = axes[0, 1]
+        make_labels(ax, 'Sky background vs JD_mid', xlabel_jd, 'Sky ADU',
+                    zero_line=False)
+        ax.scatter(x=obs_jd_fract, y=self.df_model['SkyADU'],
+                   alpha=0.6, color=obs_point_colors)
+
+        # Residuals vs Instrument Magnitude:
+        ax = axes[0, 2]
+        make_labels(ax, 'Residuals vs Instrument Mag', 'Instrument Mag', 'mMag')
+        ax.scatter(x=self.df_model['InstMag'], y=obs_residuals_mmag,
+                   alpha=0.6, color=obs_point_colors)
+
+        # Residuals vs Max ADU:
+        ax = axes[0, 3]
+        xlabel_text = 'Max ADU, uncalibrated [log scale]'
+        make_labels(ax, 'Residuals vs Max ADU', xlabel_text, 'mMag')
+        ax.set_xlabel(xlabel_text, labelpad=-30)
+        ax.set_xscale('log')
+        x_scale_min = min(1000.0, 0.9 * min(self.df_model['MaxADU_Ur']))
+        x_scale_max = 1.1 * max(self.df_model['MaxADU_Ur'])
+        ax.set_xlim(x_scale_min, x_scale_max)
+        # ax.xaxis.set_major_locator(ticker.LogLocator(base=10.0, numticks=20))
+        ax.scatter(x=self.df_model['MaxADU_Ur'], y=obs_residuals_mmag,
+                   alpha=0.6, color=obs_point_colors)
+
+        # Residuals vs Sky background:
+        ax = axes[1, 0]
+        make_labels(ax, 'Residuals vs Sky background', 'Sky ADUs', 'mMag')
+        ax.scatter(x=self.df_model['SkyADU'], y=obs_residuals_mmag,
+                   alpha=0.6, color=obs_point_colors)
+
+        # Residuals vs JD:
+        ax = axes[1, 1]
+        make_labels(ax, 'Residuals vs JD', xlabel_jd, 'mMag')
+        ax.scatter(x=obs_jd_fract, y=obs_residuals_mmag,
+                   alpha=0.6, color=obs_point_colors)
+
+        # Residuals vs Color Index:
+        ax = axes[1, 2]
+        make_labels(ax, 'Residuals vs Color Index', 'Color Index (V-I)', 'mMag')
+        ax.scatter(x=self.df_model['CI'], y=obs_residuals_mmag,
+                   alpha=0.6, color=obs_point_colors)
+
+        # Residuals vs Airmass:
+        ax = axes[1, 3]
+        make_labels(ax, 'Residuals vs Airmass', 'Airmass', 'mMag')
+        ax.scatter(x=self.df_model['Airmass'], y=obs_residuals_mmag,
+                   alpha=0.6, color=obs_point_colors)
+
+        # Residuals vs Exposure Time:
+        ax = axes[2, 0]
+        make_labels(ax, 'Residuals vs Exposure Time', 'seconds', 'mMag')
+        ax.scatter(x=self.df_model['Exposure'], y=obs_residuals_mmag,
+                   alpha=0.6, color=obs_point_colors)
+
+        # Residuals vs Vignette:
+        ax = axes[2, 1]
+        make_labels(ax, 'Residuals vs Vignette', 'pixels from CCD center', 'mMag')
+        ax.scatter(x=1024*np.sqrt(self.df_model['Vignette']), y=obs_residuals_mmag,
+                   alpha=0.6, color=obs_point_colors)
+
+        # Residuals vs X:
+        ax = axes[2, 2]
+        make_labels(ax, 'Residuals vs X', 'X pixels from CCD center', 'mMag')
+        ax.scatter(x=1024*self.df_model['X1024'], y=self.df_model['Residual'] * 1000.0, alpha=0.6,
+                   color=obs_point_colors)
+
+        # Residuals vs Y:
+        ax = axes[2, 3]
+        make_labels(ax, 'Residuals vs Y', 'Y pixels from CCD center', 'mMag')
+        ax.scatter(x=1024*self.df_model['Y1024'], y=self.df_model['Residual'] * 1000.0, alpha=0.6,
+                   color=obs_point_colors)
+
+        # Finish the figure, and show the entire plot:
+        fig.tight_layout(rect=(0, 0, 1, 0.925))
+        fig.subplots_adjust(left=0.06, bottom=0.06, right=0.94, top=0.85, wspace=0.25, hspace=0.25)
+        fig.suptitle(self.an_rel_directory +
+                     '                   ' + self.filter + ' filter                ' +
+                     '{:%Y-%m-%d     %H:%M  utc}'.format(datetime.now(timezone.utc)),
+                     color='darkblue', fontsize=20, weight='bold')
+        plt.show()
 
 
 def get_df_master(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
@@ -287,6 +430,7 @@ def apply_omit_txt(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
             return None, 'Line has wrong number of parameters: \'' + line + '\'.'
 
     for line in lines:
+        warning_line = None
         rows_to_omit = len(df_filtered) * [False]  # default to be overwritten
         if line.startswith('#OBS'):
             parms, warning_line = get_line_parms(line, "#OBS", 2, 2)
@@ -325,25 +469,28 @@ def apply_omit_txt(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
             else:
                 warning_lines.append(warning_line)
         elif line.startswith('#JD'):
-            parms, warning_line = get_line_parms(line, "#IMAGE", 2, 2)
+            parms, warning_line = get_line_parms(line, "#JD", 2, 2)
             if parms is not None:
-                jd_start = float(parms[0])
-                jd_end = float(parms[1])
+                jd_floor = floor(min(df_filtered['JD_mid']))
+                jd_start = float(parms[0]) + jd_floor
+                jd_end = float(parms[1]) + jd_floor
                 rows_to_omit = (df_filtered['JD_mid'] >= jd_start) & \
-                          (df_filtered['JD_mid'] == jd_end)
+                          (df_filtered['JD_mid'] <= jd_end)
             else:
                 warning_lines.append(warning_line)
         else:
-            warning_lines.append('Directive not understood: \'' + line + '\'.')
+            warning_line = 'Directive not understood: \'' + line + '\'.'
+            warning_lines.append(warning_line)
 
         if sum(rows_to_omit) >= 1:
             df_filtered = df_filtered[~ rows_to_omit]  # remove rows as user requested.
         else:
-            warning_lines.append('No rows omitted: \'' + line + '\'.')
+            if warning_line is None:
+                warning_lines.append('No rows omitted: \'' + line + '\'.')
 
     for warning_line in warning_lines:
         print(warning_line)
-    print('\n_apply_omit_txt() removed ' + str(len(df_master) - len(df_filtered)) + ' rows, ' +
+    print(str(len(df_master) - len(df_filtered)) + ' rows removed via omit.txt. ' +
           str(len(df_filtered)) + ' rows remain.')
     return df_filtered, warning_lines
 
@@ -354,11 +501,11 @@ def write_omit_txt_stub(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None
              ';----- Example directive lines:',
              ';',
              ';#OBS    Obj-0000-V, 132 ; to omit star 132 from FITS image Obj-0000-V.fts',
-             ';#STAR   Obj, 132, V     ; to omit star 132 from all FITS with object Obj'
+             ';#STAR   FOV, 132, V     ; to omit star 132 from all FITS with FOV '
              'and filter V',
-             ';#STAR   Obj, 132        ; to omit star 132 from all FITS with object Obj'
+             ';#STAR   FOV, 132        ; to omit star 132 from all FITS with FOV '
              'and ALL filters',
-             ';#IMAGE  Obj-0000-V      ; to omit FITS image Obj-0000-V specifically',
+             ';#IMAGE  Obj-0000-V      ; to omit FITS image Obj-0000-V.fts specifically',
              ';#JD     0.72, 1         ; to omit fractional JD from 0.72 through 1',
              ';#SERIAL 123,77 54   6   ; to omit observations by Serial number (many per line OK)',
              ';',

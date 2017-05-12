@@ -499,11 +499,11 @@ def test_mixed_model_fit_class():
     assert fit.dep_var == 'Dep'
     assert fit.fixed_vars == ['A', 'B', 'C']
     assert fit.group_var == 'Ran'
-    assert isinstance(fit.coeffs, pd.Series)
-    assert list(fit.coeffs.index) == ['Intercept', 'A', 'B', 'C', 'groups RE']
-    assert list(fit.coeffs) == pytest.approx([16.648186, 0.946692, 1.959923, 4.069383, 22.381472],
+    assert isinstance(fit.fe_coeffs, pd.Series)
+    assert list(fit.fe_coeffs.index) == ['Intercept', 'A', 'B', 'C']
+    assert list(fit.fe_coeffs) == pytest.approx([16.648186, 0.946692, 1.959923, 4.069383],
                                              abs=0.00001)
-    assert list(fit.stdev.index[:-1]) == list(fit.coeffs.index[:-1])
+    assert list(fit.stdev.index[:-1]) == list(fit.fe_coeffs.index)
     assert list(fit.stdev[:-1]) == pytest.approx([2.844632, 0.142185, 0.134386, 0.145358],
                                                  abs=0.00001)
     assert list(fit.fitted_values)[0:4] == pytest.approx([24.809899, 10.130408, 19.834543,

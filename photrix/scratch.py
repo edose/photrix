@@ -1,8 +1,12 @@
+import os
+import matplotlib.pyplot as plt
+
 import numpy as np
 import pandas as pd
 import statsmodels.regression.mixed_linear_model as sm  # statsmodels version >= 0.8 !
 
-import matplotlib.pyplot as plt
+PHOTRIX_ROOT_DIRECTORY = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+TEST_TOP_DIRECTORY = os.path.join(PHOTRIX_ROOT_DIRECTORY, "test")
 
 __author__ = "Eric Dose :: Bois d'Arc Observatory, Kansas"
 
@@ -156,7 +160,7 @@ def w2():
 
 
 def toggle():
-    # ---> (EVD) I think we could adapt this to using arrow keys to switch between make_plots.
+    # ---> (EVD) I think we could adapt this to using arrow keys to switch between plots.
 
     """ toggle between two images by pressing "t"
 
@@ -283,7 +287,7 @@ def try_statsmodel(from_formula=True):
        .fittedvalues = fit values of dep. var, includes RE contribs [Series, length=# input pts]
        .llf = likelihood [float]
        .model = [object of MixedLM class]
-       .nobs = number of observations included in fit [int]
+       .n_obs = number of observations included in fit [int]
        .params = FE then RE coefficient values from fit (RE is variance) [Series, index=var name]
        .params_object = [MixedLMParams object]
        .predict(exog=[DataFrame]) --> returns predicted Y  **ONLY INCLUDES FIXED-EFFECT CONTRIBS!**
@@ -344,7 +348,7 @@ def try_statsmodel(from_formula=True):
     print('fit.fe_params = ', fit.fe_params)
     print('fit.fittedvalues.head() = ', fit.fittedvalues.head())
     print('fit.llf = ', fit.llf)
-    print('fit.nobs = ', fit.nobs)
+    print('fit.n_obs = ', fit.nobs)
     print('fit.params = ', fit.params)
     print('fit.random_effects = ', fit.random_effects)
     print('fit.resid.head() = ', fit.resid.head())
@@ -363,4 +367,62 @@ def try_logging():
     logging.info('12 FITS without plate solutions.')
 
 
+def plot():
+    from photrix import process
+    an_top_directory = TEST_TOP_DIRECTORY
+    an_rel_directory = '$an_for_test'
+    test_filter = 'V'
+    directive_lines = ['#SERIAL  348 203 1884 678 182 177 1653 1880 ;  V outliers',
+                       '#IMAGE   QZ Aql-0001-V  ;  crazy cirrus term',
+                       '#SERIAL  352 690  ;  R outliers',
+                       '#SERIAL  703 875 193  ;  I outliers'] # in actual R processing, for comp.
+    fullpath = os.path.join(an_top_directory, an_rel_directory, 'Photometry', 'omit.txt')
 
+    omit_txt_backed_up = _backup_omit_txt(an_top_directory, an_rel_directory)
+
+    # Write new omit.txt with test directive lines:
+    process.write_omit_txt_stub(an_top_directory=an_top_directory,
+                                an_rel_directory=an_rel_directory)
+    with open(fullpath) as f:
+        lines = f.readlines()
+        directive_lines = [line + '\n' for line in directive_lines]
+    lines.extend(directive_lines)
+    with open(fullpath, 'w') as f:
+        f.writelines(lines)
+
+    # Construct a SkyModel object, which automatically calls its plot() method.
+    modelV = process.SkyModel(an_top_directory=an_top_directory,
+                              an_rel_directory=an_rel_directory, filter=test_filter,
+                              fit_extinction=False)
+
+    # Restore omit.txt if it was backed up, else write stub:
+    if omit_txt_backed_up:
+        _restore_omit_txt(an_top_directory, an_rel_directory)
+    if not os.path.exists(fullpath):
+        process.write_omit_txt_stub(an_top_directory=an_top_directory,
+                                    an_rel_directory=an_rel_directory)
+
+
+def _backup_omit_txt(an_top_directory, an_rel_directory):
+    import shutil
+    fullpath = os.path.join(an_top_directory, an_rel_directory, 'Photometry', 'omit.txt')
+    backup_path = os.path.join(an_top_directory, an_rel_directory, 'Photometry', 'omit-SAVE.txt')
+    omit_txt_backed_up = False
+    if os.path.exists(fullpath):
+        if os.path.exists(backup_path):
+            os.remove(backup_path)
+        shutil.copy2(fullpath, backup_path)  # make a copy to restore later.
+        omit_txt_backed_up = True
+        os.remove(fullpath)
+    return omit_txt_backed_up
+
+
+def _restore_omit_txt(an_top_directory, an_rel_directory):
+    import shutil
+    fullpath = os.path.join(an_top_directory, an_rel_directory, 'Photometry', 'omit.txt')
+    backup_path = os.path.join(an_top_directory, an_rel_directory, 'Photometry', 'omit-SAVE.txt')
+
+    if os.path.exists(backup_path):
+        if os.path.exists(fullpath):
+            os.remove(fullpath)
+        shutil.move(backup_path, fullpath)  # restore saved copy.
