@@ -487,36 +487,52 @@ def test_mixed_model_fit_class():
     df['Dep'] = 17 + 1*df.A + 2*df.B + 4*df.C + 5*(df.Ran-1) + 1*np.random.randn(len(df))
     categories = ['X', 'Y', 'Z']
     df['Ran'] = [categories[r] for r in df['Ran']]
+    df.index = df.index + 200
     # Split test data into model and test blocks:
     df_model = df[0:int(3*points/4)]
     df_test = df[len(df_model):]
 
-    # Construct fit object & verify attributes:
+    # Construct fit object:
     fit = util.MixedModelFit(df_model, dep_var='Dep', fixed_vars=['A', 'B', 'C'], group_var='Ran')
+
+    # Test object and scalar attributes:
+    assert isinstance(fit, util.MixedModelFit)
     assert fit.converged is True
     assert fit.nobs == len(df_model)
     assert fit.likelihood == pytest.approx(-95.7673)
     assert fit.dep_var == 'Dep'
     assert fit.fixed_vars == ['A', 'B', 'C']
     assert fit.group_var == 'Ran'
-    assert isinstance(fit.fe_coeffs, pd.Series)
-    assert list(fit.fe_coeffs.index) == ['Intercept', 'A', 'B', 'C']
-    assert list(fit.fe_coeffs) == pytest.approx([16.648186, 0.946692, 1.959923, 4.069383],
-                                             abs=0.00001)
-    assert list(fit.stdev.index[:-1]) == list(fit.fe_coeffs.index)
-    assert list(fit.stdev[:-1]) == pytest.approx([2.844632, 0.142185, 0.134386, 0.145358],
-                                                 abs=0.00001)
-    assert list(fit.fitted_values)[0:4] == pytest.approx([24.809899, 10.130408, 19.834543,
-                                                          7.758331], abs=0.00001)
-    assert list(fit.residuals)[0:2] == pytest.approx([0.490179, -0.786949], abs=0.00001)
-    assert list(fit.groups.index) == ['X', 'Y', 'Z']
-    assert list(fit.groups['groups']) == pytest.approx([-5.164649, 0.543793, 4.620857], abs=0.00001)
-    assert list(fit.group_values)[0:4] == pytest.approx([4.6208569767773913, 4.6208569767773913,
-                                                         0.54379250510498767, -5.1646494818793514],
-                                                        abs=0.00001)
+    assert fit.sigma == pytest.approx(1.030723)
+
+    # Test fixed-effect results dataframe:
+    assert list(fit.df_fixed_effects.index) == ['Intercept', 'A', 'B', 'C']
+    assert list(fit.df_fixed_effects['Name']) == list(fit.df_fixed_effects.index)
+    assert list(fit.df_fixed_effects['Value']) == pytest.approx([16.648186, 0.946692,
+                                                                 1.959923, 4.069383], abs=0.00001)
+    assert list(fit.df_fixed_effects['Stdev']) == pytest.approx([2.844632, 0.142185,
+                                                                 0.134386, 0.145358], abs=0.00001)
+    assert list(fit.df_fixed_effects['Tvalue']) == pytest.approx([5.8525, 6.65818,
+                                                                  14.58429, 27.99568], abs=0.0001)
+    assert list(fit.df_fixed_effects['Pvalue'] * 10**9) == pytest.approx([4.8426, 0.027724,
+                                                                          0, 0], abs=0.0001)
+
+    # Test random-effect (group) results dataframe:
+    assert list(fit.df_random_effects.index) == ['X', 'Y', 'Z']
+    assert list(fit.df_random_effects['GroupName']) == list(fit.df_random_effects.index)
+    assert list(fit.df_random_effects['GroupValue']) == pytest.approx([-5.164649, 0.543793,
+                                                                       4.620857], abs=0.00001)
+
+    # Test observation results dataframe:
+    assert list(fit.df_observations['FittedValue'])[0:4] == pytest.approx([24.809899, 10.130408,
+                                                                           19.834543, 7.758331],
+                                                                          abs=0.00001)
+    assert list(fit.df_observations['Residual'])[0:4] == pytest.approx([0.490179, -0.786949,
+                                                                        0.58315, -1.23926],
+                                                                       abs=0.00001)
 
     # Verify predictions on model data:
-    assert list(fit.predict(df_model)) == pytest.approx(fit.fitted_values)
+    assert list(fit.predict(df_model)) == pytest.approx(fit.df_observations['FittedValue'])
     # Verify predictions on test data:
     assert list(fit.predict(df_test[0:4])) == pytest.approx([16.706808844306536, 18.50420441664172,
                                                             20.533844119080726, 18.952844883150998])

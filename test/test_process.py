@@ -84,6 +84,7 @@ def test_get_df_master():
     assert len(df_master) == 2285
     assert len(df_master.columns) == 35
     assert all([col in df_master.columns for col in ['Serial', 'FITSfile', 'Filter']])
+    assert list(df_master.index) == list(df_master['Serial'])
 
 
 def test_apply_omit_txt():
@@ -206,7 +207,7 @@ def test_class_skymodel():
 
     modelV = process.SkyModel(an_top_directory=TEST_TOP_DIRECTORY,
                               an_rel_directory=an_rel_directory, filter=test_filter,
-                              fit_extinction=False)
+                              fit_extinction=False, do_plots=False)
 
     # Restore omit.txt if it was backed up, else write stub:
     if omit_txt_backed_up:
@@ -238,7 +239,7 @@ def test_class_skymodel():
     assert modelV.n_images == 18
     assert len(modelV.df_model['FITSfile'].drop_duplicates()) == modelV.n_images
     assert isinstance(modelV.mm_fit, MixedModelFit)
-    assert len(modelV.mm_fit.fe_coeffs) == 3  # from MixedModelFit object, normally not needed.
+    assert len(modelV.mm_fit.df_fixed_effects) == 3
     assert modelV.transform ==\
            (Instrument(modelV.instrument_name)).filters[modelV.filter]['transform']['V-I']
     assert modelV.extinction == Site(modelV.site_name).extinction[modelV.filter]
@@ -248,6 +249,21 @@ def test_class_skymodel():
     assert modelV.sky_bias == pytest.approx(0.6630, abs=0.0001)
     assert modelV.sigma == pytest.approx(0.0136, abs=0.0005)
 
+    # Test SkyModel.predict():
+    # n_rows = 3
+    # df_input = modelV.df_model[:n_rows]  # first rows
+    df_input = pd.DataFrame({'Serial': [9997, 9998, 9999],
+                             'SkyBias': [0.55, 0.9, 0.5454],
+                             'Vignette': [0.322, 0, 1],
+                             'CI': [0.577, 2.2, 0.12],
+                             'Airmass': [1.57, 1.0, 2.1],
+                             'FITSfile': ['BG Gem-0001-V.fts', 'BG Gem-0001-V.fts',
+                                          'Std_SA35-0001-V.fts'],
+                             'InstMag': [-7.68043698, -10.7139893, -6.500945076]},
+                            index=['9997a', '9998a', '9999a'])  # predict() has no access to CatMag
+    expected_star_mags = [12.34, 9.2, 13.333]  # ideal CatMags
+    mag_predictions = modelV.predict(df_input)
+    assert list(mag_predictions) == pytest.approx(expected_star_mags)
 
 
 def _backup_omit_txt(an_top_directory, an_rel_directory):

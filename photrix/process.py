@@ -41,7 +41,7 @@ class SkyModel:
                  max_cat_mag_error=0.01, max_inst_mag_sigma=0.03, max_color_vi=+2.5,
                  saturation_adu=None,
                  fit_sky_bias=True, fit_vignette=True, fit_xy=False,
-                 fit_transform=False, fit_extinction=True):
+                 fit_transform=False, fit_extinction=True, do_plots=True):
         """
         Constructs a sky model using mixed-model regression on df_master.
            Normally used by make_model()
@@ -80,6 +80,7 @@ class SkyModel:
         self.fit_xy = fit_xy
         self.fit_transform = fit_transform
         self.fit_extinction = fit_extinction
+        self.dep_var_name = 'InstMag_with_offsets'
         self.df_model = None    # data to/from regression, one row per input pt [pandas DataFrame]
         self.mm_fit = None      # placeholder [MixedModelFit object]
         self.df_star = None     # one row per unique model star [pandas DataFrame]
@@ -93,12 +94,12 @@ class SkyModel:
         self.n_obs = None       # "
         self.n_images = None    # "
         self.sigma = None       # "
-        self.cirrus = None      # "
+        self.df_image = None    # one row per image, placeholder
 
         # Rows from df_master, as curated by user in file omit.txt:
         df, warning_lines = apply_omit_txt(self.an_top_directory, self.an_rel_directory)
 
-        # Remove rows for several ineligibilities:
+        # Remove rows for several causes of ineligibility to help form a sky model:
         df = df[df['Filter'] == self.filter]
         df = df[df['StarType'] == 'Comp']
         df = df[df['CatMag'].notnull()]
@@ -114,105 +115,101 @@ class SkyModel:
 
         self._prep_and_do_regression()
         self._build_output()
-        self.plots()
+        if do_plots:
+            self.plots()
         # self.to_json_file()  # GIVE UP on JSON -- it can't handle DataFrames and Series.
         write_stare_comps_txt_stub(self.an_top_directory, self.an_rel_directory)
 
-    @classmethod
-    def from_json(cls, an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None, filter=None):
-        """
-        Alternate constructor, reads from JSON file previously written.
-           Normally used by predict(), which requires final (immutable) Models.
-        :param an_top_directory: path to an_rel_folder [str]
-        :param an_rel_directory: folder for this instrument on this Astronight [string]
-        :param filter: the filter to which this model applies [string, e.g., 'V' or 'R']
-        :return: newly constructed Model object [class Model]
-        """
-        json_fullpath = os.path.join(an_top_directory, an_rel_directory, "model-" + filter + ".txt")
-        with open(json_fullpath, 'r') as f:
-            d = json.load(f)
-        # Series and DataFrames (pandas) were stored as dictionaries, so convert them back:
-
-
-
-        # Distribute dictionary elements to their original object attributes:
-        return cls(an_top_directory=an_top_directory, an_rel_directory=an_rel_directory,
-                   filter=filter,
-                   instrument_name=d['instrument_name'],
-                   max_inst_mag_sigma=d['max_inst_mag_sigma'],
-                   max_cat_mag_error=d['max_cat_mag_error'],
-                   max_color_vi=+d['max_color_vi'], saturated_adu=d['saturation_adu'],
-                   fit_skyBias=d['fit_sky_bias'],
-                   fit_vignette=d['fit_vignette'], fit_xy=d['fit_xy'],
-                   fit_transform=d['fit_transform'], fit_extinction=d['fit_extinction'])
-
-    def to_json_file(self):
-        """
-        Writes (most of) the current object to a JSON file.
-           Does NOT include df_master (which is huge, but can be found in the same directory).
-           Also does not include the statsmodels::MixedModelLm which cannot be serialized.
-        :return: True if file successfully written, else False.
-        """
-        json_fullpath = os.path.join(self.an_top_directory, self.an_rel_directory, 'Photometry',
-                                     "model-" + self.filter + ".json")
-        json_dict = vars(self).copy()
-
-        # Convert pandas DataFrames to dictionaries without json-illegal int64, etc.
-        json_dict['df_model'] = convert_pandas_to_json_compatible_dict(json_dict['df_model'])
-        json_dict['df_star'] = convert_pandas_to_json_compatible_dict(json_dict['df_star'])
-        # Convert pandas Series to dictionaries without json-illegal int64, etc.
-        json_dict['mm_fit'].fitted_values = \
-            convert_pandas_to_json_compatible_dict(json_dict['mm_fit'].fitted_values)
-        json_dict['mm_fit'].group_values = \
-            convert_pandas_to_json_compatible_dict(json_dict['mm_fit'].group_values)
-        json_dict['mm_fit'].residuals = \
-            convert_pandas_to_json_compatible_dict(json_dict['mm_fit'].residuals)
-
-        with open(json_fullpath, 'w') as f:
-            json.dump(json_dict, f, indent=4)
+    # @classmethod
+    # def from_json(cls, an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None, filter=None):
+    #     """
+    #     Alternate constructor, reads from JSON file previously written.
+    #        Normally used by predict(), which requires final (immutable) Models.
+    #     :param an_top_directory: path to an_rel_folder [str]
+    #     :param an_rel_directory: folder for this instrument on this Astronight [string]
+    #     :param filter: the filter to which this model applies [string, e.g., 'V' or 'R']
+    #     :return: newly constructed Model object [class Model]
+    #     """
+    #     json_fullpath = os.path.join(an_top_directory, an_rel_directory, "model-" + filter + ".txt")
+    #     with open(json_fullpath, 'r') as f:
+    #         d = json.load(f)
+    #     # Series and DataFrames (pandas) were stored as dictionaries, so convert them back:
+    #
+    #
+    #
+    #     # Distribute dictionary elements to their original object attributes:
+    #     return cls(an_top_directory=an_top_directory, an_rel_directory=an_rel_directory,
+    #                filter=filter,
+    #                instrument_name=d['instrument_name'],
+    #                max_inst_mag_sigma=d['max_inst_mag_sigma'],
+    #                max_cat_mag_error=d['max_cat_mag_error'],
+    #                max_color_vi=+d['max_color_vi'], saturated_adu=d['saturation_adu'],
+    #                fit_skyBias=d['fit_sky_bias'],
+    #                fit_vignette=d['fit_vignette'], fit_xy=d['fit_xy'],
+    #                fit_transform=d['fit_transform'], fit_extinction=d['fit_extinction'])
+    #
+    # def to_json_file(self):
+    #     """
+    #     Writes (most of) the current object to a JSON file.
+    #        Does NOT include df_master (which is huge, but can be found in the same directory).
+    #        Also does not include the statsmodels::MixedModelLm which cannot be serialized.
+    #     :return: True if file successfully written, else False.
+    #     """
+    #     json_fullpath = os.path.join(self.an_top_directory, self.an_rel_directory, 'Photometry',
+    #                                  "model-" + self.filter + ".json")
+    #     json_dict = vars(self).copy()
+    #
+    #     # Convert pandas DataFrames to dictionaries without json-illegal int64, etc.
+    #     json_dict['df_model'] = convert_pandas_to_json_compatible_dict(json_dict['df_model'])
+    #     json_dict['df_star'] = convert_pandas_to_json_compatible_dict(json_dict['df_star'])
+    #     # Convert pandas Series to dictionaries without json-illegal int64, etc.
+    #     json_dict['mm_fit'].fitted_values = \
+    #         convert_pandas_to_json_compatible_dict(json_dict['mm_fit'].fitted_values)
+    #     json_dict['mm_fit'].group_values = \
+    #         convert_pandas_to_json_compatible_dict(json_dict['mm_fit'].group_values)
+    #     json_dict['mm_fit'].residuals = \
+    #         convert_pandas_to_json_compatible_dict(json_dict['mm_fit'].residuals)
+    #
+    #     with open(json_fullpath, 'w') as f:
+    #         json.dump(json_dict, f, indent=4)
 
     def _prep_and_do_regression(self):
 
-        # Initiate dependent-variable offset, which will aggregate all such offset terms.
-        dep_var_offset = self.df_model['CatMag']
+        # Initiate dependent-variable offset, which will aggregate all such offset terms:
+        dep_var_offset = self.df_model['CatMag'].copy()  # *copy* CatMag, or it will be damaged
 
-        # Build fixed-effect (x) variable list:
-        fixed_effect_vars = []
-
+        # Build fixed-effect (x) variable list and construct dep-var offset:
+        fixed_effect_var_list = []
         if self.fit_transform:
-            fixed_effect_vars.append('CI')
+            fixed_effect_var_list.append('CI')
         else:
             instrument = Instrument(self.instrument_name)
             transform_vi = instrument.filters[self.filter]['transform']['V-I']
             dep_var_offset += transform_vi * self.df_model['CI']
-
         if self.fit_extinction:
-            fixed_effect_vars.append('Airmass')
+            fixed_effect_var_list.append('Airmass')
         else:
             site = Site(self.site_name)
             extinction = site.extinction[self.filter]
             dep_var_offset += extinction * self.df_model['Airmass']
-
         if self.fit_sky_bias:
             if sum([x != 0 for x in self.df_model['SkyBias']]) > int(len(self.df_model) / 2):
-                fixed_effect_vars.append('SkyBias')
-
+                fixed_effect_var_list.append('SkyBias')
         if self.fit_vignette:
-            fixed_effect_vars.append('Vignette')
-
+            fixed_effect_var_list.append('Vignette')
         if self.fit_xy:
-            fixed_effect_vars.extend(['X1024', 'Y1024'])
+            fixed_effect_var_list.extend(['X1024', 'Y1024'])
 
-        # Build groups ('random-effect') variable:
-        group_var = 'FITSfile'  # cirrus effect is per-image
+        # Build 'random-effect' variable:
+        random_effect_var_name = 'FITSfile'  # cirrus effect is per-image
 
         # Build dependent (y) variable:
-        dep_var_name = 'DepVar'
-        self.df_model[dep_var_name] = self.df_model['InstMag'] - dep_var_offset
+        self.df_model[self.dep_var_name] = self.df_model['InstMag'] - dep_var_offset
 
         # Execute regression:
-        self.mm_fit = MixedModelFit(data=self.df_model, dep_var=dep_var_name,
-                                    fixed_vars=fixed_effect_vars, group_var=group_var)
+        self.mm_fit = MixedModelFit(data=self.df_model, dep_var=self.dep_var_name,
+                                    fixed_vars=fixed_effect_var_list,
+                                    group_var=random_effect_var_name)
 
     def _build_output(self):
         """
@@ -220,39 +217,42 @@ class SkyModel:
         :return: None
         """
         # Add 1/obs regression data as new df_model columns:
-        self.df_model['Residual'] = self.mm_fit.residuals
-        # self.df_model['FittedDepVar'] = self.mm_fit.fitted_values
-        fitted_dep_var = self.mm_fit.fitted_values
-        dep_var_offset = self.df_model['InstMag'] - self.df_model['DepVar']
-        self.df_model['FittedInstMag'] = fitted_dep_var + dep_var_offset
+        self.df_model['FittedValue'] = self.mm_fit.df_observations['FittedValue']
+        self.df_model['Residual'] = self.mm_fit.df_observations['Residual']
+        dep_var_offset = self.df_model['InstMag'] - self.df_model[self.dep_var_name]
+        self.df_model['FittedInstMag'] = self.df_model['FittedValue'] + dep_var_offset
 
         # Build df_star (star ID and count only):
         self.df_star = self.df_model[['Serial', 'ModelStarID']].groupby('ModelStarID').count()
         self.df_star['ModelStarID'] = self.df_star.index
 
-        # Build image vector 'cirrus' (from Mixed Model random effect), 1 row per FITS file,
-        #    index = FITSfile, columns = FITSfile, JD_mid, groups (cirrus effect):
+        # Build df_image (from Mixed Model random effect), 1 row per FITS file,
+        #    index = FITSfile, columns = FITSfile, JD_mid, Value:
+        df = self.mm_fit.df_random_effects.copy()
+        df = df.rename(columns={'GroupName': 'FITSfile', 'GroupValue': 'Value'})
         df_xref = self.df_model[['FITSfile', 'JD_mid']].drop_duplicates()
-        self.cirrus = pd.merge(self.mm_fit.groups, df_xref, on='FITSfile',
-                               how='left', sort=False).sort_values(by='JD_mid')
+        df = pd.merge(df, df_xref, on='FITSfile', how='left', sort=False).sort_values(by='JD_mid')
+        self.df_image = df.copy()
 
         # Extract and store scalar results:
         if self.fit_transform:
-            self.transform = self.mm_fit.coeffs['CI']
+            self.transform = self.mm_fit.df_fixed_effects.loc['CI', 'Value']  # .loc(row, col)
         else:
             instrument = Instrument(self.instrument_name)
             self.transform = instrument.filters[self.filter]['transform']['V-I']
 
         if self.fit_extinction:
-            self.extinction = self.mm_fit.coeffs['Airmass']
+            self.extinction = self.mm_fit.df_fixed_effects.loc['Airmass', 'Value']
         else:
             site = Site(self.site_name)
             self.extinction = site.extinction[self.filter]
 
-        self.vignette = self.mm_fit.fe_coeffs['Vignette'] if self.fit_vignette is True else 0.0
-        self.x = self.mm_fit.fe_coeffs['X'] if self.fit_xy is True else 0.0
-        self.y = self.mm_fit.fe_coeffs['Y'] if self.fit_xy is True else 0.0
-        self.sky_bias = self.mm_fit.fe_coeffs['SkyBias'] if self.fit_sky_bias is True else 0.0
+        self.vignette = self.mm_fit.df_fixed_effects.loc['Vignette', 'Value'] \
+            if self.fit_vignette is True else 0.0
+        self.x = self.mm_fit.df_fixed_effects.loc['X1024', 'Value'] if self.fit_xy is True else 0.0
+        self.y = self.mm_fit.df_fixed_effects['Y1024', 'Value'] if self.fit_xy is True else 0.0
+        self.sky_bias = self.mm_fit.df_fixed_effects.loc['SkyBias', 'Value'] \
+            if self.fit_sky_bias is True else 0.0
         self.converged = self.mm_fit.converged
         self.n_obs = len(self.df_model)
         self.n_images = len(self.df_model['FITSfile'].drop_duplicates())
@@ -263,20 +263,64 @@ class SkyModel:
     def plots(self):
         import numpy as np
         import matplotlib.pyplot as plt
-        import matplotlib.ticker as ticker
 
-        # Set up plot grid and style parameters:
-        fig, axes = plt.subplots(ncols=4, nrows=3, figsize=(16, 10))  # (width, height) in "inches"
+        # Setup for all Figures.
         obs_is_std = [name.startswith('Std_') for name in self.df_model['FOV']]
         obs_point_colors = ['darkgreen' if obs_is_std[i] is True else 'black'
                             for i, x in enumerate(obs_is_std)]
-        image_is_std = [name.startswith('Std_') for name in self.cirrus['FITSfile']]
+        image_is_std = [name.startswith('Std_') for name in self.df_image['FITSfile']]
         image_point_colors = ['darkgreen' if image_is_std[i] is True else 'black'
                               for i, x in enumerate(image_is_std)]
         jd_floor = floor(min(self.df_model['JD_mid']))
         obs_jd_fract = self.df_model['JD_mid']-jd_floor
         xlabel_jd = 'JD(mid)-' + str(jd_floor)
         obs_residuals_mmag = self.df_model['Residual'] * 1000.0
+
+        # FIGURE 1 (Q-Q plot):
+        from scipy.stats import norm
+        df_y = self.df_model.copy()[['Residual', 'Serial']]
+        df_y['Residual'] *= 1000.0
+        df_y['Colors'] = obs_point_colors  # keep colors attached to correct residuals when sorted
+        df_y = df_y.sort_values(by='Residual')
+        n = len(df_y)
+        t_values = [norm.ppf((k-0.5)/n) for k in range(1, n+1)]
+
+        # Construct Q-Q plot:
+        fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(12, 8))  # (width, height) in "inches"
+        ax.grid(True, color='lightgray', zorder=-1000)
+        ax.set_title('Q-Q plot of Residuals: ' +
+                     self.an_rel_directory + '    ' + self.filter +
+                     ' filter', color='darkblue', fontsize=20, weight='bold')
+        ax.set_xlabel('t (sigma.residuals = ' + str(round(1000.0 * self.sigma, 1)) + ' mMag)')
+        ax.set_ylabel('Residual (mMag)')
+        ax.scatter(x=t_values, y=df_y['Residual'], alpha=0.6, color=df_y['Colors'], zorder=+1000)
+
+        # Label potential outliers:
+        mean_y = df_y['Residual'].mean()
+        std_y = df_y['Residual'].std()
+        z_score_y = (df_y['Residual'] - mean_y) / std_y
+        df_y['T'] = t_values
+        df_to_label = df_y[abs(z_score_y) >= 2.0]
+        for x, y, label in zip(df_to_label['T'], df_to_label['Residual'], df_to_label['Serial']):
+            ax.annotate(label, xy=(x, y), xytext=(4, -4),
+                        textcoords='offset points', ha='left', va='top', rotation=-40)
+
+        # Add reference line:
+        x_low = 1.10 * min(df_y['T'])
+        x_high = 1.10 * max(df_y['T'])
+        y_low = x_low * std_y
+        y_high = x_high * std_y
+        ax.plot([x_low, x_high], [y_low, y_high], color='gray', zorder=-100, linewidth=1)
+
+        # Add annotation: number of observations:
+        fig.text(x=0.5, y=0.87,
+                 s=str(len(self.df_model)) + ' observations in model.',
+                 verticalalignment='top', horizontalalignment='center',
+                 fontsize=12)
+        plt.show()
+
+        # FIGURE 2 (multiplot): Set up plot grid and style parameters:
+        fig, axes = plt.subplots(ncols=4, nrows=3, figsize=(16, 10))  # (width, height) in "inches"
 
         def make_labels(ax, title, xlabel, ylabel, zero_line=True):
             ax.set_title(title, y=0.89)
@@ -288,7 +332,7 @@ class SkyModel:
         # Cirrus Plot (one point per image):
         ax = axes[0, 0]
         make_labels(ax, 'Image Cirrus Plot', xlabel_jd, 'mMag')
-        ax.scatter(x=self.cirrus['JD_mid']-jd_floor, y=self.cirrus['groups'] * 1000.0,
+        ax.scatter(x=self.df_image['JD_mid']-jd_floor, y=self.df_image['Value'] * 1000.0,
                    alpha=0.6, color=image_point_colors)
 
         # Sky background vs JD_mid:
@@ -374,6 +418,59 @@ class SkyModel:
                      color='darkblue', fontsize=20, weight='bold')
         plt.show()
 
+    def predict(self, predict_input):
+        """
+        Uses current model to predict best star magnitudes for *observed* InstMag and other inputs.
+        :param predict_input: data, all needed input columns, including groups [pandas DataFrame]
+        :return: a dependent variable prediction for each input row [pandas Series of floats,
+            with index = index of predict_input]
+        """
+        # First, verify that input is a DataFrame and that all needed columns are present.
+        #    Names must be same as in model.
+        if not isinstance(predict_input, pd.DataFrame):
+            print('>>>>> SkyModel.predict(predict_input): predict_input is not a pandas DataFrame.')
+            return None
+        required_input_columns = ['Serial', 'FITSfile', 'InstMag', 'CI', 'Airmass']
+        if self.fit_sky_bias:
+            required_input_columns.append('SkyBias')
+        if self.fit_vignette:
+            required_input_columns.append('Vignette')
+        if self.fit_xy:
+            required_input_columns.extend(['X1024', 'Y1024'])
+        all_present = all([name in predict_input.columns for name in required_input_columns])
+        if not all_present:
+            print('>>>>> SkyModel.predict(): at least one column missing.')
+            print('      Current model requires these columns:')
+            print('         ' + ', '.join(required_input_columns))
+            return None
+
+        # Make copy of dataframe; add bogus CatMag column (required by model):
+        df_for_predict = predict_input.copy()
+        bogus_cat_mag = 0.0
+        df_for_predict['CatMag'] = bogus_cat_mag  # totally bogus local value, to be reversed later
+
+        # Execute MixedModelFit.predict(), giving Intercept + bogus CatMag + FEs + REs (pd.Series):
+        raw_predictions = self.mm_fit.predict(df_for_predict)
+
+        # Now, the tricky part: estimating best magnitudes for unknowns/targets
+        #   (effectively get best CatMag per star).
+        # eq A: predict() = Intercept + bogus CatMag + FEs + REs (per MixedModelFit.predict()).
+        # eq B: obs InstMag - offsets ~~ Intercept + best CatMag + FEs + REs (as in regression).
+        # so (eq B - eq A) -> best CatMag ~~ obs InstMag - offsets - predict() + bogus CatMag
+        # We still need to get: offsets (just as done in regression), then estimate best catMag:
+
+        # Compute dependent-variable offsets for unknown stars:
+        dep_var_offsets = pd.Series(len(df_for_predict) * [0.0], index=raw_predictions.index)
+        if self.fit_transform is False:
+            dep_var_offsets += self.transform * df_for_predict['CI']
+        if self.fit_extinction is False:
+            dep_var_offsets += self.extinction * df_for_predict['Airmass']
+
+        # Extract best CatMag d'un seul coup, per (eq B - eq A), above:
+        predicted_star_mags = \
+            df_for_predict['InstMag'] - dep_var_offsets - raw_predictions + bogus_cat_mag
+        return predicted_star_mags
+
 
 def get_df_master(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
     """
@@ -382,6 +479,7 @@ def get_df_master(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
     :param an_rel_directory: directory for this instrument on this Astronight [string] 
     :return: pandas DataFrame with all comp, check, and target star raw photometric data
          (which dataframe is generated and csv-written by R, as of May 2017).
+         The DataFrame index is set to equal column Serial (which was already a kind of index).
     """
     if an_rel_directory is None:
         return None
@@ -389,6 +487,7 @@ def get_df_master(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
     if not os.path.exists(fullpath):
         return None
     df_master = pd.read_csv(fullpath, sep=';')
+    df_master.index = df_master['Serial']
     return df_master
 
 
@@ -417,17 +516,6 @@ def apply_omit_txt(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
     lines = [line for line in lines if line != '']  # remove empty lines
     df_filtered = df_master.copy()  # start with a copy, omit lines per user requests.
     warning_lines = []
-
-    # Nested function (strictly local for convenience):
-    def get_line_parms(line, directive, nparms_min, nparms_max):
-        line_parms = [p.strip() for p in line[(len(directive)):].split(',')]
-        valid_num_line_parms = (len(line_parms) >= nparms_min)
-        if nparms_max is not None:  # ignore nparms_max if it is None.
-            valid_num_line_parms = valid_num_line_parms and (len(line_parms) <= nparms_max)
-        if valid_num_line_parms:
-            return line_parms, None
-        else:
-            return None, 'Line has wrong number of parameters: \'' + line + '\'.'
 
     for line in lines:
         warning_line = None
@@ -543,14 +631,26 @@ def write_stare_comps_txt_stub(an_top_directory=AN_TOP_DIRECTORY, an_rel_directo
     return lines_written
 
 
-def convert_pandas_to_json_compatible_dict(pandas_obj):
-        """
-        Python's json package cannot handle int64, etc that pandas insists on putting into
-            its Series and DataFrame constructs. So have them write themselves to JSON text,
-            then have json read the text back in as a dictionary ready for inclusion in an 
-            object that json package considers legitimate to write to JSON text. Whew.
-        :return: dict representation of pandas object, ready for inclusion in a JSON file [py dict]
-        """
-        json_text = pandas_obj.to_json()
-        return json.loads(json_text)  # a dictionary without int64, etc
+# def convert_pandas_to_json_compatible_dict(pandas_obj):
+#         """
+#         Python's json package cannot handle int64, etc that pandas insists on putting into
+#             its Series and DataFrame constructs. So have them write themselves to JSON text,
+#             then have json read the text back in as a dictionary ready for inclusion in an
+#             object that json package considers legitimate to write to JSON text. Whew.
+#         :return: dict representation of pandas object, ready to include in a JSON file [py dict]
+#         """
+#         json_text = pandas_obj.to_json()
+#         return json.loads(json_text)  # a dictionary without int64, etc
 
+
+def get_line_parms(line, directive, nparms_min=None, nparms_max=None):
+    line_parms = [p.strip() for p in line[(len(directive)):].split(',')]
+    valid_num_line_parms = True  # until falsified
+    if nparms_min is not None:  # ignore nparms_min if None.
+        valid_num_line_parms = valid_num_line_parms & (len(line_parms) >= nparms_min)
+    if nparms_max is not None:  # ignore nparms_max if None.
+        valid_num_line_parms = valid_num_line_parms & (len(line_parms) <= nparms_max)
+    if valid_num_line_parms:
+        return line_parms, None
+    else:
+        return None, 'Line has wrong number of parameters: \'' + line + '\'.'

@@ -398,15 +398,16 @@ def event_utcs_in_timespan(jd_reference, period, timespan):
 class MixedModelFit:
     """
     Object: holds info for one mixed-model (py::statsmodel) fit. 
-    General in nature (not tied to astronomical usage).
+    Generic in nature--NOT tied to astronomical usage.
     Uses formula form, i.e., statsmodel::sm.MixedLM.from_formula()
     """
     def __init__(self, data, dep_var=None, fixed_vars=None, group_var=None):
         """
         Executes mixed-model fit & makes data available.
-        :param data: input data, one variable per column [pandas Dataframe]
+        :param data: input data, one variable per column, one point per row [pandas Dataframe]
         :param dep_var: one column name as dependent 'Y' variable [string] 
-        :param fixed_vars: one or more column names as independent 'X' variable [string]
+        :param fixed_vars: one or more column names as independent 'X' variable [string or
+                  list of strings]
         :param group_var: one column name as group (category; random-effect) variable [string]
         Usage: fit = MixedModel(df_input, 'Y', ['X1', 'X2'], 'a_group_type']
                fit = MixedModel(df_input, 'Y', 'X1', 'a_group_type'] (OK if only one indep var)
@@ -437,23 +438,36 @@ class MixedModelFit:
         fit = model.fit()
 
         self.statsmodels_object = fit  # instance of class MixedLMResults (py pkg statsmodels)
+
+        # Scalar and naming attributes:
         self.converged = fit.converged  # bool
         self.nobs = fit.nobs  # number of observations used in fit
         self.likelihood = fit.llf
         self.dep_var = dep_var
         self.fixed_vars = fixed_vars
         self.group_var = group_var
+        self.sigma = sqrt(sum(fit.resid**2)/(fit.nobs-len(fixed_vars)-2))
 
-        self.fe_coeffs = fit.fe_params    # pd.Series, includes 'Intercept
-        self.stdev = pd.concat([fit.bse_fe, fit.bse_re])  # to cover for bug in statsmodels output
-        self.tvalues = fit.tvalues  # pd.Series,   "
+        # Fixed-effects dataframe (joins so we don't count on consistent input ordering):
+        df = pd.DataFrame({'Value': fit.fe_params})
+        df = df.join(pd.DataFrame({'Stdev': fit.bse_fe}))     # join on index (enforce consistency)
+        df = df.join(pd.DataFrame({'Tvalue': fit.tvalues}))   # " & any random effect discarded
+        df = df.join(pd.DataFrame({'Pvalue': fit.pvalues}))   # " & "
+        df['Name'] = df.index
+        self.df_fixed_effects = df.copy()
 
-        self.fitted_values = fit.fittedvalues  # pd.Series, one element per data point
-        self.residuals = fit.resid             # pd.Series    "
-        self.sigma = sqrt(sum(self.residuals**2)/(self.nobs-len(fixed_vars)-2))
+        # Random-effect dataframe, index=GroupName, cols=GroupName, GroupValue:
+        df = pd.DataFrame(fit.random_effects).transpose()  # DataFrame, 1 row/group
+        df = df.rename(columns={'groups': 'GroupValue'})
+        df['GroupName'] = df.index
+        self.df_random_effects = df.copy()
 
-        self.groups = pd.DataFrame(fit.random_effects).transpose()  # DataFrame, 1 row/group
-        self.groups['FITSfile'] = self.groups.index  # add FITSfile row (not just as index)
+        # Observation dataframe (safe to count on consistent input ordering -> easier construction):
+        df = pd.DataFrame({'FittedValue': fit.fittedvalues})
+        df['Residual'] = fit.resid
+        self.df_observations = df.copy()
+
+        pass
 
     def predict(self, data):
         """
@@ -468,12 +482,12 @@ class MixedModelFit:
         fixed_effect_inputs = data[self.fixed_vars]  # 1 col per fixed effect variable
         predicted_on_fixed_only = self.statsmodels_object.predict(exog=fixed_effect_inputs)
 
-        # Separate RE contib to pred values were already computed in MixedModels object 'fit':
-        random_effect_inputs = pd.DataFrame(data['Ran'])  # 1 col 'Ran' = the random-effect var
-        random_effect_coeffs = self.groups
-        predicted_on_random_only = pd.merge(random_effect_inputs, random_effect_coeffs,
-                                            left_on='Ran', right_index=True,
-                                            how='left', sort=False)['groups']  # Series (left-join)
+        # RE contibs to pred values were already included in MixedModels object 'fit':
+        df_random_effect_inputs = pd.DataFrame(data[self.group_var])  # 1 col, the random-effect var
+        df_random_effect_values = self.df_random_effects[['GroupValue']]
+        predicted_on_random_only = pd.merge(df_random_effect_inputs, df_random_effect_values,
+                                            left_on=self.group_var, right_index=True, how='left',
+                                            sort=False)['GroupValue']  # Series (left-join)
 
         total_prediction = predicted_on_fixed_only + predicted_on_random_only
         return total_prediction
