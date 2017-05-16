@@ -243,23 +243,20 @@ def degrees_as_hex(angle_degrees, seconds_decimal_places=2):
     return hex_string
 
 
-def weighted_mean(values, weights, return_stdev=False):
+def weighted_mean(values, weights):
     """
-    Returns weighted mean, and optionally the weighted std deviation of the *mean*.
+    Returns weighted mean and weighted std deviation of the mean (not of observations).
     :param values: list (or other iterable) of values to be averaged
     :param weights: list (or other iterable) of weights; length must = length of values
-    :param return_stdev: True-> return tuple (w_mean, w_stdev); False-> return w_mean only (float).
-    :return: return_stdev==True-> return tuple (w_mean, w_stdev); False-> return w_mean only.
+    :return: tuple (weighted mean, weightest standard deviation)
     """
-    if (len(values) != len(weights)) or len(values) == 0 or len(weights) == 0:
+    if (len(values) != len(weights)) or (len(values) == 0) or (len(weights) == 0):
         raise ValueError('lengths of values & weights must be equal & non-zero.')
     if sum(weights) <= 0:
         raise ValueError('sum of weights must be positive.')
     w_range = range(len(weights))
     norm_weights = [weights[i]/sum(weights) for i in w_range]
     w_mean = sum([norm_weights[i]*values[i] for i in w_range])
-    if not return_stdev:
-        return w_mean
     if len(values) == 1:
         w_stdev = 0
     else:

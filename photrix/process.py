@@ -1,12 +1,12 @@
 import json
 import os
-from math import floor
+from math import floor, sqrt
 from datetime import datetime, timezone
 
 import pandas as pd
 
 from .user import Instrument, Site
-from .util import MixedModelFit
+from .util import MixedModelFit, weighted_mean
 
 __author__ = "Eric Dose :: New Mexico Mira Project, Albuquerque"
 
@@ -51,7 +51,7 @@ class SkyModel:
         :param instrument_name: name of Instrument, e.g., 'Borea' [string; name of Instrument obj]
         :param site_name: name of observing site, e.g., 'DSW' [string; name of Site object]
         :param max_cat_mag_error: maximum catalog error allowed to stars in model [float]
-        :param max_inst_mag_sigma: maximum instrument magnitude error allowed star observations [float]
+        :param max_inst_mag_sigma: max instrument magnitude error allowed star observations [float]
         :param max_color_vi: maximum V-I color allowed to stars in model [float]
         :param saturation_adu: ccd ADUs that constitute saturation [float; from Instrument if None] 
         :param fit_sky_bias: True to fit sky bias term [bool]
@@ -472,6 +472,185 @@ class SkyModel:
         return predicted_star_mags
 
 
+class PredictionSet:
+    def __init__(self, an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None,
+                 instrument_name='Borea', site_name='DSW',
+                 max_inst_mag_sigma=0.05, skymodel_list=None):
+        """
+        Constructs a prediction set, i.e., a set of best estimates of comp, check, and target star
+        magnitudes, ready for marking up (curating) and reporting to the AAVSO (for example). 
+        :param an_top_directory: e.g., 'J:\Astro\Images\C14' [string]
+        :param an_rel_directory: e.g., '20170504'. The dir 'Photometry' is subdir of this. [string]
+        :param instrument_name: name of Instrument, e.g., 'Borea' [string; name of Instrument obj]
+        :param site_name: name of observing site, e.g., 'DSW' [string; name of Site object]
+        :param max_inst_mag_sigma: max instrument magnitude error allowed star observations [float]
+        :param skymodel_list: SkyModel objects ready to be used [list of SkyModel objs]
+        """
+        self.an_top_directory = an_top_directory
+        self.an_rel_directory = an_rel_directory
+        self.instrument_name = instrument_name
+        self.instrument = Instrument(self.instrument_name)
+        self.site_name = site_name
+        self.site = Site(self.site_name)
+        self.max_inst_mag_sigma = max_inst_mag_sigma
+        # ---- we'll deal with transform preferences in a later version.
+        #      for now, we'll stick with V-I for all filters
+        # if transform_preferences is None:
+        #     transform_preferences = self.get_transform_preferences(self.instrument)
+        # else:
+        #     self.transform_preferences = transform_preferences
+        self.saturation_adu = self.instrument.camera['saturation_adu']
+        self.skymodels = dict((skymodel.filter, skymodel) for skymodel in skymodel_list)
+        self.images_with_targets = None
+
+        df_eligible_obs, warning_lines = apply_omit_txt(self.an_top_directory,
+                                                        self.an_rel_directory)
+
+        df_curated_comp_obs = self.curate_stare_comps(df_eligible_obs)
+
+        df_estimates_comps = self.estimate_comps(df_curated_comp_obs)
+
+        df_cirrus_effect = self.estimate_cirrus_effect(df_estimates_comps)
+
+        df_estimates_checks_targets = self.estimate_checks_targets()
+
+        self.compute_all_errors()
+
+        write_report_map_stub()
+
+        self._to_json()  # maybe.
+
+
+    def curate_stare_comps(self, df_eligible_obs):
+        """
+        Using user's stare_comps.txt in this an_rel_directory, 
+           limit comps applied to stare observations.
+        :param df_eligible_obs: dataframe of obs (typically all obs eligible to this pt) [DataFrame]
+        :return: dataframe of all observations remaining eligible after this curation [DataFrame]
+        """
+        fullpath = os.path.join(self.an_top_directory, self.an_rel_directory,
+                                'Photometry', 'stare_comps.txt')
+        if not os.path.exists(fullpath):
+            write_omit_txt_stub(self.an_top_directory, self.an_rel_directory)
+            return df_eligible_obs.copy()  # no change or warnings, since stare_comps.txt was absent
+
+        with open(fullpath) as f:
+            lines = f.readlines()
+        lines = [line.split(";")[0] for line in lines]  # remove all comments
+        lines = [line.strip() for line in lines]  # remove lead/trail blanks
+        lines = [line for line in lines if line != '']  # remove empty lines
+        df_curated_obs = df_eligible_obs.copy()  # default in case no lines in stare_comps.txt
+        warning_lines = []
+
+        for line in lines:
+            warning_line = None
+            if line.startswith("#COMPS"):
+                parms, warning_line = get_line_parms(line, "#OBS", 3, None)
+                if parms is not None:
+                    fov_name = parms[0]
+                    filter_name = parms[1]
+                    comp_ids = ' '.join(parms[2:]).split()
+                    rows_to_remove = (df_eligible_obs['StarType'] == 'Comp') and \
+                        (df_eligible_obs['FOV'] == fov_name) and \
+                        (df_eligible_obs['Filter'] == filter_name) and \
+                        (df_eligible_obs['StarID'] not in comp_ids)
+                    df_curated_obs = df_eligible_obs[~ rows_to_remove]
+                else:
+                    warning_lines.append(warning_line)
+            else:
+                warning_line = 'Directive not understood: \'' + line + '\'.'
+                warning_lines.append(warning_line)
+        return df_curated_obs, warning_lines
+
+    def estimate_comps(self, df_eligible_obs):
+        """
+        Get raw, predicted mag estimates for ALL eligible comp-star observations, in all filters.
+        :param df_eligible_obs: data for all eligible star observations [pandas DataFrame]  
+        :return: dataframe of 
+        """
+        df = df_eligible_obs.copy()
+        # Select rows, then remove rows that suffer various causes of ineligibility:
+        df = df[df['StarType'] == 'Comp']
+        df = df[df['MaxADU_Ur'].notnull()]
+        df = df[df['MaxADU_Ur'] <= self.saturation_adu]
+        df = df[df['InstMagSigma'] <= self.max_inst_mag_sigma]
+        df = df[df['CatMag'].notnull()]
+        df = df[df['CI'].notnull()]
+        df = df[df['Airmass'].notnull()]
+        df_eligible_comp_obs = df
+
+        images_with_eligible_comps = df_eligible_comp_obs['FITSfile'].drop_duplicates()
+        self.images_with_targets = \
+            (df_eligible_obs[df_eligible_obs['StarType'].lower() == 'target'])['FITSfile'] \
+            .drop_duplicates()  # eliminates standard FOVs etc
+        images_with_targets_and_comps = [im for im in self.images_with_targets
+                                         if im in images_with_eligible_comps]
+
+        # Get best magnitude estimates for all eligible comps:
+        df_list = []
+        for filter_name, skymodel in self.skymodels.items():
+            comp_obs_to_include = (df_eligible_comp_obs['Filter'] == filter_name) and \
+                                   (df_eligible_comp_obs['FITSfile'] in images_with_targets)
+            df_predict_input = df_eligible_comp_obs[comp_obs_to_include]
+            predict_output = skymodel.predict(df_predict_input)
+
+            df_estimates_this_model = \
+                df_predict_input[['Serial', 'ModelStarID', 'FITSfile', 'StarID', 'Chart',
+                                  'Xcentroid', 'Ycentroid', 'InstMag', 'InstMagSigma', 'StarType',
+                                  'CatMag', 'CatMagSaved', 'CatMagError', 'Exposure',
+                                  'JD_mid', 'Filter', 'Airmass', 'CI', 'SkyBias', 'Vignette']]
+            df_estimates_this_model['EstimatedMag'] = predict_output
+            df_list.append(df_estimates_this_model)  # list.append() performs in-place
+        df_estimates_comps = pd.concat(df_list, ignore_index=True)
+        df_estimates_comps['UseInEnsemble'] = True  # default until falsified
+        df_estimates_comps.index = df_estimates_comps['Serial']
+        return df_estimates_comps
+
+    def estimate_cirrus_effect(self, df_estimates_comps):
+        """
+        Generates per-image cirrus effect with more careful inclusion/exclusion criteria than
+           were used in the MixedModelFit, esp. in rejecting outlier comp observations.
+        :return: data for best per-image cirrus-effects, in magnitudes [pandas DataFrame] 
+        """
+        df_list = []
+        for image in self.images_with_targets:
+            df_estimates_comps_this_image = \
+                df_estimates_comps[df_estimates_comps['FITSfile'] == image]
+            cirrus_effect_from_comps = \
+                df_estimates_comps_this_image['EstimatedMag'] - \
+                df_estimates_comps_this_image['CatMag']
+            sigma2 = df_estimates_comps_this_image['CatMagError']**2 + \
+                df_estimates_comps_this_image['InstMagSigma']**2
+            least_allowed_sigma = 0.01
+            raw_weights = pd.Series([1.0 / max(s2, least_allowed_sigma**2) for s2 in sigma2])
+            normalized_weights = raw_weights / sum(raw_weights)
+            v2 = sum(normalized_weights**2)
+            cirrus_effect_this_image = weighted_mean(cirrus_effect_from_comps, normalized_weights)
+            resid2 = (cirrus_effect_from_comps - cirrus_effect_this_image)**2
+            cirrus_effect_this_image = df_estimates_comps_this_image.iloc[1]['CatMagError'] \
+                if len(df_estimates_comps_this_image) == 1 \
+                else sqrt(v2 * sum(normalized_weights * resid2))
+            comp_ids_used = df_estimates_comps_this_image['StarID']  # starting point = use all
+            num_comps_used = len(df_estimates_comps_this_image)      # "
+            num_comps_removed = 0                                    # "
+
+            # Reject this image's worst comp stars and recalculate, if
+            #    (we start with at least 4 comp stars) AND (criterion1 >= 16 OR criterion2 >= 20).
+            criterion1 = 0  # how many times worse is the worst comp vs avg of other comps
+            criterion2 = 0  # square of worst comp's effective t-value, relative to CatMagError
+            if len(df_estimates_comps_this_image) >= 4:
+                x = normalized_weights * resid2  # a pd.Series; will be >= 0
+                criterion1 = max(x) / ((sum(x)-max(x)) / (len(x)-1))
+                y = raw_weights * resid2  # a pd.Series; will be >= 0
+                criterion2 = max(y)
+                selection = pd.Series(len(df_estimates_comps_this_image) * [True])  # is this used??
+                if (criterion1 >= 16) or (criterion2 >= 20):
+                    c1 = x / ((sum(x)-x) / (len(x)-1))
+                    c2 = y
+                    score = pd.Series([max(c_1/16.0, c_2/20.0) for (c_1, c_2) in zip(c1, c2)])
+                    max_to_remove = floor(len(score) / 4)
+
+
 def get_df_master(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
     """
     Simple utility to read df_master.csv file and return the DataFrame.
@@ -631,6 +810,30 @@ def write_stare_comps_txt_stub(an_top_directory=AN_TOP_DIRECTORY, an_rel_directo
     return lines_written
 
 
+def write_report_map_stub(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
+    lines = [';----- This is report_map.txt for AN directory ' + an_rel_directory,
+             ';----- Use this file to omit and/or combine target observations, for AAVSO report',
+             ';----- Example directive line:',
+             ';',
+             ';#TARGET  GD Cyg    ; to omit this target star altogether from AAVSO report',
+             ';#JD      0.65 0.67 ; to omit this JD (fractional) range from AAVSO report',
+             ';#SERIAL  34 44,129  32 1202 ; to omit these 5 Serial numbers from AAVSO report',
+             ';#COMBINE 80 128    ; to combine (average) these 2 Serial numbers in AAVSO report',
+             ';',
+             ';----- Add your directive lines:',
+             ';']
+    lines = [line + '\n' for line in lines]
+    fullpath = os.path.join(an_top_directory, an_rel_directory, 'Photometry', 'report_map.txt')
+    if not os.path.exists(fullpath):
+        with open(fullpath, 'w') as f:
+            f.writelines(lines)
+        lines_written = len(lines)
+    else:
+        lines_written = 0
+    return lines_written
+
+
+
 # def convert_pandas_to_json_compatible_dict(pandas_obj):
 #         """
 #         Python's json package cannot handle int64, etc that pandas insists on putting into
@@ -654,3 +857,12 @@ def get_line_parms(line, directive, nparms_min=None, nparms_max=None):
         return line_parms, None
     else:
         return None, 'Line has wrong number of parameters: \'' + line + '\'.'
+
+
+    # def get_transform_preferences(self, instrument):
+    #     # transform_preferences: for each observation filter, one or more filter pairs, in
+    #     #    descending order of preference, used to make transform corrections, in the form
+    #     #    {'V':['V-I', 'B-V'], 'R':['V-I', 'V-R', 'B-V'], 'I':['V-I', 'R-I', 'V-R', 'B-V']}
+    #     #    None -> get from Instrument object [dict of {str:list of strings}]
+    #     pass
+

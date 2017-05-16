@@ -110,24 +110,17 @@ def test_degrees_as_hex():
 
 
 def test_weighted_mean():
-    assert util.weighted_mean([3], [7]) == 3
-    assert util.weighted_mean([1, 3, 8], [0, 3, 9]) == 81/12
     with pytest.raises(ValueError) as e:
         util.weighted_mean([], [])                 # zero-length
     assert 'lengths of values & weights must be equal & non-zero' in str(e)
-    # print('>>>' + str(e) + '<<<')
     with pytest.raises(ValueError) as e:
         util.weighted_mean([2, 3], [4, 5, 3])      # unequal lengths
     assert 'lengths of values & weights must be equal & non-zero' in str(e)
-    # print('>>>' + str(e) + '<<<')
     with pytest.raises(ValueError) as e:
         util.weighted_mean([2, 3, 4], [1, 4, -5])  # sum(weights)==0
     assert 'sum of weights must be positive' in str(e)
-    # print('>>>' + str(e) + '<<<')
-    assert util.weighted_mean([3], [7], True) == (3, 0)
-    assert util.weighted_mean([1, 3, 8], [0, 3, 9], True) == (81/12, 2.9296875)
-    assert util.weighted_mean([1, 3, 8], [0, 3, 9], True) == \
-           util.weighted_mean([3, 8], [3, 9], True)
+    assert util.weighted_mean([1, 3, 8], [0, 3, 9]) == (81/12, pytest.approx(2.9296875))
+    assert util.weighted_mean([1, 3, 8], [0, 3, 9]) == util.weighted_mean([3, 8], [3, 9])
 
 
 def test_ladder_round():

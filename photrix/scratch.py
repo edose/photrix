@@ -426,3 +426,51 @@ def _restore_omit_txt(an_top_directory, an_rel_directory):
         if os.path.exists(fullpath):
             os.remove(fullpath)
         shutil.move(backup_path, fullpath)  # restore saved copy.
+
+
+def plot_logo(seed=123):
+    """
+    Make NMMP logo's lightcurve (for my poster at SAS/AAVSO summer 2017)
+    :param seed: random seed--change this at will until point spacing looks good [int]
+    :return: [None]
+    """
+    import matplotlib.pyplot as plt
+    import numpy as np
+    import pandas as pd
+    from math import pi, floor
+
+    min_phase_start = -0.2
+    min_phase_transition = 1.62
+    min_phase_end = 2.7
+    increment_1 = 0.17  # approximate; we're going to randomized
+    increment_2 = 0.04
+    pre_x_random_level = 0.75
+    min_phase_addin_cos_fraction = 0.068
+
+    np.random.seed(seed)
+    n_pre = int(floor((min_phase_transition - min_phase_start) / increment_1))
+    rand_pre = np.random.random(n_pre)
+    raw_x_random = [x * (min_phase_transition - min_phase_start) + min_phase_start
+                    for x in rand_pre]
+    raw_x_random[0] = +0.2
+    raw_x_random[1] = -0.5
+    raw_x_equispaced = list(np.arange(start=min_phase_start, stop=min_phase_transition,
+                                step=increment_1))
+    raw_x_pre = list(pd.Series(raw_x_equispaced) +
+                     pre_x_random_level * increment_1 * pd.Series(raw_x_random))
+    raw_x_post = list(np.arange(start=min_phase_transition+increment_2, stop=min_phase_end,
+                                step=increment_2))
+    raw_x_pre.extend(raw_x_post)
+    raw_x = pd.Series(raw_x_pre)
+
+    twopi = (2.0 * pi) * raw_x
+    add_in = raw_x + min_phase_start
+    raw_cos = pd.Series(np.cos(twopi))
+    incl_add_in = raw_x + (min_phase_addin_cos_fraction * raw_cos)
+    x = incl_add_in
+    y = - raw_cos
+
+    fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(15, 3.5))  # (w,h)/inch
+    ax.set_ylim(bottom=-1.5, top=1.5)
+    ax.scatter(x=x, y=y, alpha=1, color='#ee4400', marker='s', s=106, edgecolor='sienna')
+    plt.show()
