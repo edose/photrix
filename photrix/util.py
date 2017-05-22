@@ -248,21 +248,28 @@ def weighted_mean(values, weights):
     Returns weighted mean and weighted std deviation of the mean (not of observations).
     :param values: list (or other iterable) of values to be averaged
     :param weights: list (or other iterable) of weights; length must = length of values
-    :return: tuple (weighted mean, weightest standard deviation)
+    :return: 3-tuple (weighted mean, weighted std dev (population), weighted std dev of mean)
     """
     if (len(values) != len(weights)) or (len(values) == 0) or (len(weights) == 0):
         raise ValueError('lengths of values & weights must be equal & non-zero.')
     if sum(weights) <= 0:
         raise ValueError('sum of weights must be positive.')
-    w_range = range(len(weights))
-    norm_weights = [weights[i]/sum(weights) for i in w_range]
-    w_mean = sum([norm_weights[i]*values[i] for i in w_range])
-    if len(values) == 1:
-        w_stdev = 0
+    value_list = list(values)    # py list comprehension often misunderstands pandas Series indices.
+    weight_list = list(weights)  # "
+    norm_weights = [wt/sum(weights) for wt in weight_list]
+    w_mean = sum([nwt * val for (nwt, val) in zip(norm_weights, value_list)])
+    n_nonzero_weights = sum([w != 0 for w in weight_list])
+
+    if n_nonzero_weights == 1:
+        w_stdev_pop = 0
+        w_stdev_w_mean = 0
     else:
-        v2 = sum([norm_weights[i]**2 for i in w_range])
-        w_stdev = v2 * sum([norm_weights[i]*(values[i]-w_mean)**2 for i in w_range])
-    return w_mean, w_stdev
+        resid2 = [(val-w_mean)**2 for val in value_list]
+        nwt2 = sum([nwt**2 for nwt in norm_weights])
+        rel_factor = 1.0 / (1.0 - nwt2)  # reliability factor (better than N'/(N'-1))
+        w_stdev_pop = sqrt(rel_factor * sum([nwt * r2 for (nwt, r2) in zip(norm_weights, resid2)]))
+        w_stdev_w_mean = sqrt(nwt2) * w_stdev_pop
+    return w_mean, w_stdev_pop, w_stdev_w_mean
 
 
 DEFAULT_LADDER = [1.0, 1.25, 1.6, 2.0, 2.5, 3.2, 4.0, 5.0, 6.4, 8.0, 10.0]
@@ -466,25 +473,33 @@ class MixedModelFit:
 
         pass
 
-    def predict(self, data):
+    def predict(self, df_predict_input, include_random_effect=True):
         """
-        Takes new data and renders predicted dependent-variable values.
-        DOES include effect of groups (random effects), unlike py::statsmodels.
-        :param data: new input data used to render predictions. 
+        Takes new_data and renders predicted dependent-variable values.
+        Optionally includes effect of groups (random effects), unlike py::statsmodels.
+        :param: new_data: new input data used to render predictions. 
            Extra (unused) columns OK; model selects only needed columns. [pandas DataFrame] 
-        :return: predictions of dependent-variable values matching rows of 'data' (pandas Series)
+        :param: include_random_effect: True to include them, False to omit/ignore [bool]
+        :return: predictions of dependent-variable values matching rows of new data (pandas Series)
         """
 
         # Get predicted values on fixed effects only (per statsmodels' weird def. of 'predicted'):
-        fixed_effect_inputs = data[self.fixed_vars]  # 1 col per fixed effect variable
+        fixed_effect_inputs = df_predict_input[self.fixed_vars]  # 1 col per fixed effect variable
         predicted_on_fixed_only = self.statsmodels_object.predict(exog=fixed_effect_inputs)
 
-        # RE contibs to pred values were already included in MixedModels object 'fit':
-        df_random_effect_inputs = pd.DataFrame(data[self.group_var])  # 1 col, the random-effect var
-        df_random_effect_values = self.df_random_effects[['GroupValue']]
-        predicted_on_random_only = pd.merge(df_random_effect_inputs, df_random_effect_values,
-                                            left_on=self.group_var, right_index=True, how='left',
-                                            sort=False)['GroupValue']  # Series (left-join)
+        # If requested, add RE contibs (that were not included in MixedModels object 'fit'):
+        if include_random_effect:
+            df_random_effect_inputs = pd.DataFrame(df_predict_input[self.group_var])
+            df_random_effect_values = self.df_random_effects[['GroupValue']]
+            predicted_on_random_only = pd.merge(df_random_effect_inputs, df_random_effect_values,
+                                                left_on=self.group_var,
+                                                right_index=True, how='left',
+                                                sort=False)['GroupValue']  # Series (left-join)
+            # Random effect is ***SUBTRACTED***, because original fit was
+            #    InstMag ~ CatMag + Random effect + offsets + other fixed effects
+            #    and now its surrogate CatMag we're trying to estimate
+            total_prediction = predicted_on_fixed_only - predicted_on_random_only
+        else:
+            total_prediction = predicted_on_fixed_only
 
-        total_prediction = predicted_on_fixed_only + predicted_on_random_only
         return total_prediction

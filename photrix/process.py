@@ -150,7 +150,7 @@ class SkyModel:
     # def from_json(cls, an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None, filter=None):
     #     """
     #     Alternate constructor, reads from JSON file previously written.
-    #        Normally used by predict(), which requires final (immutable) Models.
+    #        Normally used by predict_fixed_only(), which requires final (immutable) Models.
     #     :param an_top_directory: path to an_rel_folder [str]
     #     :param an_rel_directory: folder for this instrument on this Astronight [string]
     #     :param filter: the filter to which this model applies [string, e.g., 'V' or 'R']
@@ -259,6 +259,7 @@ class SkyModel:
         df_xref = self.df_model[['FITSfile', 'JD_mid']].drop_duplicates()
         df = pd.merge(df, df_xref, on='FITSfile', how='left', sort=False).sort_values(by='JD_mid')
         self.df_image = df.copy()
+        self.df_image.index = self.df_image['FITSfile']
 
         # Extract and store scalar results:
         if self.fit_transform:
@@ -444,17 +445,19 @@ class SkyModel:
                      color='darkblue', fontsize=20, weight='bold')
         plt.show()
 
-    def predict(self, predict_input):
+    def predict_fixed_only(self, df_predict_input):
         """
         Uses current model to predict best star magnitudes for *observed* InstMag and other inputs.
-        :param predict_input: data, all needed input columns, including groups [pandas DataFrame]
+        FIXED-EFFECTS ONLY: does not include random effect.
+        :param df_predict_input: data, all needed input columns for skymodel [pandas DataFrame]
+            will NOT include or use random effects.
         :return: a dependent variable prediction for each input row [pandas Series of floats,
             with index = index of predict_input]
         """
         # First, verify that input is a DataFrame and that all needed columns are present.
         #    Names must be same as in model.
-        if not isinstance(predict_input, pd.DataFrame):
-            print('>>>>> SkyModel.predict(predict_input): predict_input is not a pandas DataFrame.')
+        if not isinstance(df_predict_input, pd.DataFrame):
+            print('>>>>> SkyModel.predict_fixed_only(): predict_input is not a pandas DataFrame.')
             return None
         required_input_columns = ['Serial', 'FITSfile', 'InstMag', 'CI', 'Airmass']
         if self.fit_sky_bias:
@@ -463,38 +466,41 @@ class SkyModel:
             required_input_columns.append('Vignette')
         if self.fit_xy:
             required_input_columns.extend(['X1024', 'Y1024'])
-        all_present = all([name in predict_input.columns for name in required_input_columns])
+        all_present = all([name in df_predict_input.columns for name in required_input_columns])
         if not all_present:
-            print('>>>>> SkyModel.predict(): at least one column missing.')
+            print('>>>>> SkyModel.predict_fixed_only(): at least one column missing.')
             print('      Current model requires these columns:')
             print('         ' + ', '.join(required_input_columns))
             return None
 
-        # Make copy of dataframe; add bogus CatMag column (required by model):
-        df_for_predict = predict_input.copy()
+        # Make parsimonious copy of dataframe; add bogus CatMag column (required by model):
+        df_for_mm_predict = (df_predict_input.copy())[required_input_columns]
         bogus_cat_mag = 0.0
-        df_for_predict['CatMag'] = bogus_cat_mag  # totally bogus local value, to be reversed later
+        df_for_mm_predict['CatMag'] = bogus_cat_mag  # totally bogus local value, reversed later
 
-        # Execute MixedModelFit.predict(), giving Intercept + bogus CatMag + FEs + REs (pd.Series):
-        raw_predictions = self.mm_fit.predict(df_for_predict)
+        # Execute MixedModelFit.predict(), giving Intercept + bogus CatMag + FEs + REs (pd.Series)
+        #    DOES NOT INCLUDE RANDOM EFFECTS (these will be added back as Cirrus Effect terms):
+        raw_predictions = self.mm_fit.predict(df_for_mm_predict, include_random_effect=False)
 
         # Now, the tricky part: estimating best magnitudes for unknowns/targets
         #   (effectively get best CatMag per star).
-        # eq A: predict() = Intercept + bogus CatMag + FEs + REs (per MixedModelFit.predict()).
+        # eq A: predict_fixed_only() = Intercept + bogus CatMag + FEs + REs
+        #       (per MixedModelFit.predict()).
         # eq B: obs InstMag - offsets ~~ Intercept + best CatMag + FEs + REs (as in regression).
-        # so (eq B - eq A) -> best CatMag ~~ obs InstMag - offsets - predict() + bogus CatMag
+        # so (eq B - eq A) -> best CatMag ~~
+        #       obs InstMag - offsets - predict_fixed_only() + bogus CatMag
         # We still need to get: offsets (just as done in regression), then estimate best catMag:
 
         # Compute dependent-variable offsets for unknown stars:
-        dep_var_offsets = pd.Series(len(df_for_predict) * [0.0], index=raw_predictions.index)
+        dep_var_offsets = pd.Series(len(df_for_mm_predict) * [0.0], index=raw_predictions.index)
         if self.fit_transform is False:
-            dep_var_offsets += self.transform * df_for_predict['CI']
+            dep_var_offsets += self.transform * df_for_mm_predict['CI']
         if self.fit_extinction is False:
-            dep_var_offsets += self.extinction * df_for_predict['Airmass']
+            dep_var_offsets += self.extinction * df_for_mm_predict['Airmass']
 
         # Extract best CatMag d'un seul coup, per (eq B - eq A), above:
         predicted_star_mags = \
-            df_for_predict['InstMag'] - dep_var_offsets - raw_predictions + bogus_cat_mag
+            df_for_mm_predict['InstMag'] - dep_var_offsets - raw_predictions + bogus_cat_mag
         return predicted_star_mags
 
 
@@ -543,10 +549,8 @@ class PredictionSet:
                                                                     self.df_all_eligible_obs)
 
         self.df_comp_mags = self.compute_comp_mags()
-        # Here, matches R::predict.R::predictAll() just before line 85,
-        #    and self.df_comp_mags should match R:df_estimates_comps.
 
-        # self.df_cirrus_effect = self.compute_cirrus_effect(df_comp_mags)
+        self.df_cirrus_effect = self.compute_cirrus_effect(self.df_comp_mags)
         #
         # df_transformed_without_errors = self.compute_transformed_mags()
         #
@@ -592,7 +596,7 @@ class PredictionSet:
                                   'Xcentroid', 'Ycentroid', 'InstMag', 'InstMagSigma', 'StarType',
                                   'CatMag', 'CatMagError', 'Exposure',
                                   'JD_mid', 'Filter', 'Airmass', 'CI', 'SkyBias', 'Vignette']]
-            df_estimates_this_skymodel.loc[:, 'EstimatedMag'] = skymodel.predict(df_predict_input)
+            df_estimates_this_skymodel.loc[:, 'EstimatedMag'] = skymodel.predict_fixed_only(df_predict_input)
             df_list.append(df_estimates_this_skymodel)  # list.append() performs in-place
         # Collect and return the dataframe:
         df_comp_mags = pd.concat(df_list, ignore_index=True)
@@ -604,32 +608,35 @@ class PredictionSet:
         """
         Generates per-image cirrus effect with more careful inclusion/exclusion criteria than
            were used in the MixedModelFit, esp. in rejecting outlier comp observations.
+        :param: df_comp_mags: comprehensive comp-magnitude data [pandas DataFrame]
         :return: data for best per-image cirrus-effects, in magnitudes [pandas DataFrame] 
         """
         df_row_list = []
         for image in self.images_with_targets_and_comps:
             df_estimates_comps_this_image = \
-                df_comp_mags[df_comp_mags['FITSfile'] == image]
+                df_comp_mags[df_comp_mags['FITSfile'] == image].copy()
             cirrus_effect_from_comps = \
                 df_estimates_comps_this_image['EstimatedMag'] - \
                 df_estimates_comps_this_image['CatMag']
             sigma2 = df_estimates_comps_this_image['CatMagError']**2 + \
                 df_estimates_comps_this_image['InstMagSigma']**2
             least_allowed_sigma = 0.01
-            raw_weights = pd.Series([1.0 / max(s2, least_allowed_sigma**2) for s2 in sigma2])
+            # raw_weights ~ 1/s^2 where s cannot be less than least_allowed_sigma:
+            raw_weights = pd.Series([1.0 / max(s2, least_allowed_sigma**2) for s2 in sigma2],
+                                    index=sigma2.index)
             normalized_weights = raw_weights / sum(raw_weights)
-            v2 = sum(normalized_weights**2)
-            cirrus_effect_this_image = weighted_mean(cirrus_effect_from_comps, normalized_weights)
-            resid2 = (cirrus_effect_from_comps - cirrus_effect_this_image)**2
-            cirrus_effect_this_image = df_estimates_comps_this_image.iloc[1]['CatMagError'] \
-                if len(df_estimates_comps_this_image) == 1 \
-                else sqrt(v2 * sum(normalized_weights * resid2))
+            # Compute cirrus effect of mean value (+ sigma of mean rather than of indiv comp vals):
+            cirrus_effect_this_image, _, cirrus_sigma_this_image = \
+                weighted_mean(cirrus_effect_from_comps, normalized_weights)
+            if len(df_estimates_comps_this_image) == 1:
+                cirrus_sigma_this_image = df_estimates_comps_this_image['CatMagError'].iloc[0]
             comp_ids_used = df_estimates_comps_this_image['StarID']  # starting point = use all
             num_comps_used = len(df_estimates_comps_this_image)      # "
             num_comps_removed = 0                                    # "
 
-            # Reject this image's worst comp stars and recalculate, if
+            # Reject this image's worst comp stars and recalculate, in the case
             #    (we start with at least 4 comp stars) AND (criterion1 >= 16 OR criterion2 >= 20).
+            resid2 = (cirrus_effect_from_comps - cirrus_effect_this_image)**2  # pd.Series
             criterion1 = 0  # how many times worse is the worst comp vs avg of other comps
             criterion2 = 0  # square of worst comp's effective t-value, relative to CatMagError
             if len(df_estimates_comps_this_image) >= 4:
@@ -637,34 +644,41 @@ class PredictionSet:
                 criterion1 = max(x) / ((sum(x)-max(x)) / (len(x)-1))
                 y = raw_weights * resid2  # a pd.Series; will be >= 0
                 criterion2 = max(y)
-                selection = pd.Series(len(df_estimates_comps_this_image) * [True])  # is this used??
                 if (criterion1 >= 16) or (criterion2 >= 20):
                     c1 = x / ((sum(x)-x) / (len(x)-1))
                     c2 = y
-                    score = pd.Series([max(c_1/16.0, c_2/20.0) for (c_1, c_2) in zip(c1, c2)])
+                    # score > 1 for each row (comp) that may be removed:
+                    score = pd.Series([max(c_1/16.0, c_2/20.0) for (c_1, c_2) in zip(c1, c2)],
+                                      index=c1.index)
                     max_to_remove = floor(len(score) / 4)
-                    to_remove = (score >= 1) and \
+                    to_remove = (score >= 1) & \
                                 (score.rank(method='first') > (len(score) - max_to_remove))
 
                     # Now, set weights to zero for the worst comps, recalc cirrus effect & sigmas:
-                    raw_weights[to_remove] = 0
+                    raw_weights[to_remove] = 0.0
                     normalized_weights = raw_weights / sum(raw_weights)
-                    v2 = sum(normalized_weights**2)
-                    cirrus_effect_this_image = weighted_mean(cirrus_effect_from_comps,
-                                                             normalized_weights)
-                    resid2 = (cirrus_effect_from_comps - cirrus_effect_this_image) ** 2
-                    cirrus_sigma_this_image = sqrt(v2 * sum(normalized_weights * resid2))
+                    cirrus_effect_this_image, _, cirrus_sigma_this_image = \
+                        weighted_mean(cirrus_effect_from_comps, normalized_weights)
+                    n_nonzero_weights = sum([w != 0 for w in normalized_weights])
+                    if n_nonzero_weights == 1:
+                        cirrus_sigma_this_image = \
+                            sum([sigma for (nwt, sigma)
+                                 in zip(normalized_weights,
+                                        df_estimates_comps_this_image['CatMagError'])
+                                 if nwt != 0])
+
                     comp_ids_used = (df_estimates_comps_this_image['StarID'])[~ to_remove]
                     num_comps_used = len(comp_ids_used)
                     num_comps_removed = len(df_estimates_comps_this_image) - num_comps_used
 
                     # Record these omitted comp stars in the master comp-star dataframe.
                     removed_serials = (df_estimates_comps_this_image['Serial'])[to_remove]
-                    df_comp_mags.loc[df_comp_mags in removed_serials,
+                    df_comp_mags.loc[(df_comp_mags['Serial'].isin(removed_serials)),
                                      'UseInEnsemble'] = False
 
             # Insert results into this image's row in df_cirrus_effect:
-            df_row_this_image = {'CirrusEffect': cirrus_effect_this_image,
+            df_row_this_image = {'Image': image,
+                                 'CirrusEffect': cirrus_effect_this_image,
                                  'CirrusSigma': cirrus_sigma_this_image,
                                  'Criterion1': criterion1,
                                  'Criterion2': criterion2,
@@ -673,7 +687,7 @@ class PredictionSet:
                                  'NumCompsRemoved': num_comps_removed}
             df_row_list.append(df_row_this_image)
         df_cirrus_effect = pd.DataFrame(df_row_list)
-
+        df_cirrus_effect.index = df_cirrus_effect['Image']
         return df_cirrus_effect
 
     def compute_transformed_mags(self):
@@ -699,7 +713,7 @@ class PredictionSet:
                 (df_input_checks_targets.copy())[(['Filter'] == skymodel.filter) and
                                                  (['FITSfile'] in
                                                   self.images_with_targets_and_comps)]
-            predict_output = skymodel.predict(df_input_this_skymodel)
+            predict_output = skymodel.predict_fixed_only(df_input_this_skymodel)
             df_estimates_this_filter = df_input_this_skymodel.copy()
             df_estimates_this_filter['PredictedMag'] = predict_output
             df_filter_list.append(df_estimates_this_filter)
@@ -967,7 +981,7 @@ def write_stare_comps_txt_stub(an_top_directory=AN_TOP_DIRECTORY, an_rel_directo
     Will NOT overwrite existing stare_comps.txt file.
     """
     lines = [';----- This is stare_comps.txt for AN directory ' + an_rel_directory,
-             ';----- Select comp stars (by FOV, filter, & StarID) from input to predict().',
+             ';----- Select comp stars (by FOV, filter, & StarID) from input to predict_fixed_only().',
              ';----- Example directive line:',
              ';',
              ';#COMPS  Obj, V, 132, 133 144    ; to KEEP from FOV \'Obj\': '

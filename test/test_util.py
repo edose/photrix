@@ -1,5 +1,6 @@
 from datetime import datetime, timezone, timedelta
-from math import isnan
+from math import isnan, sqrt
+import pandas as pd
 import pytest
 
 from photrix import util                  # call: util.ra_as_degrees()
@@ -119,8 +120,17 @@ def test_weighted_mean():
     with pytest.raises(ValueError) as e:
         util.weighted_mean([2, 3, 4], [1, 4, -5])  # sum(weights)==0
     assert 'sum of weights must be positive' in str(e)
-    assert util.weighted_mean([1, 3, 8], [0, 3, 9]) == (81/12, pytest.approx(2.9296875))
+    assert util.weighted_mean([1, 3, 8], [0, 3, 9]) == (81/12, pytest.approx(3.535533),
+                                                        pytest.approx(2.795085))
     assert util.weighted_mean([1, 3, 8], [0, 3, 9]) == util.weighted_mean([3, 8], [3, 9])
+    value_series = pd.Series([1, 3, 8], index=[4, 2, 999])
+    weights_series = pd.Series([0, 3, 9], index=['e', 'XXX', '0-&&'])
+    assert util.weighted_mean(value_series, weights_series) == \
+        util.weighted_mean([1, 3, 8], [0, 3, 9])
+    assert util.weighted_mean([-2, -1, 0, 1, 2], [1, 1, 1, 1, 1]) == \
+        (pytest.approx(0, abs=0.000001),
+         pytest.approx(sqrt(2.5)), pytest.approx(sqrt(0.5)))
+    assert util.weighted_mean([1, 2, 5, 11], [0, 0, 3, 0]) == (5, 0, 0)  # only 1 nonzero weight
 
 
 def test_ladder_round():
@@ -528,7 +538,7 @@ def test_mixed_model_fit_class():
     assert list(fit.predict(df_model)) == pytest.approx(fit.df_observations['FittedValue'])
     # Verify predictions on test data:
     assert list(fit.predict(df_test[0:4])) == pytest.approx([16.706808844306536, 18.50420441664172,
-                                                            20.533844119080726, 18.952844883150998])
+                                                             20.533844119080726, 18.952844883150998])
 
 
 

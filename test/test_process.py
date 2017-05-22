@@ -226,7 +226,7 @@ def test_class_skymodel():
     assert modelV.sky_bias == pytest.approx(0.6630, abs=0.0001)
     assert modelV.sigma == pytest.approx(0.0136, abs=0.0005)
 
-    # Test SkyModel.predict():
+    # Test SkyModel.predict_fixed_only():
     # n_rows = 3
     # df_input = modelV.df_model[:n_rows]  # first rows
     df_input = pd.DataFrame({'Serial': [9997, 9998, 9999],
@@ -237,9 +237,13 @@ def test_class_skymodel():
                              'FITSfile': ['BG Gem-0001-V.fts', 'BG Gem-0001-V.fts',
                                           'Std_SA35-0001-V.fts'],
                              'InstMag': [-7.68043698, -10.7139893, -6.500945076]},
-                            index=['9997a', '9998a', '9999a'])  # predict() has no access to CatMag
+                            index=['9997a', '9998a', '9999a'])
     expected_star_mags = [12.34, 9.2, 13.333]  # ideal CatMags
-    mag_predictions = modelV.predict(df_input)
+    mag_predictions_fixed_only = modelV.predict_fixed_only(df_input)
+    random_effect_values = modelV.df_image.loc[df_input['FITSfile'], 'Value']
+    # Remember: we SUBTRACT random effects (because original fit was
+    #    InstMag ~ CatMag + Random Effects + offsets + fixed effects:
+    mag_predictions = mag_predictions_fixed_only.values - random_effect_values.values
     assert list(mag_predictions) == pytest.approx(expected_star_mags)
 
 
@@ -360,9 +364,15 @@ def test_class_predictionset():
                pytest.approx(0.7606676, 0.000001)
 
 # Test df_cirrus_effect (match R::df_estimates_comps of line 159/160, version 1.1.4):
+    assert ps.df_cirrus_effect.shape == (191, 8)
+    assert set(ps.df_cirrus_effect.columns) == set(['Image', 'CirrusEffect', 'CirrusSigma',
+                                                    'Criterion1', 'Criterion2', 'NumCompsUsed',
+                                                    'CompIDsUsed', 'NumCompsRemoved'])
+    assert ps.df_cirrus_effect['NumCompsRemoved'].sum() == 17
+    assert ps.df_cirrus_effect.loc['SS Gem-0003-I.fts', 'CompIDsUsed'] == '104,110,113,95'
 
 
-# ---------------  INTERNAL TEST-HELPER FUNCTIONS -----------------------
+# ---------------  INTERNAL TEST-HELPER FUNCTIONS ----------------------------------------------
 
 def _overwrite_omit_txt(an_top_directory, an_rel_directory, directive_lines=None):
     # No backup. Just write it:
@@ -401,7 +411,7 @@ def _overwrite_stare_comps_txt(an_top_directory, an_rel_directory, directive_lin
     #        comps removed (kept them all), but that's OK since a restrictive set was tested
     #        in test_stare_comps() above.)
     header = [';----- This is stare_comps.txt for AN directory ' + an_rel_directory,
-              ';----- Select comp stars (by FOV, filter, & StarID) from input to predict().',
+              ';----- Select comp stars (by FOV, filter, & StarID) from input to predict_fixed_only().',
               ';----- Example directive line:',
               ';',
               ';#COMPS  Obj, V, 132, 133 144    ; to KEEP from FOV \'Obj\': '
