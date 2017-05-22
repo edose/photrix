@@ -3,7 +3,9 @@ import os
 from math import floor, sqrt
 from datetime import datetime, timezone
 
+import numpy as np
 import pandas as pd
+from scipy.interpolate import UnivariateSpline
 
 from .user import Instrument, Site
 from .util import MixedModelFit, weighted_mean
@@ -14,8 +16,32 @@ AN_TOP_DIRECTORY = 'J:/Astro/Images/C14'
 
 #######
 #
-#  Usage:
+#  photrix.process workflow:
+#    from photrix.process import *
+#    ----------- The next few steps stay in R (not python) for now:
 #    precheck(an_rel_directory='20170509', instrument_name='Borea')
+#    pre_cal(an_rel_directory='20170509', instrument_name='Borea')
+#    --> [do MaxIm DL calibration]
+#    post_cal(an_rel_directory='20170509', instrument_name='Borea')
+#    make_df_master(an_rel_directory='20170509', instrument_name='Borea')
+#    ----------- all the above will continue in R.
+#    ----------- The actual photrix.process workflow starts HERE:
+#    v = make_model(an_rel_directory='20170509', instrument_name='Borea', filter='V)
+#       ... and so on for other filters esp. 'R' and 'I'.
+#    --> [edit omit.txt until all models are right]
+#    pred = PredictionSet(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None,
+#       instrument_name='Borea', site_name='DSW',
+#       max_inst_mag_sigma=0.05, skymodel_list=[v, r, i])  # skymodel_list = list of SkyModel objs
+#    IF STARES IN THIS AN:
+#        show_stare_comps(an_rel_directory='20170509', instrument_name='Borea')
+#        --> [edit stare_comps.txt to reflect choice of stare comps, each filter]
+#        plot_stare_target(an_rel_directory='20170509', fov=FOV)  # ensure OK
+#    make_report_map(an_rel_directory='20170509')
+#    make_aavso_report(an_rel_directory='20170509', software_version='2.0.5')
+#    --> [upload to AAVSO]
+#    --> [LCG review; edit FOV files if needed]
+#
+#######
 
 
 def precheck(an_rel_directory=None, instrument_name='Borea'):
@@ -501,74 +527,41 @@ class PredictionSet:
         #     self.transform_preferences = transform_preferences
         self.saturation_adu = self.instrument.camera['saturation_adu']
         self.skymodels = dict((skymodel.filter, skymodel) for skymodel in skymodel_list)
-        self.images_with_targets = None
+        self.df_all_eligible_obs = None
+        self.df_all_curated_obs = None
+        self.df_comp_mags = None
+        self.df_cirrus_effect = None
+        self.df_transformed = None
+        self.images_with_targets_and_comps = None  # list of strings, set in .compute_comp_mags()
 
-        df_eligible_obs, warning_lines = apply_omit_txt(self.an_top_directory,
-                                                        self.an_rel_directory)
+        # Do workflow steps:
+        self.df_all_eligible_obs, warning_lines = apply_omit_txt(self.an_top_directory,
+                                                                 self.an_rel_directory)
 
-        df_curated_comp_obs = self.curate_stare_comps(df_eligible_obs)
+        self.df_all_curated_obs, warning_lines = curate_stare_comps(self.an_top_directory,
+                                                                    self.an_rel_directory,
+                                                                    self.df_all_eligible_obs)
 
-        df_estimates_comps = self.estimate_comps(df_curated_comp_obs)
+        self.df_comp_mags = self.compute_comp_mags()
+        # Here, matches R::predict.R::predictAll() just before line 85,
+        #    and self.df_comp_mags should match R:df_estimates_comps.
 
-        df_cirrus_effect = self.estimate_cirrus_effect(df_estimates_comps)
+        # self.df_cirrus_effect = self.compute_cirrus_effect(df_comp_mags)
+        #
+        # df_transformed_without_errors = self.compute_transformed_mags()
+        #
+        # self.df_transformed = self.compute_all_errors(df_comp_mags,
+        #                                               df_transformed_without_errors)
+        #
+        # write_report_map_stub()
 
-        df_estimates_checks_targets = self.estimate_checks_targets()
 
-        self.compute_all_errors()
-
-        write_report_map_stub()
-
-        self._to_json()  # maybe.
-
-
-    def curate_stare_comps(self, df_eligible_obs):
-        """
-        Using user's stare_comps.txt in this an_rel_directory, 
-           limit comps applied to stare observations.
-        :param df_eligible_obs: dataframe of obs (typically all obs eligible to this pt) [DataFrame]
-        :return: dataframe of all observations remaining eligible after this curation [DataFrame]
-        """
-        fullpath = os.path.join(self.an_top_directory, self.an_rel_directory,
-                                'Photometry', 'stare_comps.txt')
-        if not os.path.exists(fullpath):
-            write_omit_txt_stub(self.an_top_directory, self.an_rel_directory)
-            return df_eligible_obs.copy()  # no change or warnings, since stare_comps.txt was absent
-
-        with open(fullpath) as f:
-            lines = f.readlines()
-        lines = [line.split(";")[0] for line in lines]  # remove all comments
-        lines = [line.strip() for line in lines]  # remove lead/trail blanks
-        lines = [line for line in lines if line != '']  # remove empty lines
-        df_curated_obs = df_eligible_obs.copy()  # default in case no lines in stare_comps.txt
-        warning_lines = []
-
-        for line in lines:
-            warning_line = None
-            if line.startswith("#COMPS"):
-                parms, warning_line = get_line_parms(line, "#OBS", 3, None)
-                if parms is not None:
-                    fov_name = parms[0]
-                    filter_name = parms[1]
-                    comp_ids = ' '.join(parms[2:]).split()
-                    rows_to_remove = (df_eligible_obs['StarType'] == 'Comp') and \
-                        (df_eligible_obs['FOV'] == fov_name) and \
-                        (df_eligible_obs['Filter'] == filter_name) and \
-                        (df_eligible_obs['StarID'] not in comp_ids)
-                    df_curated_obs = df_eligible_obs[~ rows_to_remove]
-                else:
-                    warning_lines.append(warning_line)
-            else:
-                warning_line = 'Directive not understood: \'' + line + '\'.'
-                warning_lines.append(warning_line)
-        return df_curated_obs, warning_lines
-
-    def estimate_comps(self, df_eligible_obs):
+    def compute_comp_mags(self):
         """
         Get raw, predicted mag estimates for ALL eligible comp-star observations, in all filters.
-        :param df_eligible_obs: data for all eligible star observations [pandas DataFrame]  
         :return: dataframe of 
         """
-        df = df_eligible_obs.copy()
+        df = self.df_all_curated_obs.copy()
         # Select rows, then remove rows that suffer various causes of ineligibility:
         df = df[df['StarType'] == 'Comp']
         df = df[df['MaxADU_Ur'].notnull()]
@@ -577,45 +570,46 @@ class PredictionSet:
         df = df[df['CatMag'].notnull()]
         df = df[df['CI'].notnull()]
         df = df[df['Airmass'].notnull()]
-        df_eligible_comp_obs = df
+        df_comp_obs_with_estimates = df
 
-        images_with_eligible_comps = df_eligible_comp_obs['FITSfile'].drop_duplicates()
-        self.images_with_targets = \
-            (df_eligible_obs[df_eligible_obs['StarType'].lower() == 'target'])['FITSfile'] \
-            .drop_duplicates()  # eliminates standard FOVs etc
-        images_with_targets_and_comps = [im for im in self.images_with_targets
-                                         if im in images_with_eligible_comps]
+        # Make list of images with both targets (e.g., not stds) and comps:
+        images_with_eligible_comps = df_comp_obs_with_estimates['FITSfile'].drop_duplicates()
+        images_with_targets = \
+            (self.df_all_curated_obs[self.df_all_curated_obs['StarType'].str.lower() ==
+                                     'target'])['FITSfile'].drop_duplicates()  # remove std FOVs etc
+        self.images_with_targets_and_comps = [im for im in images_with_targets
+                                              if im in images_with_eligible_comps.values]
 
         # Get best magnitude estimates for all eligible comps:
         df_list = []
         for filter_name, skymodel in self.skymodels.items():
-            comp_obs_to_include = (df_eligible_comp_obs['Filter'] == filter_name) and \
-                                   (df_eligible_comp_obs['FITSfile'] in images_with_targets)
-            df_predict_input = df_eligible_comp_obs[comp_obs_to_include]
-            predict_output = skymodel.predict(df_predict_input)
-
-            df_estimates_this_model = \
+            comp_obs_to_include = (df_comp_obs_with_estimates['Filter'] == filter_name) & \
+                                  (df_comp_obs_with_estimates['FITSfile']
+                                      .isin(self.images_with_targets_and_comps))
+            df_predict_input = df_comp_obs_with_estimates[comp_obs_to_include]
+            df_estimates_this_skymodel = \
                 df_predict_input[['Serial', 'ModelStarID', 'FITSfile', 'StarID', 'Chart',
                                   'Xcentroid', 'Ycentroid', 'InstMag', 'InstMagSigma', 'StarType',
-                                  'CatMag', 'CatMagSaved', 'CatMagError', 'Exposure',
+                                  'CatMag', 'CatMagError', 'Exposure',
                                   'JD_mid', 'Filter', 'Airmass', 'CI', 'SkyBias', 'Vignette']]
-            df_estimates_this_model['EstimatedMag'] = predict_output
-            df_list.append(df_estimates_this_model)  # list.append() performs in-place
-        df_estimates_comps = pd.concat(df_list, ignore_index=True)
-        df_estimates_comps['UseInEnsemble'] = True  # default until falsified
-        df_estimates_comps.index = df_estimates_comps['Serial']
-        return df_estimates_comps
+            df_estimates_this_skymodel.loc[:, 'EstimatedMag'] = skymodel.predict(df_predict_input)
+            df_list.append(df_estimates_this_skymodel)  # list.append() performs in-place
+        # Collect and return the dataframe:
+        df_comp_mags = pd.concat(df_list, ignore_index=True)
+        df_comp_mags['UseInEnsemble'] = True  # default, may be reset later
+        df_comp_mags.index = df_comp_mags['Serial']
+        return df_comp_mags
 
-    def estimate_cirrus_effect(self, df_estimates_comps):
+    def compute_cirrus_effect(self, df_comp_mags):
         """
         Generates per-image cirrus effect with more careful inclusion/exclusion criteria than
            were used in the MixedModelFit, esp. in rejecting outlier comp observations.
         :return: data for best per-image cirrus-effects, in magnitudes [pandas DataFrame] 
         """
-        df_list = []
-        for image in self.images_with_targets:
+        df_row_list = []
+        for image in self.images_with_targets_and_comps:
             df_estimates_comps_this_image = \
-                df_estimates_comps[df_estimates_comps['FITSfile'] == image]
+                df_comp_mags[df_comp_mags['FITSfile'] == image]
             cirrus_effect_from_comps = \
                 df_estimates_comps_this_image['EstimatedMag'] - \
                 df_estimates_comps_this_image['CatMag']
@@ -649,6 +643,137 @@ class PredictionSet:
                     c2 = y
                     score = pd.Series([max(c_1/16.0, c_2/20.0) for (c_1, c_2) in zip(c1, c2)])
                     max_to_remove = floor(len(score) / 4)
+                    to_remove = (score >= 1) and \
+                                (score.rank(method='first') > (len(score) - max_to_remove))
+
+                    # Now, set weights to zero for the worst comps, recalc cirrus effect & sigmas:
+                    raw_weights[to_remove] = 0
+                    normalized_weights = raw_weights / sum(raw_weights)
+                    v2 = sum(normalized_weights**2)
+                    cirrus_effect_this_image = weighted_mean(cirrus_effect_from_comps,
+                                                             normalized_weights)
+                    resid2 = (cirrus_effect_from_comps - cirrus_effect_this_image) ** 2
+                    cirrus_sigma_this_image = sqrt(v2 * sum(normalized_weights * resid2))
+                    comp_ids_used = (df_estimates_comps_this_image['StarID'])[~ to_remove]
+                    num_comps_used = len(comp_ids_used)
+                    num_comps_removed = len(df_estimates_comps_this_image) - num_comps_used
+
+                    # Record these omitted comp stars in the master comp-star dataframe.
+                    removed_serials = (df_estimates_comps_this_image['Serial'])[to_remove]
+                    df_comp_mags.loc[df_comp_mags in removed_serials,
+                                     'UseInEnsemble'] = False
+
+            # Insert results into this image's row in df_cirrus_effect:
+            df_row_this_image = {'CirrusEffect': cirrus_effect_this_image,
+                                 'CirrusSigma': cirrus_sigma_this_image,
+                                 'Criterion1': criterion1,
+                                 'Criterion2': criterion2,
+                                 'NumCompsUsed': num_comps_used,
+                                 'CompIDsUsed': ','.join(comp_ids_used),
+                                 'NumCompsRemoved': num_comps_removed}
+            df_row_list.append(df_row_this_image)
+        df_cirrus_effect = pd.DataFrame(df_row_list)
+
+        return df_cirrus_effect
+
+    def compute_transformed_mags(self):
+        """
+        Return best mag estimates for all target and check stars, all observations, all filters.
+        :return: 
+        """
+        # Construct df_input_checks_targets:
+        df = self.df_all_eligible_obs.copy()
+        df = df[df['StarType'] in ['Check', 'Target']]
+        df = df[df['MaxADU_Ur'] <= self.saturation_adu]
+        df = df[df['InstMagSigma'] <= self.max_inst_mag_sigma]
+        df['CI'] = 0.0  # because they are presumed unknown; populated later
+        df['CatMagSaved'] = df['CatMag'].copy()
+        df['CatMag'] = 0.0  # estimated below by imputation from predicted magnitudes
+        df_input_checks_targets = df
+
+        # Construct df_estimates_checks_targets (which will account for Airmass(extinction),
+        #    but not (yet) for Color Index (transforms) which will be handled below:
+        df_filter_list = []
+        for skymodel in self.skymodels:
+            df_input_this_skymodel = \
+                (df_input_checks_targets.copy())[(['Filter'] == skymodel.filter) and
+                                                 (['FITSfile'] in
+                                                  self.images_with_targets_and_comps)]
+            predict_output = skymodel.predict(df_input_this_skymodel)
+            df_estimates_this_filter = df_input_this_skymodel.copy()
+            df_estimates_this_filter['PredictedMag'] = predict_output
+            df_filter_list.append(df_estimates_this_filter)
+        df_estimates_checks_targets = df.concat(df_filter_list, ignore_index=True)
+        df_estimates_checks_targets.index = df_estimates_checks_targets['Serial']  # to ensure
+
+        # CIRRUS CORRECTION: Apply per-image cirrus-effect to checks and targets (for all filters):
+        df_predictions_checks_targets = pd.merge(left=df_estimates_checks_targets,
+                                                 right=self.df_cirrus_effect,
+                                                 how='left', left_on='FITSfile', right_on='Image')
+        df_predictions_checks_targets['UntransformedMag'] = \
+            df_predictions_checks_targets['PredictedMag'] - \
+            df_predictions_checks_targets['CirrusEffect']
+
+        # COLOR CORRECTION: interpolate Color Index values, then apply them (transform):
+        transforms = {k: v['transform'] for (k, v) in self.skymodels}  # a dict of
+        df_predictions_checks_targets = impute_target_ci(df_predictions_checks_targets,
+                                                         ci_filters=['V', 'I'],
+                                                         transforms=transforms)
+        df_transforms = pd.DataFrame([transforms]).transpose()  # lookup table for left join
+        df_transformed = pd.merge(df_predictions_checks_targets, df_transforms,
+                                  how='left', left_on='Filter', right_index=True)
+        df_transformed['TransformedMag'] = df_transformed['UntransformedMag'] -\
+                                           df_transformed['Transform'] * df_transformed['CI']
+        df_transformed = df_transformed[[np.isnan(tm) == False
+                                         for tm in df_transformed['TransformedMag']]]
+        return df_transformed
+
+    def compute_all_errors(self, df_eligible_obs, df_estimates_comps,
+                           df_cirrus_effect, df_transformed):
+        """
+        Compute 3 error contributors and total sigma for each target and check star in each image. 
+           model_sigma: from mixed-model regression (same for all observations in this filter).
+           cirrus_sigma: from variance in ensemble comp stars (same for all obs in this image).
+           inst_mag_sigma: from shot noise & background noise in specific obs (unique to each obs).
+        :return: updated df_transformed [pandas DataFrame]
+        """
+        # Make new empty columns in df_transformed, to be populated later:
+        #    (note: column InstMagSigma already exists from photometry)
+        df_transformed['ModelSigma'] = None
+        df_transformed['CirrusSigma'] = None
+        df_transformed['TotalSigma'] = None
+        for skymodel in self.skymodels:
+            this_filter = skymodel.filter
+            model_sigma = skymodel.sigma
+            images_this_filter = (df_estimates_comps[df_estimates_comps['Filter'] ==
+                                                     this_filter])['FITSfile'].drop_duplicates()
+            for image in images_this_filter:
+                n = max(1, len(df_estimates_comps[(df_estimates_comps['FITSfile'] == image) and
+                                       (df_estimates_comps['UseInEnsemble'] == True)]))
+                cirrus_sigma = df_cirrus_effect.loc[df_cirrus_effect['Image'] == image,
+                                                    'CirrusSigma']
+                df_targets_checks = df_transformed[df_transformed['FITSimage'] == image] \
+                    [['Serial', 'InstMagSigma']]
+                for serial in df_targets_checks['Serial']:
+                    inst_mag_sigma = df_targets_checks.loc[df_targets_checks['Serial'] == serial,
+                                                           'InstMagSigma']
+                    # Add up total error in quadrature:
+                    # TODO: shouldn't inst_mag_sigma *decrease* with more stars contributing?
+                    total_sigma = sqrt((model_sigma**2)/n + cirrus_sigma**2 + inst_mag_sigma**2)
+                    # Plug new data into correct cells in df_transformed:
+                    this_row = df_transformed['Serial'] = serial
+                    df_transformed.loc[this_row, 'ModelSigma'] = model_sigma
+
+        df_estimates_comps = df_estimates_comps.sort_values(by=['ModelStarID', 'JD_mid'])
+
+        df_transformed = df_transformed.drop(['PredictedMag', 'Criterion1',
+                                              'Criterion2', 'UntransformedMag', 'Transform'],
+                                             axis=1)  # remove columns as a bit of cleanup
+        df_columns_to_add = self.df_all_curated_obs[['Serial', 'FOV',
+                                                     'MaxADU_Ur', 'FWHM', 'SkyADU', 'SkySigma']]
+        df_transformed = pd.merge(left=df_transformed, right=df_columns_to_add, on='Serial')
+        df_transformed = df_transformed.sort_values(by=['ModelStarID', 'JD_mid'])
+        return df_transformed
 
 
 def get_df_master(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
@@ -763,6 +888,9 @@ def apply_omit_txt(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
 
 
 def write_omit_txt_stub(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
+    """
+    Will NOT overwrite existing omit.txt.
+    """
     lines = [';----- This is omit.txt for AN directory ' + an_rel_directory,
              ';----- Use this file to omit observations from input to SkyModel (all filters).',
              ';----- Example directive lines:',
@@ -789,7 +917,55 @@ def write_omit_txt_stub(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None
     return lines_written
 
 
+def curate_stare_comps(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None, df_in=None):
+    """
+    Using user's stare_comps.txt in this an_rel_directory, 
+       remove unwanted (stare) comp observations from further use.
+    :return: data for all observations remaining eligible after this curation [DataFrame],
+                and warning messages [list of strings]
+    """
+    if df_in is None:
+        return None, None
+
+    # Read & parse control file stare_comps.txt:
+    fullpath = os.path.join(an_top_directory, an_rel_directory, 'Photometry', 'stare_comps.txt')
+    if not os.path.exists(fullpath):
+        write_stare_comps_txt_stub(an_top_directory, an_rel_directory)
+        return None  # no change or warnings as stare_comps.txt absent
+    with open(fullpath) as f:
+        lines = f.readlines()
+    lines = [line.split(";")[0] for line in lines]  # remove all comments
+    lines = [line.strip() for line in lines]  # remove lead/trail blanks
+    lines = [line for line in lines if line != '']  # remove empty lines
+
+    # Apply directive lines from stare_comps.txt:
+    df = df_in.copy()   # starting point
+    warning_lines = []  # "
+    for line in lines:
+        warning_line = None
+        if line.startswith("#COMPS"):
+            parms, warning_line = get_line_parms(line, "#COMPS", 3, None)
+            if parms is not None:
+                fov_name = parms[0]
+                filter_name = parms[1]
+                comp_ids = ' '.join(parms[2:]).split()  # parse whether comma- or space-separated
+                rows_to_remove = (df['StarType'] == 'Comp') & \
+                                 (df['FOV'] == fov_name) & \
+                                 (df['Filter'] == filter_name) & \
+                                 (~ df['StarID'].isin(comp_ids))
+                df = df[~ rows_to_remove]
+            else:
+                warning_lines.append(warning_line)
+        else:
+            warning_line = 'Directive not understood: \'' + line + '\'.'
+            warning_lines.append(warning_line)
+    return df, warning_lines
+
+
 def write_stare_comps_txt_stub(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
+    """
+    Will NOT overwrite existing stare_comps.txt file.
+    """
     lines = [';----- This is stare_comps.txt for AN directory ' + an_rel_directory,
              ';----- Select comp stars (by FOV, filter, & StarID) from input to predict().',
              ';----- Example directive line:',
@@ -811,6 +987,9 @@ def write_stare_comps_txt_stub(an_top_directory=AN_TOP_DIRECTORY, an_rel_directo
 
 
 def write_report_map_stub(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
+    """
+    Will NOT overwrite existing report.map file.
+    """
     lines = [';----- This is report_map.txt for AN directory ' + an_rel_directory,
              ';----- Use this file to omit and/or combine target observations, for AAVSO report',
              ';----- Example directive line:',
@@ -833,19 +1012,6 @@ def write_report_map_stub(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=No
     return lines_written
 
 
-
-# def convert_pandas_to_json_compatible_dict(pandas_obj):
-#         """
-#         Python's json package cannot handle int64, etc that pandas insists on putting into
-#             its Series and DataFrame constructs. So have them write themselves to JSON text,
-#             then have json read the text back in as a dictionary ready for inclusion in an
-#             object that json package considers legitimate to write to JSON text. Whew.
-#         :return: dict representation of pandas object, ready to include in a JSON file [py dict]
-#         """
-#         json_text = pandas_obj.to_json()
-#         return json.loads(json_text)  # a dictionary without int64, etc
-
-
 def get_line_parms(line, directive, nparms_min=None, nparms_max=None):
     line_parms = [p.strip() for p in line[(len(directive)):].split(',')]
     valid_num_line_parms = True  # until falsified
@@ -865,4 +1031,105 @@ def get_line_parms(line, directive, nparms_min=None, nparms_max=None):
     #     #    {'V':['V-I', 'B-V'], 'R':['V-I', 'V-R', 'B-V'], 'I':['V-I', 'R-I', 'V-R', 'B-V']}
     #     #    None -> get from Instrument object [dict of {str:list of strings}]
     #     pass
+
+
+def impute_target_ci(df_predictions_checks_targets, ci_filters, transforms):
+    """
+    Impute Color Index value for each target and check star, by time-interpolation from known
+       (comp) Color Index values. This will REPLACE CI values for Target and Check stars
+       (which probably had been set to zero for targets but catalog CI for checks).
+    :param df_predictions_checks_targets: [pandas DataFrame] 
+    :param ci_filters: ['V', 'I'] for the time being (May 2017).
+    :param transforms: transforms for all skymodels [dict filter:transform(V-I)]
+    :return: updated_df_predictions_checks_targets: updated with CI color index for targets 
+    """
+    JD_floor = floor(min(df_predictions_checks_targets['JD_mid']))
+    df_predictions_checks_targets['JD_num'] = df_predictions_checks_targets['JD_mid'] - JD_floor
+
+    # Only target stars (and checks? -- is this an oversight?):
+    star_ids_targets_checks = \
+        ((df_predictions_checks_targets.copy())[['StarType'] in ['Target', 'Check']])['ModelStarID']
+    star_ids_targets_checks = star_ids_targets_checks.drop_duplicates()
+
+    # Replace CI color index values for one target star at a time:
+    for this_star_id in star_ids_targets_checks:
+        df_star_id = (df_predictions_checks_targets[['ModelStarID'] == this_star_id])
+        df_star_id = (df_star_id[['Serial', 'ModelStarID', 'Filter',
+                                 'JD_num', 'CI', 'UntransformedMag']]).sort_values(by='JD_num')
+        df_ci_points = (extract_ci_points(df_star_id, ci_filters,
+                                          transforms)).sort_values(by='JD_num')
+
+        # Interpolate CI (method depends on # interp pts available), and put value into df_star_id:
+        if len(df_ci_points) <= 0:
+            df_star_id = None
+            print(">>>>> ModelStarID=", this_star_id,
+                  ": no CI points returned by imput_target_ci()")
+        elif len(df_ci_points) == 1:  # normal case for LPVs
+            df_star_id['CI'] = df_ci_points[0]  # 1 point --> all CIs set to the same value
+        elif len(df_ci_points) in [2, 3]:  # 2 or 3 points --> linear fit of CI vs time
+            x = df_ci_points['JD_num']
+            y = df_ci_points['CI']
+            this_linear_fit = np.polyfit(x, y, 1) #  (x,y,deg=1 thus linear)
+            this_fit_function = np.poly1d(this_linear_fit)
+            df_star_id['CI'] = this_fit_function(df_star_id['JD_num'])  # does the linear interpol
+            # Enforce no extrapolation:
+            stars_before_jd_range = df_star_id['JD_num'] < min(x)
+            stars_after_jd_range = df_star_id['JD_num'] > max(x)
+            df_star_id.loc[stars_before_jd_range, 'CI'] = this_fit_function(min(x))
+            df_star_id.loc[stars_after_jd_range, 'CI'] = this_fit_function(max(x))
+        else:  # here, 4 or more CI points to use in interpolation (prob a stare)
+            # TODO: should this be an interpolation in V mag rather than in time?
+            x = df_ci_points['JD_num']
+            y = df_ci_points['CI']
+            weights = len(x) * [1.0]
+            smoothness = len(x) * 0.03**2  # i.e, N * (sigma_CI)**2
+            # Construct spline; est=3 -> no extrapolation, rather fixed at boundary values:
+            spline = UnivariateSpline(x=x, y=y, w=weights, s=smoothness, ext=3)
+            df_star_id['CI'] = spline(df_star_id['JD_num'])
+
+        # Do the CI value replacements for this target star:
+        indices_to_update = [df_predictions_checks_targets['Serial'].index
+                             if x in df_predictions_checks_targets['Serial'] else None
+                             for x in df_star_id['Serial']]
+        df_predictions_checks_targets.loc[indices_to_update, 'CI'] = df_star_id['CI']
+
+    return df_predictions_checks_targets
+
+
+def extract_ci_points(df_star_id, ci_filters, transforms):
+    """
+    
+    :param df_star_id: rows from df_predictions holding one ModelStarID [pandas DataFrame] 
+    :param ci_filters: 
+    :param transforms: 
+    :return: 
+    """
+    max_diff_jd = 60.0 / (24 * 60)  # 60 minutes in days; max time between adjacent obs for color
+    df = (df_star_id.copy())[['Filter'] in ci_filters].sort_values(by='JD_num')
+    df['local_index'] = range(len(df))
+
+    ci_point_list = []
+    if len(df) <= 1:
+        return None  # can't extract realistic pairs if there's only one point
+    # Extract a color (one filter's magnitude minus the other's mag) whenever adjacent observations
+    #    of the same ModelStarID are in different filters:
+    filter = df['Filter']
+    jd = df['JD_num']
+    u_mag = df['UntransformedMag']
+    for ind in range(0, df['local_index']-1):
+        if filter[ind+1] != filter[ind]:  # if adj obs differ in filter...
+            if (jd[ind+1] - jd[ind]) < max_diff_jd:  # ...and if not too different in time
+                new_point_jd = (jd[ind+1] + jd[ind]) / 2.0
+                if filter[ind] == ci_filters[0]:
+                    raw_point_ci = u_mag[ind] - u_mag[ind+1]  # keep the sign correct
+                else:
+                    raw_point_ci = u_mag[ind+1] - u_mag[ind]
+                # Solve for actual (catalog-basis) color index:
+                new_point_ci = raw_point_ci / (1 + transforms[0] - transforms[1])
+                ci_point_list.append({'JD_num': new_point_jd, 'CI': new_point_ci})  # dict for 1 row
+    df_ci_point = pd.DataFrame(ci_point_list)
+    return df_ci_point
+
+
+
 

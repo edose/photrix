@@ -1,6 +1,7 @@
 import os
 import shutil
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -92,40 +93,25 @@ def test_apply_omit_txt():
     an_rel_directory = '$an_for_test'
 
     # Nested function
-    def do_apply_omit_txt(directive_lines):
+    def do_apply_omit_lines(directive_lines):
         fullpath = os.path.join(an_top_directory, an_rel_directory, 'Photometry', 'omit.txt')
-
-        omit_txt_backed_up = _backup_omit_txt(an_top_directory, an_rel_directory)
-
         # Write new omit.txt with test directive lines:
-        process.write_omit_txt_stub(an_top_directory=TEST_TOP_DIRECTORY,
-                                    an_rel_directory=an_rel_directory)
-        with open(fullpath) as f:
-            lines = f.readlines()
-            directive_lines = [line + '\n' for line in directive_lines]
-        lines.extend(directive_lines)
-        with open(fullpath, 'w') as f:
-            f.writelines(lines)
-
-        # Make output data:
+        _overwrite_omit_txt(an_top_directory=TEST_TOP_DIRECTORY,
+                            an_rel_directory=an_rel_directory,
+                            directive_lines=directive_lines)
+        # Make & return output data:
         df_filtered, warning_lines = process.apply_omit_txt(an_top_directory=TEST_TOP_DIRECTORY,
                                                             an_rel_directory=an_rel_directory)
-
-        if omit_txt_backed_up:
-            _restore_omit_txt(an_top_directory, an_rel_directory)
-        if not os.path.exists(fullpath):
-            process.write_omit_txt_stub(an_top_directory=TEST_TOP_DIRECTORY,
-                                        an_rel_directory=an_rel_directory)
         return df_filtered, warning_lines
 
     # Case: #OBS directives:
     df_master = process.get_df_master(an_top_directory=TEST_TOP_DIRECTORY,
                                       an_rel_directory=an_rel_directory)  # fresh copy
     df_filtered, warning_lines = \
-        do_apply_omit_txt(['#OBS   Std_SA107-0001-V, 123  ;  one existing star obs',
-                           '#OBS   RT Oph-0002-R, 152     ;  another existing star obs',
-                           '#OBS   RZ Mon-0001-V, 16      ;  one non-existant star obs (warning)',
-                           '#CRAZY_DIRECTIVE  XXX,999     ;  raise warning'
+        do_apply_omit_lines(['#OBS   Std_SA107-0001-V, 123  ;  one existing star obs',
+                             '#OBS   RT Oph-0002-R, 152     ;  another existing star obs',
+                             '#OBS   RZ Mon-0001-V, 16      ;  one non-existant star obs (warning)',
+                             '#CRAZY_DIRECTIVE  XXX,999     ;  raise warning'
                            ])
     assert set(df_filtered.columns) == set(df_master.columns)
     assert set(df_master.Serial) - set(df_filtered.Serial) == set([671, 1797])
@@ -137,9 +123,9 @@ def test_apply_omit_txt():
     df_master = process.get_df_master(an_top_directory=TEST_TOP_DIRECTORY,
                                       an_rel_directory=an_rel_directory)  # fresh copy
     df_filtered, warning_lines = \
-        do_apply_omit_txt(['#STAR  Std_SA107, 123, V  ;  one existing star, V-filter only',
-                           '#STAR  RU Lyn, 136        ;  one existing star, all filters',
-                           '#STAR  RZ Mon, 16         ;  one non-existant star (warning)'
+        do_apply_omit_lines(['#STAR  Std_SA107, 123, V  ;  one existing star, V-filter only',
+                             '#STAR  RU Lyn, 136        ;  one existing star, all filters',
+                             '#STAR  RZ Mon, 16         ;  one non-existant star (warning)'
                            ])
     assert set(df_filtered.columns) == set(df_master.columns)
     assert set(df_master.Serial) - set(df_filtered.Serial) == set([671] +
@@ -151,8 +137,8 @@ def test_apply_omit_txt():
     df_master = process.get_df_master(an_top_directory=TEST_TOP_DIRECTORY,
                                       an_rel_directory=an_rel_directory)  # fresh copy
     df_filtered, warning_lines = \
-        do_apply_omit_txt(['#IMAGE  Std_SA107-0002-R  ;  one existing image',
-                           '#IMAGE  RU Lyn-0999-X     ;  non-existent image (warning)'
+        do_apply_omit_lines(['#IMAGE  Std_SA107-0002-R  ;  one existing image',
+                             '#IMAGE  RU Lyn-0999-X     ;  non-existent image (warning)'
                            ])
     assert set(df_filtered.columns) == set(df_master.columns)
     assert set(df_master.Serial) - set(df_filtered.Serial) == set(list(range(683, 696)) + [])
@@ -163,8 +149,8 @@ def test_apply_omit_txt():
     df_master = process.get_df_master(an_top_directory=TEST_TOP_DIRECTORY,
                                       an_rel_directory=an_rel_directory)  # fresh copy
     df_filtered, warning_lines = \
-        do_apply_omit_txt(['#JD 0.668, 0.6695   ;  two images',
-                           '#JD 0.2, 0.3        ;  no images (warning)'])
+        do_apply_omit_lines(['#JD 0.668, 0.6695   ;  two images',
+                             '#JD 0.2, 0.3        ;  no images (warning)'])
     assert set(df_filtered.columns) == set(df_master.columns)
     assert set(df_master.Serial) - set(df_filtered.Serial) == set(list(range(489, 512)) + [])
     assert len(warning_lines) == 1
@@ -174,8 +160,8 @@ def test_apply_omit_txt():
     df_master = process.get_df_master(an_top_directory=TEST_TOP_DIRECTORY,
                                       an_rel_directory=an_rel_directory)  # fresh copy
     df_filtered, warning_lines = \
-        do_apply_omit_txt(['#SERIAL 99999                            ;  no images (warning)',
-                           '#SERIAL  12, 14,15,4444 677,, 5 777 765,2000, 14  ; all but 4444 OK '])
+        do_apply_omit_lines(['#SERIAL 99999                            ;  no images (warning)',
+                             '#SERIAL  12, 14,15,4444 677,, 5 777 765,2000, 14  ; all ex 4444 OK'])
     assert set(df_filtered.columns) == set(df_master.columns)
     assert set(df_master.Serial) - set(df_filtered.Serial) == \
            set([12, 14, 15, 677, 5, 777, 765, 2000, 14])  # 4444 excluded; not an actual Serial #
@@ -190,10 +176,8 @@ def test_class_skymodel():
     directive_lines = ['#SERIAL  348 203 1884 678 182 177 1653 1880 ;  V outliers',
                        '#IMAGE   QZ Aql-0001-V  ;  crazy cirrus term',
                        '#SERIAL  352 690  ;  R outliers',
-                       '#SERIAL  703 875 193  ;  I outliers'] # in actual R processing, for comp.
+                       '#SERIAL  703 875 193  ;  I outliers']  # in actual R processing, for comp.
     fullpath = os.path.join(an_top_directory, an_rel_directory, 'Photometry', 'omit.txt')
-
-    omit_txt_backed_up = _backup_omit_txt(an_top_directory, an_rel_directory)
 
     # Write new omit.txt with test directive lines:
     process.write_omit_txt_stub(an_top_directory=TEST_TOP_DIRECTORY,
@@ -208,13 +192,6 @@ def test_class_skymodel():
     modelV = process.SkyModel(an_top_directory=TEST_TOP_DIRECTORY,
                               an_rel_directory=an_rel_directory, filter=test_filter,
                               fit_extinction=False, do_plots=False)
-
-    # Restore omit.txt if it was backed up, else write stub:
-    if omit_txt_backed_up:
-        _restore_omit_txt(an_top_directory, an_rel_directory)
-    if not os.path.exists(fullpath):
-        process.write_omit_txt_stub(an_top_directory=TEST_TOP_DIRECTORY,
-                                    an_rel_directory=an_rel_directory)
 
     # Test attributes from inputs:
     assert modelV.an_top_directory == TEST_TOP_DIRECTORY
@@ -266,24 +243,180 @@ def test_class_skymodel():
     assert list(mag_predictions) == pytest.approx(expected_star_mags)
 
 
-def _backup_omit_txt(an_top_directory, an_rel_directory):
+def test_curate_stare_comps():
+    an_top_directory = TEST_TOP_DIRECTORY
+    an_rel_directory = '$an_for_test'
+
+    # Nested function
+    def do_apply_stare_comps_lines(directive_lines):
+        filename = 'stare_comps.txt'
+        fullpath = os.path.join(an_top_directory, an_rel_directory, 'Photometry', filename)
+
+        # Write new stare_comps.txt with test directive lines:
+        process.write_stare_comps_txt_stub(an_top_directory=TEST_TOP_DIRECTORY,
+                                           an_rel_directory=an_rel_directory)
+        with open(fullpath) as f:
+            lines = f.readlines()
+            directive_lines = [line + '\n' for line in directive_lines]
+        lines.extend(directive_lines)
+        with open(fullpath, 'w') as f:
+            f.writelines(lines)
+
+        # Make output dataframe (apply_omit_txt():
+        df_eligible_obs, _ = process.apply_omit_txt(an_top_directory=TEST_TOP_DIRECTORY,
+                                                    an_rel_directory=an_rel_directory)
+        df_curated_obs, warning_lines = process.curate_stare_comps(
+            an_top_directory=TEST_TOP_DIRECTORY,
+            an_rel_directory=an_rel_directory,
+            df_in=df_eligible_obs)
+        return df_eligible_obs, df_curated_obs, warning_lines
+
+    # Case: #COMPS directive:
+    #   (These are NOT the comps originally removed in processing this AN;
+    #       they are set to make a better test.)
+    df_eligible_obs, df_curated_obs, warning_lines = do_apply_stare_comps_lines(
+        ['#COMPS  V1023 Her , V , 117,120,123  ;  one FOV, keep 3 comps',
+         '#CRAZY_DIRECTIVE  XXX,999     ;  raise warning'
+         ])
+    rows_expected_removed = (df_eligible_obs['FOV'] == 'V1023 Her') &\
+                            (df_eligible_obs['StarType'] == 'Comp') &\
+                            (df_eligible_obs['Filter'] == 'V') &\
+                            (~ df_eligible_obs['StarID'].isin(['117', '120', '123']))
+    assert sum(rows_expected_removed) == 90  # a check before proceeding
+    serials_expected_removed = set((df_eligible_obs[rows_expected_removed])['Serial'])
+    serials_actually_removed = set(df_eligible_obs['Serial']) - set(df_curated_obs['Serial'])
+    assert serials_actually_removed == serials_expected_removed
+    starids_removed = df_eligible_obs.loc[list(serials_actually_removed), 'StarID']
+    assert all(starids_removed.isin(['111']))
+    assert len(warning_lines) == 1
+    assert warning_lines[0].find('Directive not understood') != -1  # -1 returned if a is not in b
+    assert warning_lines[0].find('#CRAZY_DIRECTIVE ') != -1  # -1 returned if a is not in b
+    # end of test_curate_stare_comps().
+
+
+def test_class_predictionset():
+    an_top_directory = TEST_TOP_DIRECTORY
+    an_rel_directory = '$an_for_test'
+
+    # Ensure omit.txt and stare_comps.txt are set up before we start (no backups)
+    #    with directives used in original R processing of 20170504:
+    _overwrite_omit_txt(an_top_directory=an_top_directory, an_rel_directory=an_rel_directory)
+    _overwrite_stare_comps_txt(an_top_directory=an_top_directory, an_rel_directory=an_rel_directory)
+
+    # Construct skymodel objects:
+    skymodel_list = []
+    for test_filter in ['V', 'R', 'I']:
+        skymodel_this_filter = process.SkyModel(an_top_directory=an_top_directory,
+                                                an_rel_directory=an_rel_directory,
+                                                filter=test_filter,
+                                                fit_extinction=False, do_plots=False)
+        skymodel_list.append(skymodel_this_filter)
+
+    ps = process.PredictionSet(an_top_directory=an_top_directory,
+                               an_rel_directory='$an_for_test',
+                               instrument_name='Borea',
+                               site_name='DSW',
+                               max_inst_mag_sigma=0.05,
+                               skymodel_list=skymodel_list)
+
+    # Test basic attributes:
+    assert ps.an_top_directory == an_top_directory
+    assert ps.an_rel_directory == an_rel_directory
+    assert ps.instrument_name == 'Borea'
+    assert ps.site_name == 'DSW'
+    assert ps.max_inst_mag_sigma == 0.05
+    assert ps.saturation_adu == \
+                Instrument(instrument_name=ps.instrument_name).camera['saturation_adu']
+    assert len(ps.images_with_targets_and_comps) == 191  # matches R::images_with_comps
+
+    # Test df_all_eligible_obs (match R::df_filtered of line 39/30, version 1.1.4):
+    assert ps.df_all_eligible_obs.shape == (2259, 35)
+    assert len(ps.df_all_eligible_obs['ModelStarID'].drop_duplicates()) == 464
+    assert len(ps.df_all_eligible_obs['StarID'].drop_duplicates()) == 154
+    assert len(ps.df_all_eligible_obs['FITSfile'].drop_duplicates()) == 217
+    assert (ps.df_all_eligible_obs['JD_mid'] - 2457878.0).mean() == \
+               pytest.approx(0.7671787, 0.000001)
+
+    # Test df_all_curated_obs (match R::df_filtered of line 40/41, version 1.1.4,
+    #    these will not have changed from df_all_eligible_obs, as stare_comps removed no comps):
+    assert ps.df_all_curated_obs.shape == ps.df_all_eligible_obs.shape
+    assert len(ps.df_all_curated_obs['ModelStarID'].drop_duplicates()) ==\
+               len(ps.df_all_eligible_obs['ModelStarID'].drop_duplicates())
+    assert len(ps.df_all_curated_obs['StarID'].drop_duplicates()) ==\
+               len(ps.df_all_eligible_obs['StarID'].drop_duplicates())
+    assert len(ps.df_all_curated_obs['FITSfile'].drop_duplicates()) == \
+               len(ps.df_all_eligible_obs['FITSfile'].drop_duplicates())
+    assert (ps.df_all_curated_obs['JD_mid'] - 2457878.0).mean() == \
+               (ps.df_all_eligible_obs['JD_mid'] - 2457878.0).mean()
+
+    # Test df_comp_mags (match R::df_estimates_comps of line 80/81, version 1.1.4):
+    assert ps.df_comp_mags.shape == (885, 21)
+    assert len(ps.df_comp_mags['ModelStarID'].drop_duplicates()) == 271
+    assert len(ps.df_comp_mags['StarID'].drop_duplicates()) == 79
+    assert all(ps.df_comp_mags['StarType'] == 'Comp')
+    assert any(np.isnan(ps.df_comp_mags['CatMag'])) is False
+    assert ps.df_comp_mags['CatMag'].mean() == pytest.approx(11.74600113, abs=0.000001)
+    assert (ps.df_comp_mags['JD_mid'] - 2457878.0).mean() == \
+               pytest.approx(0.7606676, 0.000001)
+
+# Test df_cirrus_effect (match R::df_estimates_comps of line 159/160, version 1.1.4):
+
+
+# ---------------  INTERNAL TEST-HELPER FUNCTIONS -----------------------
+
+def _overwrite_omit_txt(an_top_directory, an_rel_directory, directive_lines=None):
+    # No backup. Just write it:
+    header = [';----- This is omit.txt for AN directory ' + an_rel_directory,
+              ';----- Use this file to omit observations from input to SkyModel (all filters).',
+              ';----- Example directive lines:',
+              ';',
+              ';#OBS    Obj-0000-V, 132 ; to omit star 132 from FITS image Obj-0000-V.fts',
+              ';#STAR   FOV, 132, V     ; to omit star 132 from all FITS with FOV '
+              'and filter V',
+              ';#STAR   FOV, 132        ; to omit star 132 from all FITS with FOV '
+              'and ALL filters',
+              ';#IMAGE  Obj-0000-V      ; to omit FITS image Obj-0000-V.fts specifically',
+              ';#JD     0.72, 1         ; to omit fractional JD from 0.72 through 1',
+              ';#SERIAL 123,77 54   6   ; to omit observations by Serial number (many per line OK)',
+              ';',
+              ';----- Add your directive lines:',
+              ';']
+    if directive_lines is None:
+        # The original 20170504 lines:
+        directive_lines_to_write = ['#SERIAL  348 203 1884 678 182 177 1653 1880 ;  V outliers',
+                                    '#IMAGE   QZ Aql-0001-V  ;  crazy cirrus term',
+                                    '#SERIAL  352 690  ;  R outliers',
+                                    '#SERIAL  703 875 193  ;  I outliers']
+    else:
+        directive_lines_to_write = directive_lines
     fullpath = os.path.join(an_top_directory, an_rel_directory, 'Photometry', 'omit.txt')
-    backup_path = os.path.join(an_top_directory, an_rel_directory, 'Photometry', 'omit-SAVE.txt')
-    omit_txt_backed_up = False
-    if os.path.exists(fullpath):
-        if os.path.exists(backup_path):
-            os.remove(backup_path)
-        shutil.copy2(fullpath, backup_path)  # make a copy to restore later.
-        omit_txt_backed_up = True
-        os.remove(fullpath)
-    return omit_txt_backed_up
+    all_text = [line + '\n' for line in (header + directive_lines_to_write)]
+    with open(fullpath, 'w') as f:
+        f.writelines(all_text)
 
 
-def _restore_omit_txt(an_top_directory, an_rel_directory):
-    fullpath = os.path.join(an_top_directory, an_rel_directory, 'Photometry', 'omit.txt')
-    backup_path = os.path.join(an_top_directory, an_rel_directory, 'Photometry', 'omit-SAVE.txt')
+def _overwrite_stare_comps_txt(an_top_directory, an_rel_directory, directive_lines=None):
+    # No backup. Just write it:
+    #    (These ARE the comps originally kept in processing this AN. I think there are no
+    #        comps removed (kept them all), but that's OK since a restrictive set was tested
+    #        in test_stare_comps() above.)
+    header = [';----- This is stare_comps.txt for AN directory ' + an_rel_directory,
+              ';----- Select comp stars (by FOV, filter, & StarID) from input to predict().',
+              ';----- Example directive line:',
+              ';',
+              ';#COMPS  Obj, V, 132, 133 144    ; to KEEP from FOV \'Obj\': '
+              'comp stars \'132\' \'133\' and \'144\' in filter \'V\'',
+              ';',
+              ';----- Add your directive lines:',
+              ';']
+    if directive_lines is None:
+        # The original directive lines in AN20170504.
+        directive_lines_to_write = ['#COMPS  V1023 Her , V , 117,120,111',
+                                    '#COMPS  V1023 Her , I , 117,120,111']
+    else:
+        directive_lines_to_write = directive_lines
+    fullpath = os.path.join(an_top_directory, an_rel_directory, 'Photometry', 'stare_comps.txt')
 
-    if os.path.exists(backup_path):
-        if os.path.exists(fullpath):
-            os.remove(fullpath)
-        shutil.move(backup_path, fullpath)  # restore saved copy.
+    all_text = [line + '\n' for line in (header + directive_lines_to_write)]
+    with open(fullpath, 'w') as f:
+        f.writelines(all_text)

@@ -1,0 +1,18 @@
+#FOV_NAME           Std_SA100
+#FORMAT_VERSION     1.5 ; FOV format version defined April 24 2017
+#CENTER             08:53:14.3  -00:37:56  ;  (J2000)
+#CHART              X15687X  ;  of the table, not the graphical chart
+#DATE               12/20/2015
+;---------- Main-Target Section
+#MAIN_TARGET        Standard
+#TARGET_TYPE        Standard
+;---------- Observing Section
+#OBSERVING_STYLE    Standard   V=11.5  R=11.2  I=10.2
+;---------- AAVSO Sequence Section
+#STARS:
+118	133.39771	 -0.61127	comp	B=12.292(1) I=11.213(1) R=11.504(1) V=11.799(1) U=12.291(1)
+130	133.32151	 -0.69131	comp	B=13.512(7) I=12.418(11) R=12.720(10) V=13.027(7) U=13.450(15)
+101	133.14149	 -0.66359	comp	B=10.297(1) I=9.977(1) R=10.062(1) V=10.140(1) U=10.403(1)
+114	133.47717	 -0.53913	comp	B=12.701(9) I=10.043(9) R=10.679(8) V=11.384(8) U=14.158(12)
+124	133.32677	 -0.68591	comp	B=12.897(5) I=11.684(6) R=12.015(5) V=12.350(4) U=12.857(16)
+92	133.30984	 -0.72505	comp	B=10.426(1) I=7.949(1) R=8.501(1) V=9.150(1) U=11.921(2)
