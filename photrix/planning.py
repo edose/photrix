@@ -17,6 +17,11 @@ from .web import get_aavso_webobs_raw_table
 
 __author__ = "Eric Dose :: New Mexico Mira Project, Albuquerque"
 
+# USAGE:
+# pl.make_an_roster('20170525', 'c:/Astro/ACP/AN20170525', user_update_tolerance_days=1, exp_time_factor=0.8)
+# pl.make_an_plan('c:/Astro/ACP/AN20170525/planning.xlsx', exp_time_factor=1)
+
+
 FOV_DIRECTORY = "C:/Dev/Photometry/FOV/"
 STARE_EVENT_TYPES = {"eclipser": "minima", "exoplanet": "minima",
                      "delta scuti": "maxima", 'rr lyrae': 'maxima'}
@@ -1044,10 +1049,15 @@ def reorder_actions(raw_plan_list):
     :param raw_plan_list: the plan list to reorder.
     :return: the reordered plan list
     """
-    ideal_action_ordering = [['plan'], ['chill'], ['waituntil'], ['quitat'], ['afinterval'],
-                             ['stare', 'fov', 'burn', 'image', 'autofocus', 'comment'],
+    # 5/26/2017: try change: move waituntil and chill into General category of actions:
+    ideal_action_ordering = [['plan'],
+                             ['quitat'],
+                             ['afinterval'],
+                             ['waituntil', 'chill', 'stare', 'fov', 'burn',
+                              'image', 'autofocus', 'comment'],
                              ['flats', 'darks'],
-                             ['shutdown'], ['chain']]  # keeping sublists in original order
+                             ['shutdown'],
+                             ['chain']]  # actions in each sublist retain user-given order
     reordered_plan_list = []
     for plan in raw_plan_list:
         reordered_action_list = []
@@ -1235,6 +1245,7 @@ def add_timetable(plan_list, an, an_start_hhmm):
     :param an_start_hhmm: HHMM string denoting desired UTC start time, or None for dusk twilight.
     :return: list of Plan namedtuples with 'status', 'start_utc', and 'altitude_deg' filled in.
     """
+    # TODO: Correct starting time for first plan, especially if starting before dark (e.g., #CHILL).
     # Calculate timeline and action status, add to each action in each plan:
     # Develop projected timeline (starting time for each action in entire night):
     if an_start_hhmm is None:

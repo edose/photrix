@@ -60,6 +60,11 @@ def precheck(an_rel_directory=None, instrument_name='Borea'):
     #    (4) verify FOV file present.
     # Write out errors & warnings. Write out summary stats. Log.
 
+    # You'll want this regex pattern to match Ur FITS filenames:
+    #     r'^(.{3,}?)-S\d{3}-R\d{3}-C\d{3}-([a-zA-Z]{1,2}?)(_dupe-\d{1,4})?.f\w{1,2}'
+    # And this regex pattern to match photrix FITS filenames
+    #     r'(.{3,}?)-\d{4}-([a-zA-Z]{1,2}?).f\w{1,2}'
+
 
 class SkyModel:
     def __init__(self, an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None, filter=None,
@@ -535,9 +540,11 @@ class PredictionSet:
         self.skymodels = dict((skymodel.filter, skymodel) for skymodel in skymodel_list)
         self.df_all_eligible_obs = None
         self.df_all_curated_obs = None
+        # df_comps_mags: redefined 5/2017 to include all comps (not only from images w/targets)
         self.df_comp_mags = None
         self.df_cirrus_effect = None
         self.df_transformed = None
+        self.images_with_eligible_comps = None
         self.images_with_targets_and_comps = None  # list of strings, set in .compute_comp_mags()
 
         # Do workflow steps:
@@ -563,6 +570,8 @@ class PredictionSet:
     def compute_comp_mags(self):
         """
         Get raw, predicted mag estimates for ALL eligible comp-star observations, in all filters.
+        This means for ALL images with or without targets, and with eligible comp observations.
+        5/26/2017: Includes standards and other comp-containing images without targets.
         :return: dataframe of 
         """
         df = self.df_all_curated_obs.copy()
@@ -576,27 +585,29 @@ class PredictionSet:
         df = df[df['Airmass'].notnull()]
         df_comp_obs_with_estimates = df
 
-        # Make list of images with both targets (e.g., not stds) and comps:
-        images_with_eligible_comps = df_comp_obs_with_estimates['FITSfile'].drop_duplicates()
+        # Make lists of images with comps, and of images with comps&targets:
+        self.images_with_eligible_comps = df_comp_obs_with_estimates['FITSfile'].drop_duplicates()
         images_with_targets = \
             (self.df_all_curated_obs[self.df_all_curated_obs['StarType'].str.lower() ==
                                      'target'])['FITSfile'].drop_duplicates()  # remove std FOVs etc
         self.images_with_targets_and_comps = [im for im in images_with_targets
-                                              if im in images_with_eligible_comps.values]
+                                              if im in self.images_with_eligible_comps.values]
 
         # Get best magnitude estimates for all eligible comps:
         df_list = []
         for filter_name, skymodel in self.skymodels.items():
             comp_obs_to_include = (df_comp_obs_with_estimates['Filter'] == filter_name) & \
                                   (df_comp_obs_with_estimates['FITSfile']
-                                      .isin(self.images_with_targets_and_comps))
+                                      .isin(self.images_with_eligible_comps))
             df_predict_input = df_comp_obs_with_estimates[comp_obs_to_include]
             df_estimates_this_skymodel = \
                 df_predict_input[['Serial', 'ModelStarID', 'FITSfile', 'StarID', 'Chart',
                                   'Xcentroid', 'Ycentroid', 'InstMag', 'InstMagSigma', 'StarType',
                                   'CatMag', 'CatMagError', 'Exposure',
                                   'JD_mid', 'Filter', 'Airmass', 'CI', 'SkyBias', 'Vignette']]
-            df_estimates_this_skymodel.loc[:, 'EstimatedMag'] = skymodel.predict_fixed_only(df_predict_input)
+            # column 'EstimatedMag' does NOT include image/cirrus effect!
+            df_estimates_this_skymodel.loc[:, 'EstimatedMag'] = \
+                skymodel.predict_fixed_only(df_predict_input)
             df_list.append(df_estimates_this_skymodel)  # list.append() performs in-place
         # Collect and return the dataframe:
         df_comp_mags = pd.concat(df_list, ignore_index=True)
@@ -607,12 +618,15 @@ class PredictionSet:
     def compute_cirrus_effect(self, df_comp_mags):
         """
         Generates per-image cirrus effect with more careful inclusion/exclusion criteria than
-           were used in the MixedModelFit, esp. in rejecting outlier comp observations.
-        :param: df_comp_mags: comprehensive comp-magnitude data [pandas DataFrame]
+            were used in the MixedModelFit, esp. in rejecting outlier comp observations.
+        As of 5/26/2017: now includes images without targets, rendering resulting df
+            a SUPERSET of R::df_cirrus_effect.
+        :param: df_comp_mags: comprehensive comp-magnitude data [pandas DataFrame]. As of
+            5/2017 includes all eligible comps from images with or without targets.
         :return: data for best per-image cirrus-effects, in magnitudes [pandas DataFrame] 
         """
         df_row_list = []
-        for image in self.images_with_targets_and_comps:
+        for image in self.images_with_eligible_comps:
             df_estimates_comps_this_image = \
                 df_comp_mags[df_comp_mags['FITSfile'] == image].copy()
             cirrus_effect_from_comps = \
@@ -640,19 +654,19 @@ class PredictionSet:
             criterion1 = 0  # how many times worse is the worst comp vs avg of other comps
             criterion2 = 0  # square of worst comp's effective t-value, relative to CatMagError
             if len(df_estimates_comps_this_image) >= 4:
-                x = normalized_weights * resid2  # a pd.Series; will be >= 0
-                criterion1 = max(x) / ((sum(x)-max(x)) / (len(x)-1))
-                y = raw_weights * resid2  # a pd.Series; will be >= 0
-                criterion2 = max(y)
+                x = normalized_weights * resid2  # pd.Series; will be >= 0
+                c1 = x / ((sum(x) - x) / (len(x) - 1))  # pd.Series
+                criterion1 = max(c1)
+                c2 = raw_weights * resid2  # a pd.Series; will be >= 0
+                criterion2 = max(c2)
                 if (criterion1 >= 16) or (criterion2 >= 20):
-                    c1 = x / ((sum(x)-x) / (len(x)-1))
-                    c2 = y
                     # score > 1 for each row (comp) that may be removed:
                     score = pd.Series([max(c_1/16.0, c_2/20.0) for (c_1, c_2) in zip(c1, c2)],
                                       index=c1.index)
                     max_to_remove = floor(len(score) / 4)
                     to_remove = (score >= 1) & \
-                                (score.rank(method='first') > (len(score) - max_to_remove))
+                                (score.rank(ascending=True, method='first') >
+                                 (len(score) - max_to_remove))
 
                     # Now, set weights to zero for the worst comps, recalc cirrus effect & sigmas:
                     raw_weights[to_remove] = 0.0
@@ -772,7 +786,6 @@ class PredictionSet:
                     inst_mag_sigma = df_targets_checks.loc[df_targets_checks['Serial'] == serial,
                                                            'InstMagSigma']
                     # Add up total error in quadrature:
-                    # TODO: shouldn't inst_mag_sigma *decrease* with more stars contributing?
                     total_sigma = sqrt((model_sigma**2)/n + cirrus_sigma**2 + inst_mag_sigma**2)
                     # Plug new data into correct cells in df_transformed:
                     this_row = df_transformed['Serial'] = serial

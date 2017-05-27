@@ -330,7 +330,7 @@ def test_class_predictionset():
     assert ps.site_name == 'DSW'
     assert ps.max_inst_mag_sigma == 0.05
     assert ps.saturation_adu == \
-                Instrument(instrument_name=ps.instrument_name).camera['saturation_adu']
+        Instrument(instrument_name=ps.instrument_name).camera['saturation_adu']
     assert len(ps.images_with_targets_and_comps) == 191  # matches R::images_with_comps
 
     # Test df_all_eligible_obs (match R::df_filtered of line 39/30, version 1.1.4):
@@ -339,13 +339,13 @@ def test_class_predictionset():
     assert len(ps.df_all_eligible_obs['StarID'].drop_duplicates()) == 154
     assert len(ps.df_all_eligible_obs['FITSfile'].drop_duplicates()) == 217
     assert (ps.df_all_eligible_obs['JD_mid'] - 2457878.0).mean() == \
-               pytest.approx(0.7671787, 0.000001)
+        pytest.approx(0.7671787, 0.000001)
 
     # Test df_all_curated_obs (match R::df_filtered of line 40/41, version 1.1.4,
     #    these will not have changed from df_all_eligible_obs, as stare_comps removed no comps):
     assert ps.df_all_curated_obs.shape == ps.df_all_eligible_obs.shape
     assert len(ps.df_all_curated_obs['ModelStarID'].drop_duplicates()) ==\
-               len(ps.df_all_eligible_obs['ModelStarID'].drop_duplicates())
+        len(ps.df_all_eligible_obs['ModelStarID'].drop_duplicates())
     assert len(ps.df_all_curated_obs['StarID'].drop_duplicates()) ==\
                len(ps.df_all_eligible_obs['StarID'].drop_duplicates())
     assert len(ps.df_all_curated_obs['FITSfile'].drop_duplicates()) == \
@@ -354,22 +354,73 @@ def test_class_predictionset():
                (ps.df_all_eligible_obs['JD_mid'] - 2457878.0).mean()
 
     # Test df_comp_mags (match R::df_estimates_comps of line 80/81, version 1.1.4):
-    assert ps.df_comp_mags.shape == (885, 21)
-    assert len(ps.df_comp_mags['ModelStarID'].drop_duplicates()) == 271
-    assert len(ps.df_comp_mags['StarID'].drop_duplicates()) == 79
-    assert all(ps.df_comp_mags['StarType'] == 'Comp')
-    assert any(np.isnan(ps.df_comp_mags['CatMag'])) is False
-    assert ps.df_comp_mags['CatMag'].mean() == pytest.approx(11.74600113, abs=0.000001)
-    assert (ps.df_comp_mags['JD_mid'] - 2457878.0).mean() == \
+    # In R: df_estimates_comps includes only images with targets.
+    # In py/photrix: ps.df_comp_mags includes ALL images with eligible comps incl Std FOVs etc.
+    # Test R-equivalent dataframe r_df_estimates_comps:
+    rows_to_keep = [ff in ps.images_with_targets_and_comps
+                    for ff in ps.df_comp_mags['FITSfile'].values]
+    r_df_estimates_comps = (ps.df_comp_mags.copy()).loc[rows_to_keep, :]
+    assert r_df_estimates_comps.shape == (885, 21)
+    assert len(r_df_estimates_comps['ModelStarID'].drop_duplicates()) == 271
+    assert len(r_df_estimates_comps['StarID'].drop_duplicates()) == 79
+    assert all(r_df_estimates_comps['StarType'] == 'Comp')
+    assert any(np.isnan(r_df_estimates_comps['CatMag'])) is False
+    assert r_df_estimates_comps['CatMag'].mean() == pytest.approx(11.74600113, abs=0.000001)
+    assert (r_df_estimates_comps['JD_mid'] - 2457878.0).mean() == \
                pytest.approx(0.7606676, 0.000001)
 
-# Test df_cirrus_effect (match R::df_estimates_comps of line 159/160, version 1.1.4):
-    assert ps.df_cirrus_effect.shape == (191, 8)
+    # Test actual dataframe ps.df_comp_mags:
+    assert ps.df_comp_mags.shape == (1126, 21)
+    assert len(ps.df_comp_mags['ModelStarID'].drop_duplicates()) == 310
+    assert len(ps.df_comp_mags['StarID'].drop_duplicates()) == 101
+    assert any(np.isnan(ps.df_comp_mags['CatMag'])) is False
+    assert ps.df_comp_mags['CatMag'].mean() == pytest.approx(11.795893, abs=0.000001)
+    assert (ps.df_comp_mags['JD_mid'] - 2457878.0).mean() == \
+               pytest.approx(0.755980, 0.000001)
+
+    images_r_df_estimates_comps = set(r_df_estimates_comps['FITSfile'])
+    images_df_comp_mags = set(ps.df_comp_mags['FITSfile'])
+    assert images_r_df_estimates_comps == set(ps.images_with_targets_and_comps)
+    assert images_df_comp_mags == set(ps.images_with_eligible_comps)
+
+    # Rigorous test of df_comp_mags via calculation from scratch:
+    df = ps.df_comp_mags
+    df_comp = df.loc[df['ModelStarID'] == 'RZ Mon_145']
+    this_skymodel = [s_l for s_l in skymodel_list if s_l.filter =='V'][0]
+    fe = this_skymodel.mm_fit.df_fixed_effects.Value
+    inst_mag = df_comp['InstMag'].iloc[0]
+    dep_var_offsets = this_skymodel.transform * df_comp['CI'].iloc[0] +\
+        this_skymodel.extinction * df_comp['Airmass'].iloc[0]
+    raw_mm_prediction = fe.Intercept + \
+        fe.SkyBias * df_comp['SkyBias'].iloc[0] +\
+        fe.Vignette * df_comp['Vignette'].iloc[0]
+    estimated_mag_predicted = inst_mag - dep_var_offsets - raw_mm_prediction
+    # The next line does NOT include cirrus/image effect:
+    assert estimated_mag_predicted == pytest.approx(df_comp['EstimatedMag'].iloc[0], abs=0.000001)
+
+    # Test df_cirrus_effect (SUPERSET of (not =) R::df_cirrus_effect line 164/165, version 1.2.0),
+    #     that is, now includes images without targets (e.g., Std FOVs):
+    assert ps.df_cirrus_effect.shape == (212, 8)
     assert set(ps.df_cirrus_effect.columns) == set(['Image', 'CirrusEffect', 'CirrusSigma',
                                                     'Criterion1', 'Criterion2', 'NumCompsUsed',
                                                     'CompIDsUsed', 'NumCompsRemoved'])
-    assert ps.df_cirrus_effect['NumCompsRemoved'].sum() == 17
+    assert ps.df_cirrus_effect['NumCompsRemoved'].sum() == 24
     assert ps.df_cirrus_effect.loc['SS Gem-0003-I.fts', 'CompIDsUsed'] == '104,110,113,95'
+    assert ps.df_cirrus_effect.loc['Std_SA107-0003-I.fts', 'NumCompsUsed'] == 11
+    assert ps.df_cirrus_effect.loc['Std_SA107-0003-I.fts', 'NumCompsRemoved'] == 1
+    # Test the SUBSET of df_cirrus_effect with only images w/ targets (matching R:df_cirrus_effect):
+    rows_with_targets = [(im in ps.images_with_targets_and_comps)
+                         for im in ps.df_cirrus_effect['Image']]
+    df_cirrus_effect_with_targets = ps.df_cirrus_effect[rows_with_targets]
+    assert df_cirrus_effect_with_targets.shape == (191, 8)
+    assert set(df_cirrus_effect_with_targets.columns) == \
+           set(['Image', 'CirrusEffect', 'CirrusSigma',
+                'Criterion1', 'Criterion2', 'NumCompsUsed',
+                'CompIDsUsed', 'NumCompsRemoved'])
+    assert df_cirrus_effect_with_targets['NumCompsRemoved'].sum() == 17
+    assert df_cirrus_effect_with_targets.loc['SS Gem-0003-I.fts', 'CompIDsUsed'] == '104,110,113,95'
+    assert 'Std...' not in df_cirrus_effect_with_targets['Image']
+
 
 
 # ---------------  INTERNAL TEST-HELPER FUNCTIONS ----------------------------------------------
