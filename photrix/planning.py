@@ -40,7 +40,7 @@ LOCAL_OBS_CACHE_FULLPATH = os.path.join(PHOTRIX_ROOT_DIRECTORY, "local_obs_cache
 AAVSO_WEBOBS_ROWS_TO_GET = 100
 MIN_ROWS_ONE_STARE = 10
 MAX_DAYS_ONE_STARE = 0.5
-DEFAULT_UPDATE_TOLERANCE_DAYS = 0.166667  # 4 hours
+DEFAULT_UPDATE_TOLERANCE_DAYS = 0.083333  # 2 hours
 
 ABSOLUTE_MAX_EXPOSURE_TIME = 600  # seconds
 ABSOLUTE_MIN_EXPOSURE_TIME = 3  # seconds
@@ -1057,7 +1057,7 @@ def reorder_actions(raw_plan_list):
                               'image', 'autofocus', 'comment'],
                              ['flats', 'darks'],
                              ['shutdown'],
-                             ['chain']]  # actions in each sublist retain user-given order
+                             ['chain']]  # actions within each sublist retain user's given order
     reordered_plan_list = []
     for plan in raw_plan_list:
         reordered_action_list = []

@@ -72,10 +72,11 @@ class SkyModel:
                  max_cat_mag_error=0.01, max_inst_mag_sigma=0.03, max_color_vi=+2.5,
                  saturation_adu=None,
                  fit_sky_bias=True, fit_vignette=True, fit_xy=False,
-                 fit_transform=False, fit_extinction=True, do_plots=True):
+                 fit_transform=False, fit_extinction=True, fit_log_adu=True,
+                 do_plots=True):
         """
         Constructs a sky model using mixed-model regression on df_master.
-           Normally used by make_model()
+            Normally used by make_model()
         :param an_top_directory: e.g., 'J:\Astro\Images\C14' [string]
         :param an_rel_directory: e.g., '20170504'. The dir 'Photometry' is subdir of this. [string]
         :param filter: name of filter to which this model applies [string, e.g., 'V' or 'R']
@@ -86,11 +87,13 @@ class SkyModel:
         :param max_color_vi: maximum V-I color allowed to stars in model [float]
         :param saturation_adu: ccd ADUs that constitute saturation [float; from Instrument if None] 
         :param fit_sky_bias: True to fit sky bias term [bool]
+        :param fit_log_adu: True to fit log(MaxADU_Ur) as CCD nonlinearity measure [bool]
         :param fit_vignette: True to fit vignette term (dist^2 from ccd center) [bool]
         :param fit_xy: True to fit X and Y gradient terms [bool]
         :param fit_transform: True to fit transform terms; else use values from Instument obj [bool]
         :param fit_extinction: True to fit extinction terms; else use values from Site obj [bool]
-        Parameter 'fit_star_id' is not included in this version (would lead to crossed RE vars).
+        Parameter 'fit_star_id' is not included in this version (has never been used in R, and
+            would lead to crossed RE vars).
         """
 
         self.an_top_directory = an_top_directory
@@ -111,6 +114,7 @@ class SkyModel:
         self.fit_xy = fit_xy
         self.fit_transform = fit_transform
         self.fit_extinction = fit_extinction
+        self.fit_log_adu = fit_log_adu
         self.dep_var_name = 'InstMag_with_offsets'
         self.df_model = None    # data to/from regression, one row per input pt [pandas DataFrame]
         self.mm_fit = None      # placeholder [MixedModelFit object]
@@ -121,6 +125,7 @@ class SkyModel:
         self.x = None           # "
         self.y = None           # "
         self.sky_bias = None    # "
+        self.log_adu = None     # "
         self.converged = False  # "
         self.n_obs = None       # "
         self.n_images = None    # "
@@ -226,6 +231,8 @@ class SkyModel:
         if self.fit_sky_bias:
             if sum([x != 0 for x in self.df_model['SkyBias']]) > int(len(self.df_model) / 2):
                 fixed_effect_var_list.append('SkyBias')
+        if self.fit_log_adu:
+            fixed_effect_var_list.append('LogADU')
         if self.fit_vignette:
             fixed_effect_var_list.append('Vignette')
         if self.fit_xy:
@@ -285,6 +292,8 @@ class SkyModel:
         self.y = self.mm_fit.df_fixed_effects['Y1024', 'Value'] if self.fit_xy is True else 0.0
         self.sky_bias = self.mm_fit.df_fixed_effects.loc['SkyBias', 'Value'] \
             if self.fit_sky_bias is True else 0.0
+        self.log_adu = self.mm_fit.df_fixed_effects.loc['LogADU', 'Value'] \
+            if self.fit_log_adu is True else 0.0
         self.converged = self.mm_fit.converged
         self.n_obs = len(self.df_model)
         self.n_images = len(self.df_model['FITSfile'].drop_duplicates())
@@ -467,6 +476,8 @@ class SkyModel:
         required_input_columns = ['Serial', 'FITSfile', 'InstMag', 'CI', 'Airmass']
         if self.fit_sky_bias:
             required_input_columns.append('SkyBias')
+        if self.fit_log_adu:
+            required_input_columns.append('LogADU')
         if self.fit_vignette:
             required_input_columns.append('Vignette')
         if self.fit_xy:
@@ -544,8 +555,9 @@ class PredictionSet:
         self.df_comp_mags = None
         self.df_cirrus_effect = None
         self.df_transformed = None
-        self.images_with_eligible_comps = None
-        self.images_with_targets_and_comps = None  # list of strings, set in .compute_comp_mags()
+        # TODO: make the next two attributes either: both lists or both Serials.
+        self.images_with_eligible_comps = None     # pd.Series of strings
+        self.images_with_targets_and_comps = None  # list of strings
 
         # Do workflow steps:
         self.df_all_eligible_obs, warning_lines = apply_omit_txt(self.an_top_directory,
@@ -558,12 +570,11 @@ class PredictionSet:
         self.df_comp_mags = self.compute_comp_mags()
 
         self.df_cirrus_effect = self.compute_cirrus_effect(self.df_comp_mags)
-        #
-        # df_transformed_without_errors = self.compute_transformed_mags()
-        #
-        # self.df_transformed = self.compute_all_errors(df_comp_mags,
-        #                                               df_transformed_without_errors)
-        #
+
+        df_transformed_without_errors = self.compute_transformed_mags()
+
+        self.df_transformed = self.compute_all_errors(df_transformed_without_errors)
+
         # write_report_map_stub()
 
 
@@ -604,7 +615,8 @@ class PredictionSet:
                 df_predict_input[['Serial', 'ModelStarID', 'FITSfile', 'StarID', 'Chart',
                                   'Xcentroid', 'Ycentroid', 'InstMag', 'InstMagSigma', 'StarType',
                                   'CatMag', 'CatMagError', 'Exposure',
-                                  'JD_mid', 'Filter', 'Airmass', 'CI', 'SkyBias', 'Vignette']]
+                                  'JD_mid', 'Filter', 'Airmass', 'CI', 'SkyBias', 'LogADU',
+                                  'Vignette']]
             # column 'EstimatedMag' does NOT include image/cirrus effect!
             df_estimates_this_skymodel.loc[:, 'EstimatedMag'] = \
                 skymodel.predict_fixed_only(df_predict_input)
@@ -711,7 +723,7 @@ class PredictionSet:
         """
         # Construct df_input_checks_targets:
         df = self.df_all_eligible_obs.copy()
-        df = df[df['StarType'] in ['Check', 'Target']]
+        df = df[[(st in ['Check', 'Target']) for st in df['StarType']]]
         df = df[df['MaxADU_Ur'] <= self.saturation_adu]
         df = df[df['InstMagSigma'] <= self.max_inst_mag_sigma]
         df['CI'] = 0.0  # because they are presumed unknown; populated later
@@ -719,87 +731,118 @@ class PredictionSet:
         df['CatMag'] = 0.0  # estimated below by imputation from predicted magnitudes
         df_input_checks_targets = df
 
-        # Construct df_estimates_checks_targets (which will account for Airmass(extinction),
+        # Make df_estimates_checks_targets (which will account for Airmass(extinction),
         #    but not (yet) for Color Index (transforms) which will be handled below:
         df_filter_list = []
-        for skymodel in self.skymodels:
-            df_input_this_skymodel = \
-                (df_input_checks_targets.copy())[(['Filter'] == skymodel.filter) and
-                                                 (['FITSfile'] in
-                                                  self.images_with_targets_and_comps)]
+        for this_filter, skymodel in self.skymodels.items():
+            rows_to_select = (df_input_checks_targets['Filter'] == this_filter) & \
+                             (df_input_checks_targets['FITSfile']\
+                              .isin(self.images_with_targets_and_comps))
+            df_input_this_skymodel = (df_input_checks_targets.copy())[rows_to_select]
             predict_output = skymodel.predict_fixed_only(df_input_this_skymodel)
             df_estimates_this_filter = df_input_this_skymodel.copy()
             df_estimates_this_filter['PredictedMag'] = predict_output
             df_filter_list.append(df_estimates_this_filter)
-        df_estimates_checks_targets = df.concat(df_filter_list, ignore_index=True)
+        df_estimates_checks_targets = pd.concat(df_filter_list, ignore_index=True)
         df_estimates_checks_targets.index = df_estimates_checks_targets['Serial']  # to ensure
+        columns_post_predict = ["Serial", "ModelStarID", "FITSfile", "StarID", "Chart",
+                                "Xcentroid", "Ycentroid", "InstMag", "InstMagSigma", "StarType",
+                                "CatMag", "CatMagSaved", "CatMagError", "Exposure", "JD_mid",
+                                "Filter", "Airmass", "CI", "SkyBias", "Vignette", "LogADU",
+                                "PredictedMag"]
+        df_estimates_checks_targets = df_estimates_checks_targets[columns_post_predict]
+        df_estimates_checks_targets['CatMag'] = df_estimates_checks_targets['CatMagSaved']
+        df_estimates_checks_targets = df_estimates_checks_targets.drop(['CatMagSaved'], axis=1)
+        df_estimates_checks_targets['UseInEnsemble'] = None
+
 
         # CIRRUS CORRECTION: Apply per-image cirrus-effect to checks and targets (for all filters):
         df_predictions_checks_targets = pd.merge(left=df_estimates_checks_targets,
                                                  right=self.df_cirrus_effect,
                                                  how='left', left_on='FITSfile', right_on='Image')
+        # df_predictions_checks_targets.sort_values(by=['FOV', 'ModelStarID', 'Serial'],
+        #                                           inplace=True)
+        df_predictions_checks_targets.index = df_predictions_checks_targets['Serial']
+
         df_predictions_checks_targets['UntransformedMag'] = \
             df_predictions_checks_targets['PredictedMag'] - \
             df_predictions_checks_targets['CirrusEffect']
 
         # COLOR CORRECTION: interpolate Color Index values, then apply them (transform):
-        transforms = {k: v['transform'] for (k, v) in self.skymodels}  # a dict of
+        transforms = {k: v.transform for (k, v) in self.skymodels.items()}  # a dict of transforms
         df_predictions_checks_targets = impute_target_ci(df_predictions_checks_targets,
                                                          ci_filters=['V', 'I'],
                                                          transforms=transforms)
-        df_transforms = pd.DataFrame([transforms]).transpose()  # lookup table for left join
-        df_transformed = pd.merge(df_predictions_checks_targets, df_transforms,
-                                  how='left', left_on='Filter', right_index=True)
-        df_transformed['TransformedMag'] = df_transformed['UntransformedMag'] -\
-                                           df_transformed['Transform'] * df_transformed['CI']
-        df_transformed = df_transformed[[np.isnan(tm) == False
-                                         for tm in df_transformed['TransformedMag']]]
-        return df_transformed
+        df_transforms = pd.DataFrame([transforms], index=['Transform']).transpose()  # lookup table
+        df = pd.merge(df_predictions_checks_targets, df_transforms,
+                      how='left', left_on='Filter', right_index=True)
+        df['TransformedMag'] = df['UntransformedMag'] - df['Transform'] * df['CI']
+        df = df[[np.isnan(tm) == False for tm in df['TransformedMag']]]
+        df_transformed_without_errors = df
+        return df_transformed_without_errors
 
-    def compute_all_errors(self, df_eligible_obs, df_estimates_comps,
-                           df_cirrus_effect, df_transformed):
+    def compute_all_errors(self, df_transformed_without_errors):
         """
         Compute 3 error contributors and total sigma for each target and check star in each image. 
            model_sigma: from mixed-model regression (same for all observations in this filter).
            cirrus_sigma: from variance in ensemble comp stars (same for all obs in this image).
            inst_mag_sigma: from shot noise & background noise in specific obs (unique to each obs).
-        :return: updated df_transformed [pandas DataFrame]
+        :param: df_transformed_without_errors:
+        :return: df_transformed, including errors [pandas DataFrame]
         """
+        df_transformed = df_transformed_without_errors.copy()
+
         # Make new empty columns in df_transformed, to be populated later:
         #    (note: column InstMagSigma already exists from photometry)
         df_transformed['ModelSigma'] = None
         df_transformed['CirrusSigma'] = None
         df_transformed['TotalSigma'] = None
-        for skymodel in self.skymodels:
-            this_filter = skymodel.filter
+        for this_filter, skymodel in self.skymodels.items():
             model_sigma = skymodel.sigma
-            images_this_filter = (df_estimates_comps[df_estimates_comps['Filter'] ==
-                                                     this_filter])['FITSfile'].drop_duplicates()
+            images_this_filter = (self.df_comp_mags[self.df_comp_mags['Filter'] ==
+                                                    this_filter])['FITSfile'].drop_duplicates()
             for image in images_this_filter:
-                n = max(1, len(df_estimates_comps[(df_estimates_comps['FITSfile'] == image) and
-                                       (df_estimates_comps['UseInEnsemble'] == True)]))
-                cirrus_sigma = df_cirrus_effect.loc[df_cirrus_effect['Image'] == image,
-                                                    'CirrusSigma']
-                df_targets_checks = df_transformed[df_transformed['FITSimage'] == image] \
+                n = max(1, len(self.df_comp_mags[(self.df_comp_mags['FITSfile'] == image) &
+                                                 (self.df_comp_mags['UseInEnsemble'] == True)]))
+                cirrus_sigma = \
+                    float(self.df_cirrus_effect.loc[self.df_cirrus_effect['Image'] == image,
+                                                    'CirrusSigma'])
+                df_targets_checks = (df_transformed[df_transformed['FITSfile'] == image]) \
                     [['Serial', 'InstMagSigma']]
                 for serial in df_targets_checks['Serial']:
-                    inst_mag_sigma = df_targets_checks.loc[df_targets_checks['Serial'] == serial,
-                                                           'InstMagSigma']
+                    inst_mag_sigma = \
+                        float(df_targets_checks.loc[df_targets_checks['Serial'] == serial,
+                                                    'InstMagSigma'])
                     # Add up total error in quadrature:
                     total_sigma = sqrt((model_sigma**2)/n + cirrus_sigma**2 + inst_mag_sigma**2)
-                    # Plug new data into correct cells in df_transformed:
-                    this_row = df_transformed['Serial'] = serial
+                    # Write new data into correct cells in df_transformed:
+                    this_row = (df_transformed['Serial'] == serial)
                     df_transformed.loc[this_row, 'ModelSigma'] = model_sigma
+                    df_transformed.loc[this_row, 'CirrusSigma'] = cirrus_sigma
+                    df_transformed.loc[this_row, 'TotalSigma'] = total_sigma
 
-        df_estimates_comps = df_estimates_comps.sort_values(by=['ModelStarID', 'JD_mid'])
-
+        # Finish forming df_transformed (return object):
         df_transformed = df_transformed.drop(['PredictedMag', 'Criterion1',
                                               'Criterion2', 'UntransformedMag', 'Transform'],
                                              axis=1)  # remove columns as a bit of cleanup
-        df_columns_to_add = self.df_all_curated_obs[['Serial', 'FOV',
-                                                     'MaxADU_Ur', 'FWHM', 'SkyADU', 'SkySigma']]
-        df_transformed = pd.merge(left=df_transformed, right=df_columns_to_add, on='Serial')
+        df_columns_to_join = self.df_all_curated_obs[['Serial', 'FOV', 'MaxADU_Ur', 'FWHM',
+                                                      'SkyADU', 'SkySigma']]  # for markup report
+        df_transformed = pd.merge(left=df_transformed, right=df_columns_to_join, on='Serial')
+        df_transformed.index = df_transformed['Serial']
         df_transformed = df_transformed.sort_values(by=['ModelStarID', 'JD_mid'])
+
+        # ############# Start temporary code block: mimic R df:
+        r_columns = ['Serial', 'ModelStarID', 'FITSfile', 'StarID', 'Chart',
+                     'Xcentroid', 'Ycentroid',
+                     'InstMag', 'InstMagSigma', 'StarType', 'CatMag', 'CatMagError',
+                     'Exposure', 'JD_mid', 'Filter', 'Airmass', 'CI', 'SkyBias', 'Vignette',
+                     'LogADU', 'CirrusEffect', 'CirrusSigma', 'NumCompsUsed',
+                     'CompIDsUsed', 'NumCompsRemoved', 'JD_num', 'TransformedMag', 'ModelSigma',
+                     'TotalSigma', 'FOV', 'MaxADU_Ur', 'FWHM', 'SkyADU', 'SkySigma']
+        df_r = (df_transformed.copy())[r_columns]
+        df_r.to_csv(r'C:/24hrs/df_r.txt', sep=';', quotechar='"')  # '.txt', else Excel misbehaves
+        # ############# End temporary code to mimic R df.
+
         return df_transformed
 
 
@@ -994,7 +1037,7 @@ def write_stare_comps_txt_stub(an_top_directory=AN_TOP_DIRECTORY, an_rel_directo
     Will NOT overwrite existing stare_comps.txt file.
     """
     lines = [';----- This is stare_comps.txt for AN directory ' + an_rel_directory,
-             ';----- Select comp stars (by FOV, filter, & StarID) from input to predict_fixed_only().',
+             ';----- Select comp stars (by FOV, filter, StarID) from input to predict_fixed_only()',
              ';----- Example directive line:',
              ';',
              ';#COMPS  Obj, V, 132, 133 144    ; to KEEP from FOV \'Obj\': '
@@ -1065,6 +1108,7 @@ def impute_target_ci(df_predictions_checks_targets, ci_filters, transforms):
     Impute Color Index value for each target and check star, by time-interpolation from known
        (comp) Color Index values. This will REPLACE CI values for Target and Check stars
        (which probably had been set to zero for targets but catalog CI for checks).
+       CALLS extract_ci_points() to get list of ci_filter observations to interpolate.
     :param df_predictions_checks_targets: [pandas DataFrame] 
     :param ci_filters: ['V', 'I'] for the time being (May 2017).
     :param transforms: transforms for all skymodels [dict filter:transform(V-I)]
@@ -1073,30 +1117,35 @@ def impute_target_ci(df_predictions_checks_targets, ci_filters, transforms):
     JD_floor = floor(min(df_predictions_checks_targets['JD_mid']))
     df_predictions_checks_targets['JD_num'] = df_predictions_checks_targets['JD_mid'] - JD_floor
 
-    # Only target stars (and checks? -- is this an oversight?):
+    # Only target & check stars:
+    target_and_check_rows = df_predictions_checks_targets['StarType'].isin(['Target', 'Check'])
     star_ids_targets_checks = \
-        ((df_predictions_checks_targets.copy())[['StarType'] in ['Target', 'Check']])['ModelStarID']
-    star_ids_targets_checks = star_ids_targets_checks.drop_duplicates()
+        ((df_predictions_checks_targets.copy())[target_and_check_rows])['ModelStarID']
+    # Sorted for convenience in testing:
+    star_ids_targets_checks = star_ids_targets_checks.drop_duplicates().sort_values()
 
     # Replace CI color index values for one target star at a time:
     for this_star_id in star_ids_targets_checks:
-        df_star_id = (df_predictions_checks_targets[['ModelStarID'] == this_star_id])
-        df_star_id = (df_star_id[['Serial', 'ModelStarID', 'Filter',
-                                 'JD_num', 'CI', 'UntransformedMag']]).sort_values(by='JD_num')
-        df_ci_points = (extract_ci_points(df_star_id, ci_filters,
-                                          transforms)).sort_values(by='JD_num')
-
-        # Interpolate CI (method depends on # interp pts available), and put value into df_star_id:
+        rows_this_star_id = df_predictions_checks_targets['ModelStarID'] == this_star_id
+        df_star_id = (df_predictions_checks_targets[rows_this_star_id])\
+            [['Serial', 'ModelStarID', 'Filter', 'JD_num', 'CI', 'UntransformedMag']] \
+            .sort_values(by='JD_num')
+        df_ci_points = extract_ci_points(df_star_id, ci_filters, transforms)
         if len(df_ci_points) <= 0:
-            df_star_id = None
+            df_predictions_checks_targets.loc[rows_this_star_id, 'CI'] = None
             print(">>>>> ModelStarID=", this_star_id,
-                  ": no CI points returned by imput_target_ci()")
-        elif len(df_ci_points) == 1:  # normal case for LPVs
-            df_star_id['CI'] = df_ci_points[0]  # 1 point --> all CIs set to the same value
+                  " no CI points returned by input_target_ci()")
+            continue
+        df_ci_points = df_ci_points.sort_values(by='JD_num')
+
+        # Interpolate CI, put values into df_star_id:
+        #    (Interpolation method depends on number of interpolation points avaialable.)
+        if len(df_ci_points) == 1:  # normal case for LPVs
+            df_star_id['CI'] = df_ci_points.loc[0, 'CI']  # 1 point --> all CIs set to single value
         elif len(df_ci_points) in [2, 3]:  # 2 or 3 points --> linear fit of CI vs time
             x = df_ci_points['JD_num']
             y = df_ci_points['CI']
-            this_linear_fit = np.polyfit(x, y, 1) #  (x,y,deg=1 thus linear)
+            this_linear_fit = np.polyfit(x, y, 1)  # (x,y,deg=1 thus linear)
             this_fit_function = np.poly1d(this_linear_fit)
             df_star_id['CI'] = this_fit_function(df_star_id['JD_num'])  # does the linear interpol
             # Enforce no extrapolation:
@@ -1105,17 +1154,17 @@ def impute_target_ci(df_predictions_checks_targets, ci_filters, transforms):
             df_star_id.loc[stars_before_jd_range, 'CI'] = this_fit_function(min(x))
             df_star_id.loc[stars_after_jd_range, 'CI'] = this_fit_function(max(x))
         else:  # here, 4 or more CI points to use in interpolation (prob a stare)
-            # TODO: should this be an interpolation in V mag rather than in time?
+            # TODO: should this be interpolation in V mag rather than (or as alt to) interp in time?
             x = df_ci_points['JD_num']
             y = df_ci_points['CI']
             weights = len(x) * [1.0]
             smoothness = len(x) * 0.03**2  # i.e, N * (sigma_CI)**2
-            # Construct spline; est=3 -> no extrapolation, rather fixed at boundary values:
+            # Construct spline; ext=3 -> no extrapolation, rather fixed at boundary values:
             spline = UnivariateSpline(x=x, y=y, w=weights, s=smoothness, ext=3)
             df_star_id['CI'] = spline(df_star_id['JD_num'])
 
-        # Do the CI value replacements for this target star:
-        indices_to_update = [df_predictions_checks_targets['Serial'].index
+        # Insert CI values for this target star:
+        indices_to_update = [x
                              if x in df_predictions_checks_targets['Serial'] else None
                              for x in df_star_id['Serial']]
         df_predictions_checks_targets.loc[indices_to_update, 'CI'] = df_star_id['CI']
@@ -1129,34 +1178,47 @@ def extract_ci_points(df_star_id, ci_filters, transforms):
     :param df_star_id: rows from df_predictions holding one ModelStarID [pandas DataFrame] 
     :param ci_filters: 
     :param transforms: 
-    :return: 
+    :return: small dataframe of JD and Color Index for this star.
     """
     max_diff_jd = 60.0 / (24 * 60)  # 60 minutes in days; max time between adjacent obs for color
-    df = (df_star_id.copy())[['Filter'] in ci_filters].sort_values(by='JD_num')
-    df['local_index'] = range(len(df))
+    rows_to_keep = df_star_id['Filter'].isin(ci_filters)
+    df = (df_star_id.copy())[rows_to_keep].sort_values(by='JD_num')
 
     ci_point_list = []
     if len(df) <= 1:
-        return None  # can't extract realistic pairs if there's only one point
+        return pd.DataFrame()  # can't extract realistic pairs if there's only one point
     # Extract a color (one filter's magnitude minus the other's mag) whenever adjacent observations
     #    of the same ModelStarID are in different filters:
-    filter = df['Filter']
-    jd = df['JD_num']
-    u_mag = df['UntransformedMag']
-    for ind in range(0, df['local_index']-1):
+    filter = list(df['Filter'])
+    jd = list(df['JD_num'])
+    u_mag = list(df['UntransformedMag'])
+    for ind in range(0, len(df) - 1):
         if filter[ind+1] != filter[ind]:  # if adj obs differ in filter...
             if (jd[ind+1] - jd[ind]) < max_diff_jd:  # ...and if not too different in time
                 new_point_jd = (jd[ind+1] + jd[ind]) / 2.0
-                if filter[ind] == ci_filters[0]:
-                    raw_point_ci = u_mag[ind] - u_mag[ind+1]  # keep the sign correct
-                else:
-                    raw_point_ci = u_mag[ind+1] - u_mag[ind]
-                # Solve for actual (catalog-basis) color index:
-                new_point_ci = raw_point_ci / (1 + transforms[0] - transforms[1])
+                new_point_ci = \
+                    solve_for_real_ci(
+                        untransformed_mags={filter[ind]: u_mag[ind], filter[ind+1]: u_mag[ind+1]},
+                        ci_filters=ci_filters,
+                        transforms=transforms)
                 ci_point_list.append({'JD_num': new_point_jd, 'CI': new_point_ci})  # dict for 1 row
     df_ci_point = pd.DataFrame(ci_point_list)
     return df_ci_point
 
 
-
-
+def solve_for_real_ci(untransformed_mags, ci_filters, transforms):
+    """
+    Solves for best estimate of real (transformed) Color Index.
+    Dicts are passed (unordered); this function safely deduces the sign of the Color Index.
+    :param untransformed_mags: exactly two raw magnitudes, by filter
+               [dict, e.g., {'V': 12.6, 'I': 8.7} ]
+    :param ci_filters: exactly two filters, in order, defining Color Index [e.g., ['V','I']]
+    :param transforms: transforms in the ci_filters base, from which the relevant transform is
+               extracted [dict, e.g., {'V': 0.025, 'I': -0.044} ]
+    :return: best estimate of real, transformed Color Index [float]
+    """
+    mags_ordered = [untransformed_mags[f] for f in ci_filters]
+    transforms_ordered = [transforms[f] for f in ci_filters]
+    real_ci = (mags_ordered[0] - mags_ordered[1]) / \
+              (1.0 + transforms_ordered[0] - transforms_ordered[1])
+    return real_ci

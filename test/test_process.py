@@ -83,7 +83,7 @@ def test_get_df_master():
     an_rel_directory = '$an_for_test'
     df_master = process.get_df_master(an_top_directory, an_rel_directory)
     assert len(df_master) == 2285
-    assert len(df_master.columns) == 35
+    assert len(df_master.columns) == 36
     assert all([col in df_master.columns for col in ['Serial', 'FITSfile', 'Filter']])
     assert list(df_master.index) == list(df_master['Serial'])
 
@@ -170,6 +170,7 @@ def test_apply_omit_txt():
 
 
 def test_class_skymodel():
+    # TODO: add tests for fixed-effect log_adu (parallel to FE sky_bias).
     an_top_directory = TEST_TOP_DIRECTORY
     an_rel_directory = '$an_for_test'
     test_filter = 'V'
@@ -189,10 +190,10 @@ def test_class_skymodel():
     with open(fullpath, 'w') as f:
         f.writelines(lines)
 
+    # Case 1: Model WITHOUT log_adu (CCD nonlinearity) term.
     modelV = process.SkyModel(an_top_directory=TEST_TOP_DIRECTORY,
                               an_rel_directory=an_rel_directory, filter=test_filter,
-                              fit_extinction=False, do_plots=False)
-
+                              fit_extinction=False, fit_log_adu=False, do_plots=False)
     # Test attributes from inputs:
     assert modelV.an_top_directory == TEST_TOP_DIRECTORY
     assert modelV.an_rel_directory == an_rel_directory
@@ -204,11 +205,11 @@ def test_class_skymodel():
     assert modelV.max_color_vi == +2.5  # default
     assert modelV.saturation_adu == Instrument(modelV.instrument_name).camera['saturation_adu']
     assert modelV.fit_sky_bias is True
+    assert modelV.fit_log_adu is False
     assert modelV.fit_vignette is True
     assert modelV.fit_xy is False
     assert modelV.fit_transform is False
     assert modelV.fit_extinction is False
-
     # Test results attributes:
     assert modelV.converged is True
     assert modelV.n_obs == 96
@@ -218,17 +219,15 @@ def test_class_skymodel():
     assert isinstance(modelV.mm_fit, MixedModelFit)
     assert len(modelV.mm_fit.df_fixed_effects) == 3
     assert modelV.transform ==\
-           (Instrument(modelV.instrument_name)).filters[modelV.filter]['transform']['V-I']
+        (Instrument(modelV.instrument_name)).filters[modelV.filter]['transform']['V-I']
     assert modelV.extinction == Site(modelV.site_name).extinction[modelV.filter]
     assert modelV.vignette == pytest.approx(-0.00578, abs=0.00005)
     assert modelV.x == 0
     assert modelV.y == 0
     assert modelV.sky_bias == pytest.approx(0.6630, abs=0.0001)
+    assert modelV.log_adu == 0
     assert modelV.sigma == pytest.approx(0.0136, abs=0.0005)
-
     # Test SkyModel.predict_fixed_only():
-    # n_rows = 3
-    # df_input = modelV.df_model[:n_rows]  # first rows
     df_input = pd.DataFrame({'Serial': [9997, 9998, 9999],
                              'SkyBias': [0.55, 0.9, 0.5454],
                              'Vignette': [0.322, 0, 1],
@@ -246,6 +245,62 @@ def test_class_skymodel():
     mag_predictions = mag_predictions_fixed_only.values - random_effect_values.values
     assert list(mag_predictions) == pytest.approx(expected_star_mags)
 
+    # Case 2: Model WITH log_adu (CCD nonlinearity) term.
+    modelV = process.SkyModel(an_top_directory=TEST_TOP_DIRECTORY,
+                              an_rel_directory=an_rel_directory, filter=test_filter,
+                              fit_extinction=False, fit_log_adu=True, do_plots=False)
+    # Test attributes from inputs:
+    assert modelV.an_top_directory == TEST_TOP_DIRECTORY
+    assert modelV.an_rel_directory == an_rel_directory
+    assert modelV.filter == test_filter
+    assert modelV.instrument_name == 'Borea'  # default
+    assert modelV.site_name == 'DSW'  # default
+    assert modelV.max_cat_mag_error == 0.01  # default
+    assert modelV.max_inst_mag_sigma == 0.03  # default
+    assert modelV.max_color_vi == +2.5  # default
+    assert modelV.saturation_adu == Instrument(modelV.instrument_name).camera['saturation_adu']
+    assert modelV.fit_sky_bias is True
+    assert modelV.fit_log_adu is True
+    assert modelV.fit_vignette is True
+    assert modelV.fit_xy is False
+    assert modelV.fit_transform is False
+    assert modelV.fit_extinction is False
+    # Test results attributes:
+    assert modelV.converged is True
+    assert modelV.n_obs == 96
+    assert len(modelV.df_model) == modelV.n_obs
+    assert modelV.n_images == 18
+    assert len(modelV.df_model['FITSfile'].drop_duplicates()) == modelV.n_images
+    assert isinstance(modelV.mm_fit, MixedModelFit)
+    assert len(modelV.mm_fit.df_fixed_effects) == 4
+    assert modelV.transform ==\
+        (Instrument(modelV.instrument_name)).filters[modelV.filter]['transform']['V-I']
+    assert modelV.extinction == Site(modelV.site_name).extinction[modelV.filter]
+    assert modelV.vignette == pytest.approx(-0.00053, abs=0.00005)
+    assert modelV.x == 0
+    assert modelV.y == 0
+    assert modelV.sky_bias == pytest.approx(0.5506, abs=0.0001)
+    assert modelV.log_adu == pytest.approx(-0.0272, abs=0.0001)
+    assert modelV.sigma == pytest.approx(0.0132, abs=0.0005)
+    # Test SkyModel.predict_fixed_only():
+    df_input = pd.DataFrame({'Serial': [9997, 9998, 9999],
+                             'SkyBias': [0.55, 0.9, 0.5454],
+                             'LogADU': [3.1, 3.5, 3.22],
+                             'Vignette': [0.322, 0, 1],
+                             'CI': [0.577, 2.2, 0.12],
+                             'Airmass': [1.57, 1.0, 2.1],
+                             'FITSfile': ['BG Gem-0001-V.fts', 'BG Gem-0001-V.fts',
+                                          'Std_SA35-0001-V.fts'],
+                             'InstMag': [-7.68043698, -10.7139893, -6.500945076]},
+                            index=['9997a', '9998a', '9999a'])
+    expected_star_mags = [12.3753, 9.2873, 13.3713]  # ideal CatMags
+    mag_predictions_fixed_only = modelV.predict_fixed_only(df_input)
+    random_effect_values = modelV.df_image.loc[df_input['FITSfile'], 'Value']
+    # Remember: we SUBTRACT random effects (because original fit was
+    #    InstMag ~ CatMag + Random Effects + offsets + fixed effects:
+    mag_predictions = mag_predictions_fixed_only.values - random_effect_values.values
+    assert list(mag_predictions) == pytest.approx(expected_star_mags, abs=0.0002)
+
 
 def test_curate_stare_comps():
     an_top_directory = TEST_TOP_DIRECTORY
@@ -257,6 +312,7 @@ def test_curate_stare_comps():
         fullpath = os.path.join(an_top_directory, an_rel_directory, 'Photometry', filename)
 
         # Write new stare_comps.txt with test directive lines:
+        os.remove(fullpath)
         process.write_stare_comps_txt_stub(an_top_directory=TEST_TOP_DIRECTORY,
                                            an_rel_directory=an_rel_directory)
         with open(fullpath) as f:
@@ -298,6 +354,184 @@ def test_curate_stare_comps():
     # end of test_curate_stare_comps().
 
 
+def test_solve_for_real_ci():
+    # Start with ideal values, make observed values, then test that fn recovers ideal Color Index:
+    ideal_mags = {'V': 12.5, 'I': 8.8}
+    ci_filters = ['V', 'I']
+    transforms = {'I': -0.044, 'V': 0.025}
+    ideal_ci = ideal_mags['V'] - ideal_mags['I']
+    untransformed_mags = {cif: ideal_mags[cif] + transforms[cif] * ideal_ci for cif in ci_filters}
+    real_ci = process.solve_for_real_ci(untransformed_mags, ci_filters, transforms)
+    assert real_ci == pytest.approx(ideal_ci, abs=0.000001)
+
+
+def test_extract_ci_points():
+    # Case 1:
+    df_star_id = pd.DataFrame({'Serial': [2, 4, 6, 8],
+                               'ModelStarID': 'AU XXX_111',
+                               'Filter': ['V', 'R', 'I', 'I'],
+                               'JD_num': [0.66, 0.67, 0.68, 0.69],
+                               'CI': 0.0,
+                               'UntransformedMag': [12.8, 10.2, 8.3, 8.2]})
+    ci_filters = ['V', 'I']
+    transforms = {'V': 0.025, 'R': -0.08, 'I': 0.052, 'XX': 1.0}
+    df_result = process.extract_ci_points(df_star_id=df_star_id, ci_filters=ci_filters,
+                                          transforms=transforms)
+    assert len(df_result) == 1
+    assert df_result.loc[0, 'JD_num'] == \
+           (df_star_id.loc[0, 'JD_num'] + df_star_id.loc[2, 'JD_num']) / 2.0
+    assert df_result.loc[0, 'CI'] == pytest.approx((12.8-8.3) / (1.0 + 0.025 - 0.052), abs=0.000001)
+
+    # Case 2:
+    df_star_id = pd.DataFrame({'Serial': np.arange(1, 9),
+                               'ModelStarID': 'AU XXX_111',
+                               'Filter': ['V', 'R', 'I', 'I', 'V', 'I', 'V', 'R'],
+                               'JD_num': 0.66 + np.arange(8)*0.01,
+                               'CI': 0.0,
+                               'UntransformedMag': [12.8, 10.2, 8.3, 8.2, 12.6, 8.1, 12.5, 10.11]})
+    ci_filters = ['V', 'I']
+    transforms = {'V': 0.025, 'R': -0.08, 'I': 0.052, 'XX': 1.0}
+    df_result = process.extract_ci_points(df_star_id=df_star_id, ci_filters=ci_filters,
+                                          transforms=transforms)
+    assert len(df_result) == 4
+    assert list(df_result['JD_num']) == pytest.approx([0.67, 0.695, 0.705, 0.715], abs=0.00001)
+    untransformed_ci = [12.8-8.3, 12.6-8.2, 12.6-8.1, 12.5-8.1]
+    real_ci = [uci / (1.0 + 0.025 - 0.052) for uci in untransformed_ci]
+    assert list(df_result['CI']) == pytest.approx(real_ci, abs=0.000001)
+
+
+def test_impute_target_ci():
+    # Make a df for each interpolation case, concatenate them into one df, and test function:
+    df_1_ci_point = pd.DataFrame({'Serial': 1 + np.arange(4),
+                                  'ModelStarID': 'AU_1_PT',
+                                  'StarType': 'Target',
+                                  'Filter': ['V', 'R', 'I', 'I'],
+                                  'JD_mid': 2457800.35 + 0.01*np.arange(4),
+                                  'CI': 0.0,
+                                  'UntransformedMag': [12.8, 10.2, 8.3, 8.2]})
+    df_2_ci_points = pd.DataFrame({'Serial': 10 + np.arange(6),
+                                   'ModelStarID': 'AU_2_PTS',
+                                   'StarType': 'Target',
+                                   'Filter': ['V', 'R', 'I', 'I', 'V', 'V'],
+                                   'JD_mid': 2457800.45 + 0.01*np.arange(6),
+                                   'CI': 0.0,
+                                   'UntransformedMag': [12.9, 10.5, 8.7, 8.9, 12.6, 12.7]})
+    df_3_ci_points = pd.DataFrame({'Serial': 20 + np.arange(8),
+                                   'ModelStarID': 'AU_3_PTS',
+                                   'StarType': 'Check',
+                                   'Filter': ['V', 'R', 'I', 'I', 'V', 'V', 'R', 'I'],
+                                   'JD_mid': 2457800.45 + 0.01*np.arange(8),
+                                   'CI': 0.0,
+                                   'UntransformedMag': [12.5, 10.5, 8.5, 8.4, 12.4, 12.3, 10, 8.8]})
+    df_4_ci_points = pd.DataFrame({'Serial': 40 + np.arange(10),
+                                   'ModelStarID': 'AU_4_PTS',
+                                   'StarType': 'Check',
+                                   'Filter': ['V', 'R', 'I', 'I', 'V', 'V', 'R', 'I', 'R', 'V'],
+                                   'JD_mid': 2457800.55 + 0.005*np.arange(10),
+                                   'CI': 0.0,
+                                   'UntransformedMag': [12.8, 10.2, 8.3, 8.2, 12.2, 12.3, 10.2,
+                                                        8.8, 10.2, 12.5]})
+    df_7_ci_points = pd.DataFrame({'Serial': 60 + np.arange(11),
+                                   'ModelStarID': 'AU_7_PTS',
+                                   'StarType': 'Check',
+                                   'Filter': ['V', 'I', 'V', 'V', 'I', 'V', 'V', 'I',
+                                              'V', 'V', 'I'],
+                                   'JD_mid': 2457800.65 + 0.005*np.arange(11),
+                                   'CI': 0.0,
+                                   'UntransformedMag': [12.6, 8.3, 12.2, 12.8, 8.3, 12.2,
+                                                        12.8, 8.3, 12.2, 12.8, 8.4]})
+    df_no_ci_points = pd.DataFrame({'Serial': 80 + np.arange(4),
+                                    'ModelStarID': 'AU_NO_PTS',
+                                    'StarType': 'Target',
+                                    'Filter': ['V', 'R', 'V', 'V'],
+                                    'JD_mid': 2457800.75 + 0.02*np.arange(4),
+                                    'CI': 0.0,
+                                    'UntransformedMag': [12.8, 10.2, 8.3, 8.2]})
+    df_predictions_checks_targets = pd.concat([df_1_ci_point, df_2_ci_points, df_3_ci_points,
+                                              df_4_ci_points, df_7_ci_points, df_no_ci_points])
+    df_predictions_checks_targets.index = df_predictions_checks_targets['Serial']
+    ci_filters = ['V', 'I']
+    transforms = {'V': 0.025, 'R': -0.08, 'I': 0.052, 'XX': 1.0}
+    df_updated = process.impute_target_ci(df_predictions_checks_targets, ci_filters, transforms)
+    factor = 1 / (1 + transforms['V'] - transforms['I'])  # for solving for real CI from obs CI
+
+    # Test case: 1 CI point:
+    df_1 = df_updated[df_updated['ModelStarID'] == 'AU_1_PT']  # fn output for this star
+    # Verify no change
+    assert list(df_1['Serial']) == list(1 + np.arange(4))
+    assert list(df_1['StarType']) == len(df_1) * ['Target']
+    assert list(df_1['JD_mid']) == list(df_1_ci_point['JD_mid'])
+    assert list(df_1['UntransformedMag']) == list(df_1_ci_point['UntransformedMag'])
+    ci_points = factor * (df_1_ci_point.iloc[0]['UntransformedMag'] -
+                            df_1_ci_point.iloc[2]['UntransformedMag'])
+    # Verify Color Index values:
+    assert list(df_1['CI']) == len(df_1) * [pytest.approx(ci_points, abs=0.0001)]
+
+    # Test case: 2 CI points:
+    df_2 = df_updated[df_updated['ModelStarID'] == 'AU_2_PTS']  # fn output for this star
+    assert list(df_2['Serial']) == list(10 + np.arange(6))
+    assert list(df_2['StarType']) == len(df_2) * ['Target']
+    assert list(df_2['JD_mid']) == list(df_2_ci_points['JD_mid'])
+    assert list(df_2['UntransformedMag']) == list(df_2_ci_points['UntransformedMag'])
+    ci_points = [factor * (df_2_ci_points.iloc[i]['UntransformedMag'] -
+                           df_2_ci_points.iloc[j]['UntransformedMag'])
+                 for (i, j) in [(0, 2), (4, 3)]]
+    assert df_2.iloc[0]['CI'] == pytest.approx(ci_points[0], abs=0.0001)
+    assert df_2.iloc[1]['CI'] == pytest.approx(ci_points[0], abs=0.0001)
+    assert df_2.iloc[2]['CI'] == pytest.approx(4.1110, abs=0.0001)
+    assert df_2.iloc[3]['CI'] == pytest.approx(3.9054, abs=0.0001)
+    assert df_2.iloc[4]['CI'] == pytest.approx(ci_points[1], abs=0.0001)
+    assert df_2.iloc[5]['CI'] == pytest.approx(ci_points[1], abs=0.0001)
+
+    # Test case: 3 CI points:
+    df_3 = df_updated[df_updated['ModelStarID'] == 'AU_3_PTS']  # fn output for this star
+    assert list(df_3['Serial']) == list(20 + np.arange(8))
+    assert list(df_3['StarType']) == len(df_3) * ['Check']
+    assert list(df_3['JD_mid']) == list(df_3_ci_points['JD_mid'])
+    assert list(df_3['UntransformedMag']) == list(df_3_ci_points['UntransformedMag'])
+    assert df_3.iloc[0]['CI'] == df_3.iloc[1]['CI'] == pytest.approx(4.19664, abs=0.0001)
+    assert df_3.iloc[2]['CI'] == pytest.approx(4.09387, abs=0.0001)
+    assert df_3.iloc[3]['CI'] == pytest.approx(3.9911, abs=0.0001)
+    assert df_3.iloc[4]['CI'] == pytest.approx(3.8883, abs=0.0001)
+    assert df_3.iloc[5]['CI'] == pytest.approx(3.7855, abs=0.0001)
+    assert df_3.iloc[6]['CI'] == df_3.iloc[7]['CI'] == pytest.approx(3.68277, abs=0.0001)
+
+    # Test case: 4 CI points (make a nice spline):
+    df_4 = df_updated[df_updated['ModelStarID'] == 'AU_4_PTS']  # fn output for this star
+    assert list(df_4['Serial']) == list(40 + np.arange(10))
+    assert list(df_4['StarType']) == len(df_4) * ['Check']
+    assert list(df_4['JD_mid']) == list(df_4_ci_points['JD_mid'])
+    assert list(df_4['UntransformedMag']) == list(df_4_ci_points['UntransformedMag'])
+    assert df_4.iloc[0]['CI'] == df_4.iloc[1]['CI'] == pytest.approx(4.62487, abs=0.0001)
+    assert df_4.iloc[2]['CI'] == pytest.approx(4.47805, abs=0.0001)
+    assert df_4.iloc[3]['CI'] == pytest.approx(4.24314, abs=0.0001)
+    assert df_4.iloc[4]['CI'] == pytest.approx(3.97886, abs=0.0001)
+    assert df_4.iloc[5]['CI'] == pytest.approx(3.74394, abs=0.0001)
+    assert df_4.iloc[6]['CI'] == pytest.approx(3.59712, abs=0.0001)
+    assert df_4.iloc[7]['CI'] == pytest.approx(3.59712, abs=0.0001)
+    assert df_4.iloc[8]['CI'] == df_4.iloc[9]['CI'] == pytest.approx(3.80267, abs=0.0001)
+
+    # Test case: 7 CI points:
+    df_7 = df_updated[df_updated['ModelStarID'] == 'AU_7_PTS']  # fn output for this star
+    assert list(df_7['Serial']) == list(60 + np.arange(11))
+    assert list(df_7['StarType']) == len(df_7) * ['Check']
+    assert list(df_7['JD_mid']) == list(df_7_ci_points['JD_mid'])
+    assert list(df_7['UntransformedMag']) == list(df_7_ci_points['UntransformedMag'])
+    assert df_7.iloc[0]['CI'] == pytest.approx(4.41340, abs=0.0001)
+    assert df_7.iloc[2]['CI'] == pytest.approx(4.19340, abs=0.0001)
+    assert df_7.iloc[5]['CI'] == pytest.approx(4.08470, abs=0.0001)
+    assert df_7.iloc[8]['CI'] == pytest.approx(3.68003, abs=0.0001)
+    assert df_7.iloc[10]['CI'] == pytest.approx(4.52080, abs=0.0001)
+
+    # Test case: NO CI points at all:
+    df_no = df_updated[df_updated['ModelStarID'] == 'AU_NO_PTS']  # fn output for this star
+    assert list(df_no['Serial']) == list(80 + np.arange(4))
+    assert list(df_no['StarType']) == len(df_no) * ['Target']
+    assert list(df_no['JD_mid']) == list(df_no_ci_points['JD_mid'])
+    assert list(df_no['UntransformedMag']) == list(df_no_ci_points['UntransformedMag'])
+    assert all(np.isnan(df_no['CI']))
+
+
 def test_class_predictionset():
     an_top_directory = TEST_TOP_DIRECTORY
     an_rel_directory = '$an_for_test'
@@ -333,8 +567,8 @@ def test_class_predictionset():
         Instrument(instrument_name=ps.instrument_name).camera['saturation_adu']
     assert len(ps.images_with_targets_and_comps) == 191  # matches R::images_with_comps
 
-    # Test df_all_eligible_obs (match R::df_filtered of line 39/30, version 1.1.4):
-    assert ps.df_all_eligible_obs.shape == (2259, 35)
+    # Test df_all_eligible_obs (added col LogADU in R ver 1.2.1):
+    assert ps.df_all_eligible_obs.shape == (2259, 36)
     assert len(ps.df_all_eligible_obs['ModelStarID'].drop_duplicates()) == 464
     assert len(ps.df_all_eligible_obs['StarID'].drop_duplicates()) == 154
     assert len(ps.df_all_eligible_obs['FITSfile'].drop_duplicates()) == 217
@@ -353,14 +587,15 @@ def test_class_predictionset():
     assert (ps.df_all_curated_obs['JD_mid'] - 2457878.0).mean() == \
                (ps.df_all_eligible_obs['JD_mid'] - 2457878.0).mean()
 
-    # Test df_comp_mags (match R::df_estimates_comps of line 80/81, version 1.1.4):
+    # Test df_comp_mags (match R::df_estimates_comps of line 80/81, version 1.1.4),
+    #    added column LogADU in R ver 1.2.1.
     # In R: df_estimates_comps includes only images with targets.
     # In py/photrix: ps.df_comp_mags includes ALL images with eligible comps incl Std FOVs etc.
     # Test R-equivalent dataframe r_df_estimates_comps:
     rows_to_keep = [ff in ps.images_with_targets_and_comps
                     for ff in ps.df_comp_mags['FITSfile'].values]
     r_df_estimates_comps = (ps.df_comp_mags.copy()).loc[rows_to_keep, :]
-    assert r_df_estimates_comps.shape == (885, 21)
+    assert r_df_estimates_comps.shape == (885, 22)
     assert len(r_df_estimates_comps['ModelStarID'].drop_duplicates()) == 271
     assert len(r_df_estimates_comps['StarID'].drop_duplicates()) == 79
     assert all(r_df_estimates_comps['StarType'] == 'Comp')
@@ -369,8 +604,8 @@ def test_class_predictionset():
     assert (r_df_estimates_comps['JD_mid'] - 2457878.0).mean() == \
                pytest.approx(0.7606676, 0.000001)
 
-    # Test actual dataframe ps.df_comp_mags:
-    assert ps.df_comp_mags.shape == (1126, 21)
+    # Test actual dataframe ps.df_comp_mags (nb: added column LogADU in R ver 1.2.1):
+    assert ps.df_comp_mags.shape == (1126, 22)
     assert len(ps.df_comp_mags['ModelStarID'].drop_duplicates()) == 310
     assert len(ps.df_comp_mags['StarID'].drop_duplicates()) == 101
     assert any(np.isnan(ps.df_comp_mags['CatMag'])) is False
@@ -386,14 +621,15 @@ def test_class_predictionset():
     # Rigorous test of df_comp_mags via calculation from scratch:
     df = ps.df_comp_mags
     df_comp = df.loc[df['ModelStarID'] == 'RZ Mon_145']
-    this_skymodel = [s_l for s_l in skymodel_list if s_l.filter =='V'][0]
+    this_skymodel = [s_l for s_l in skymodel_list if s_l.filter == 'V'][0]
     fe = this_skymodel.mm_fit.df_fixed_effects.Value
     inst_mag = df_comp['InstMag'].iloc[0]
     dep_var_offsets = this_skymodel.transform * df_comp['CI'].iloc[0] +\
         this_skymodel.extinction * df_comp['Airmass'].iloc[0]
     raw_mm_prediction = fe.Intercept + \
         fe.SkyBias * df_comp['SkyBias'].iloc[0] +\
-        fe.Vignette * df_comp['Vignette'].iloc[0]
+        fe.Vignette * df_comp['Vignette'].iloc[0] +\
+        fe.LogADU * df_comp['LogADU'].iloc[0]
     estimated_mag_predicted = inst_mag - dep_var_offsets - raw_mm_prediction
     # The next line does NOT include cirrus/image effect:
     assert estimated_mag_predicted == pytest.approx(df_comp['EstimatedMag'].iloc[0], abs=0.000001)
@@ -404,10 +640,10 @@ def test_class_predictionset():
     assert set(ps.df_cirrus_effect.columns) == set(['Image', 'CirrusEffect', 'CirrusSigma',
                                                     'Criterion1', 'Criterion2', 'NumCompsUsed',
                                                     'CompIDsUsed', 'NumCompsRemoved'])
-    assert ps.df_cirrus_effect['NumCompsRemoved'].sum() == 24
+    assert ps.df_cirrus_effect['NumCompsRemoved'].sum() == 13
     assert ps.df_cirrus_effect.loc['SS Gem-0003-I.fts', 'CompIDsUsed'] == '104,110,113,95'
-    assert ps.df_cirrus_effect.loc['Std_SA107-0003-I.fts', 'NumCompsUsed'] == 11
-    assert ps.df_cirrus_effect.loc['Std_SA107-0003-I.fts', 'NumCompsRemoved'] == 1
+    assert ps.df_cirrus_effect.loc['Std_SA32-0009-I.fts', 'NumCompsUsed'] == 14
+    assert ps.df_cirrus_effect.loc['Std_SA32-0009-I.fts', 'NumCompsRemoved'] == 1
     # Test the SUBSET of df_cirrus_effect with only images w/ targets (matching R:df_cirrus_effect):
     rows_with_targets = [(im in ps.images_with_targets_and_comps)
                          for im in ps.df_cirrus_effect['Image']]
@@ -417,9 +653,13 @@ def test_class_predictionset():
            set(['Image', 'CirrusEffect', 'CirrusSigma',
                 'Criterion1', 'Criterion2', 'NumCompsUsed',
                 'CompIDsUsed', 'NumCompsRemoved'])
-    assert df_cirrus_effect_with_targets['NumCompsRemoved'].sum() == 17
+    assert df_cirrus_effect_with_targets['NumCompsRemoved'].sum() == 11
     assert df_cirrus_effect_with_targets.loc['SS Gem-0003-I.fts', 'CompIDsUsed'] == '104,110,113,95'
     assert 'Std...' not in df_cirrus_effect_with_targets['Image']
+
+    # Test result df_transformed from compute_transformed_mags():
+
+
 
 
 

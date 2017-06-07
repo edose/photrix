@@ -35,7 +35,7 @@
       }
     },
     "R": {
-      "reference_exposure_mag10": 30,
+      "reference_exposure_mag10": 24,
       "transform": {
         "V-I": 0.0398,
         "B-V": null,
