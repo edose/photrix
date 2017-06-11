@@ -658,9 +658,46 @@ def test_class_predictionset():
     assert 'Std...' not in df_cirrus_effect_with_targets['Image']
 
     # Test result df_transformed from compute_transformed_mags():
+    expected_columns = set(['Serial', 'ModelStarID', 'FITSfile', 'StarID', 'Chart',
+                            'Xcentroid', 'Ycentroid', 'InstMag', 'InstMagSigma', 'StarType',
+                            'CatMag', 'CatMagError', 'Exposure', 'JD_mid', 'Filter',
+                            'Airmass', 'CI', 'SkyBias', 'Vignette', 'LogADU',
+                            'UseInEnsemble', 'CirrusEffect', 'CirrusSigma', 'CompIDsUsed',
+                            'Image', 'NumCompsRemoved', 'NumCompsUsed', 'JD_num',
+                            'TransformedMag', 'ModelSigma', 'TotalSigma', 'FOV',
+                            'MaxADU_Ur', 'FWHM', 'SkyADU', 'SkySigma'])
+    assert set(ps.df_transformed.columns) == expected_columns
+    assert ps.df_transformed.shape == (532, 36)
+    assert list(ps.df_transformed['Serial'].iloc[[0, 10, 500]]) == [441, 332, 1589]
+    assert ps.df_transformed['TransformedMag'].sum() == pytest.approx(6411.828, abs=0.01)
+    assert ps.df_transformed['TotalSigma'].sum() == pytest.approx(10.03122, abs=0.0001)
 
 
+def test_stare_comps():
+    df_test = pd.DataFrame({'Serial': range(10),
+                            'FOV': ['A', 'B', 'A', 'A', 'B', 'A', 'B', 'A', 'B', 'A'],
+                            'StarID': ['Star1', 'Star1', 'Star1', 'Star2', 'Star2', 'Star2', 'Ono',
+                                       'Star1', 'Star2', 'Star2'],
+                            'Filter': ['V', 'X', 'V', 'V', 'V', 'X', 'V', 'V', 'V', 'V'],
+                            'CompIDsUsed': ['12,23,34,45', '12,23,34', '12,34,45', '12,23,34,45',
+                                            '12,23,45', '12,23,34', '12,45', '12,23,34',
+                                            '12,23,34,45', '34']})
+    df_test.index = df_test['Serial']
 
+    result_A1 = process.stare_comps(df_test, fov='A', star_id='Star1', this_filter='V')
+    assert len(result_A1) == 5
+    assert result_A1[0].startswith('EDIT file ')
+    assert result_A1[4].strip() == '4 comps -> 2 images qualify  -->   #COMPS A, V, 12, 23, 34, 45'
+
+    result_A2 = process.stare_comps(df_test, fov='A', star_id='Star2', this_filter='V')
+    assert len(result_A2) == 5
+    assert result_A2[1].strip() == '1 comps -> 2 images qualify  -->   #COMPS A, V, 34'
+    assert result_A2[3].strip() == '3 comps -> 1 images qualify  -->   #COMPS A, V, 12, 23, 34'
+
+    # Case: only one image (won't happen for real stares, but an edge case):
+    result_B1 = process.stare_comps(df_test, fov='B', star_id='Star1', this_filter='V')
+    assert len(result_B1) == 2
+    assert result_B1[1].strip() == '>>> One or zero qualifying images in dataframe.'
 
 
 # ---------------  INTERNAL TEST-HELPER FUNCTIONS ----------------------------------------------

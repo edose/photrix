@@ -476,7 +476,7 @@ class LocalObsCache:
                           'cache_datetime', 'obs_datetime', 'obs_mag', 'obs_mag_filter']) + '\n']
         for row_index in self.df_cache.index:
             row = self.df_cache.loc[row_index]
-            if row['obs_datetime'] is None or isinstance(row['obs_datetime'], pd.tslib.NaTType):
+            if row['obs_datetime'] is None or isinstance(row['obs_datetime'], type(pd.NaT)):
                 line = ','.join([row_index, row['fov_name'], row['main_target'], row['obs_style'],
                                  dt_format.format(row['cache_datetime']),
                                  'None', 'None', 'None']) + '\n'

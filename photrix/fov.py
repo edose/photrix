@@ -766,8 +766,6 @@ def insert_chart_data(fov_name, fov_directory=FOV_DIRECTORY):
 
     # Match a chart star to each FOV star, make a new text line with both mags and errors:
     new_star_lines = []
-    if fov_name == 'RX Lyr':
-        dummy = 0
 
     for line in stars_lines:
         if line.split(";")[0].strip() == '':
@@ -822,6 +820,7 @@ def insert_chart_data(fov_name, fov_directory=FOV_DIRECTORY):
             for filter_name in filter_dict.keys():
                 mag, error = filter_dict[filter_name]
                 if error is None:
+                    # TODO: add error handling
                     dummy = 0
                 if mag == 0 and error == 0:
                     mag_error_list.append(filter_name + '=0(0)')  # abbreviated

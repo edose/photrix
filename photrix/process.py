@@ -575,7 +575,7 @@ class PredictionSet:
 
         self.df_transformed = self.compute_all_errors(df_transformed_without_errors)
 
-        # write_report_map_stub()
+        write_aavso_report_map_stub(self.an_top_directory, self.an_rel_directory)
 
 
     def compute_comp_mags(self):
@@ -844,6 +844,84 @@ class PredictionSet:
         # ############# End temporary code to mimic R df.
 
         return df_transformed
+
+    def print_stare_comps(self, fov, star_id, this_filter):
+        lines = stare_comps(self.df_transformed, fov, star_id, this_filter)
+        print('\n'.join(lines))
+
+    def make_markup_report(self):
+        """
+        Makes markup report from current PredictionSet object.
+        :return: text string ready for printing (e.g., by copy/paste into Microsoft Word).
+        """
+        # First, make check-star dataframe:
+        df = self.df_transformed.copy()
+        df_check_stars = df.loc[df['StarType'] == 'Check',
+                                ['FITSfile', 'StarID', 'TransformedMag', 'CatMag']]
+        df_check_stars = df_check_stars.rename(columns={
+            'StarID': 'Check', 'TransformedMag': 'CkMag', 'CatMag': 'CkCat'})
+
+        # Make df for markup report:
+        df = self.df_transformed.copy()
+        df = df[df['StarType'] == 'Target']
+        df = df[['Serial', 'FITSfile', 'StarID', 'Filter', 'Exposure', 'TransformedMag',
+                 'InstMagSigma', 'ModelSigma', 'CirrusSigma', 'TotalSigma', 'MaxADU_Ur',
+                 'FWHM', 'JD_num']]
+        df = df.rename(columns={'StarID': 'Target', 'Exposure': 'Exp', 'TransformedMag': 'Mag',
+                                'MaxADU_Ur': 'MaxADU'})
+        df = pd.merge(df, df_check_stars, how='left', on='FITSfile')
+        df.index = df['Serial']
+        df = df.sort_values(by=['Target', 'FITSfile', 'Filter', 'Exp'])
+
+        # A nested helper function:
+        def make_column(iterable, decimal_pts=None, min_width=0, left_pad=1):
+            if decimal_pts is not None:
+                this_list = [('{0:.' + str(decimal_pts) + 'f}').format(x) for x in iterable]
+            else:
+                this_list = [str(x) for x in iterable]
+            n_chars = max(min_width, max([len(x) for x in this_list])) + left_pad
+            return [x.rjust(n_chars) for x in this_list]
+
+        # Make dataframe df_text of text columns ~ ready to print:
+        width_dict = dict()
+        df_text = pd.DataFrame()
+        df_text['Serial'] = make_column(df['Serial'], min_width=6)
+        df_text['Target'] = make_column(df['Target'], min_width=6)
+        df_text['FITSfile'] = make_column(df['FITSfile'], min_width=8)
+        df_text['Filter'] = make_column(df['Filter'], min_width=4)  # 'Filt'
+        df_text['Exp'] = make_column(df['Exp'], decimal_pts=1, min_width=5)
+        df_text['Mag'] = make_column(df['Mag'], decimal_pts=3)
+        df_text['MaxADU'] = make_column(df['MaxADU'], min_width=6)
+        df_text['FWHM'] = make_column(df['FWHM'], decimal_pts=2, min_width=4)
+        df_text['JD_fract'] = make_column(df['JD_num'], decimal_pts=4, min_width=8)
+        df_text['Check'] = make_column(df['Check'], min_width=5)
+        df_text['CkMag'] = make_column(df['CkMag'], decimal_pts=3, min_width=5)
+        df_text['CkCat'] = make_column(df['CkCat'], decimal_pts=3, min_width=5)
+        df_text['Inst'] = make_column(round(df['InstMagSigma']*1000.0), min_width=5)
+        df_text['Model'] = make_column(round(df['ModelSigma']*1000.0), min_width=5)
+        df_text['Cirr'] = make_column(round(df['CirrusSigma']*1000.0), min_width=5)
+        df_text['Sigma'] = make_column(round(df['TotalSigma']*1000.0), min_width=5)
+
+        # Make text lines of report:
+        left_spacer = 5 * ' '
+        column_list = ['Serial', 'Target', 'FITSfile', 'Filter', 'Exp', 'Mag', 'MaxADU',
+                       'FWHM', 'JD_fract', 'Check', 'CkMag', 'CkCat',
+                       'Inst', 'Model', 'Cirr', 'Sigma']
+        header_line = left_spacer + ' '.join([col.rjust(len(df_text.iloc[0][col]))
+                                              for col in column_list])
+
+        # header_line = left_spacer + ' '.join(column_list)
+        lines = [header_line]
+        for i in range(len(df)):
+            line = left_spacer + ''.join([df_text.iloc[i][col] for col in column_list])
+            lines.append(line)
+            # Spacer line between targets:
+            if i < len(df) - 1:
+                this_target = df_text.iloc[i]['Target']
+                next_target = df_text.iloc[i+1]['Target']
+                if next_target != this_target:
+                    lines.append('')
+        return lines
 
 
 def get_df_master(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
@@ -1222,3 +1300,65 @@ def solve_for_real_ci(untransformed_mags, ci_filters, transforms):
     real_ci = (mags_ordered[0] - mags_ordered[1]) / \
               (1.0 + transforms_ordered[0] - transforms_ordered[1])
     return real_ci
+
+
+def write_aavso_report_map_stub(an_top_directory, an_rel_directory):
+    lines = [";----- This is report_map.txt for AN folder " + an_rel_directory,
+             ";----- Use this file to omit and/or combine target observations from AAVSO report.",
+             ";----- Example directive lines:",
+             ";",
+             ";#TARGET  GD Cyg ; to omit this target star altogether from AAVSO report.",
+             ";#JD  0.233 0.311 ; to omit this JD (fractional) range from AAVSO report.",
+             ";#SERIAL  34 44,129  32  1202 ; to omit these 5 Serial numbers from AAVSO report.",
+             ";#COMBINE  80,128 ; to combine (average) these 2 Serial numbers within AAVSO report.",
+             ";----- Add your directive lines:",
+             ";" ]
+    lines = [line + '\n' for line in lines]
+    fullpath = os.path.join(an_top_directory, an_rel_directory, 'Photometry',
+                            'aavso_report_map.txt')
+    if not os.path.exists(fullpath):
+        with open(fullpath, 'w') as f:
+            f.writelines(lines)
+        lines_written = len(lines)
+    else:
+        lines_written = 0
+    return lines_written
+
+
+def stare_comps(df_transformed, fov=None, star_id=None, this_filter=None):
+    df = df_transformed.copy()
+    df = df[df['FOV'] == fov]
+    df = df[df['StarID'] == star_id]
+    df = df[df['Filter'] == this_filter]
+    joined_comp_stars = ','.join(df['CompIDsUsed'])
+    comp_stars_available = pd.Series(joined_comp_stars.split(',')).drop_duplicates()  # = R var 'set'
+    df_comps = pd.DataFrame({'CompID': comp_stars_available, 'IsIncluded': False})
+    result_lines = ["EDIT file 'pre-predict' with one of the following lines:"]
+    if len(df) <= 1:
+        return result_lines + \
+               ['   >>> One or zero qualifying images in dataframe.']
+    for num_to_test in range(1, 1 + len(df_comps)):
+        base = list((df_comps[df_comps['IsIncluded']])['CompID'])
+        test = list((df_comps[~ df_comps['IsIncluded']])['CompID'])
+        max_images_qualifying = 0
+        best_test = test[0]  # to give a default so comparisons don't fail
+        for this_test in test:
+            num_images_qualifying = 0
+            test_comps = base.copy()
+            test_comps.append(this_test)
+            for i_row in range(len(df)):
+                this_set = (df.iloc[i_row])['CompIDsUsed'].split(',')
+                if this_test in this_set:
+                    num_images_qualifying += 1
+            if num_images_qualifying > max_images_qualifying:
+                # TODO: break ties by choosing lower catmagerror (or initially sorting on them)?
+                best_test = this_test
+                max_images_qualifying = num_images_qualifying
+        df_comps.loc[(df_comps['CompID'] == best_test), 'IsIncluded'] = True
+        this_line = '   ' + str(sum(df_comps['IsIncluded'])) + ' comps -> ' + \
+                    str(max_images_qualifying) + ' images qualify  -->   #COMPS ' + fov + \
+                    ', ' + this_filter + ', ' + \
+                    ', '.join(df_comps.loc[df_comps['IsIncluded'], 'CompID'])
+        result_lines.append(this_line)
+    return result_lines
+
