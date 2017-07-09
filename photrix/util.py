@@ -471,8 +471,6 @@ class MixedModelFit:
         df['Residual'] = fit.resid
         self.df_observations = df.copy()
 
-        pass
-
     def predict(self, df_predict_input, include_random_effect=True):
         """
         Takes new_data and renders predicted dependent-variable values.
@@ -495,10 +493,13 @@ class MixedModelFit:
                                                 left_on=self.group_var,
                                                 right_index=True, how='left',
                                                 sort=False)['GroupValue']  # Series (left-join)
+            # THE FOLLOWING COMMENTS ARE DEFUNCT for a general Class. --------------------
             # Random effect is ***SUBTRACTED***, because original fit was
             #    InstMag ~ CatMag + Random effect + offsets + other fixed effects
             #    and now its surrogate CatMag we're trying to estimate
-            total_prediction = predicted_on_fixed_only - predicted_on_random_only
+            # total_prediction = predicted_on_fixed_only - predicted_on_random_only
+            # END DEFUNCT COMMENTS. -------------------------------------------------------
+            total_prediction = predicted_on_fixed_only + predicted_on_random_only
         else:
             total_prediction = predicted_on_fixed_only
 

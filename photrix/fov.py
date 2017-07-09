@@ -711,6 +711,7 @@ def insert_chart_data(fov_name, fov_directory=FOV_DIRECTORY):
         to render a valid FOV 1.5+ file which overwrites the pre-FOV file.
     Gets chart ID from FOV #CHART directive. Looks in CHART_DIRECTORY for chart JSON file, or 
         failing that downloads it from AAVSO and saves it.
+    Handles only filters U,B,V,R,I as of 7/1/2017.
     :param fov_name: one FOV name [string]
     :param fov_directory: input and output directory (same) [string]
     :return: list of warning lines [list of strings]
@@ -861,51 +862,51 @@ def get_chart_error(bands, chart_filter_name):
     return chart_error
 
 
-def all_fovs_1_4_to_1_5(fov_1_4_directory=FOV_DIRECTORY, fov_1_5_directory=None):
-    """
-    Convenience function to upgrade all FOVs in fov_1_4_directory from 1.4 to 1.5
-    :param fov_1_4_directory: directory from which to read (all) FOV 1.4 files  [string]
-    :param fov_1_5_directory: director to which to write FOV 1.5 files [string]
-    :return: summary of operations [string]
-    """
-    # Create new empty FOV 1.5 directory if needed:
-    if fov_1_5_directory is None:
-        if fov_1_4_directory.endswith('/FOV/'):
-            fov_1_5_directory = fov_1_4_directory.split('/FOV/')[0] + '/FOV1_5/'
-        else:
-            print('You must provide a valid fov_1_5_directory. Stopping.')
-            return
-    os.makedirs(fov_1_5_directory, exist_ok=True)  # create directory if doesn't already exist.
-
-    # Delete any pre-existing files in 1.5 directory:
-    filenames = os.listdir(fov_1_5_directory)
-    for filename in filenames:
-        fullpath = os.path.join(fov_1_5_directory, filename)
-        os.remove(fullpath)
-
-    # Populate new FOV 1.5 directory with all FOV 1.4 files, to begin:
-    import shutil
-    objectnames = os.listdir(fov_1_4_directory)
-    filenames = [name for name in objectnames if name.endswith(".txt")]
-    for filename in filenames:
-        source_path = os.path.join(fov_1_4_directory, filename)
-        shutil.copy2(source_path, fov_1_5_directory)
-    print('All ' + str(len(filenames)) + ' FOVs copied.')
-
-    # Perform all one-line 1.4 --> 1.5 changes (in new directory):
-    delete_directive(fov_1_5_directory, fov_1_5_directory, '#STARE_HOURS')
-    delete_directive(fov_1_5_directory, fov_1_5_directory, '#ACP_DIRECTIVES')
-    move_directive(fov_1_5_directory, fov_1_5_directory,
-                   directive_to_move='#ACP_COMMENTS', directive_before_new_position='#MOTIVE')
-    change_directive_value(fov_1_5_directory, fov_1_5_directory, '#FORMAT_VERSION', '1.5',
-                           ' FOV format version defined April 24 2017')
-    print('All one-line changes made.')
-
-    # For each FOV, update #STARS section to include mag errors from AAVSO VSP chart:
-    names = all_fov_names(fov_1_5_directory)
-    # names = [name for name in names if name.startswith('A')]  # <<< Remove this in production!
-    all_warning_lines = []
-    for name in names:
-        warning_lines = insert_chart_data(name, fov_1_5_directory)
-        all_warning_lines.extend(warning_lines)
-    print('\n'.join(all_warning_lines) + '\nDone.')
+# def all_fovs_1_4_to_1_5(fov_1_4_directory=FOV_DIRECTORY, fov_1_5_directory=None):
+#     """
+#     Convenience function to upgrade all FOVs in fov_1_4_directory from 1.4 to 1.5
+#     :param fov_1_4_directory: directory from which to read (all) FOV 1.4 files  [string]
+#     :param fov_1_5_directory: director to which to write FOV 1.5 files [string]
+#     :return: summary of operations [string]
+#     """
+#     # Create new empty FOV 1.5 directory if needed:
+#     if fov_1_5_directory is None:
+#         if fov_1_4_directory.endswith('/FOV/'):
+#             fov_1_5_directory = fov_1_4_directory.split('/FOV/')[0] + '/FOV1_5/'
+#         else:
+#             print('You must provide a valid fov_1_5_directory. Stopping.')
+#             return
+#     os.makedirs(fov_1_5_directory, exist_ok=True)  # create directory if doesn't already exist.
+#
+#     # Delete any pre-existing files in 1.5 directory:
+#     filenames = os.listdir(fov_1_5_directory)
+#     for filename in filenames:
+#         fullpath = os.path.join(fov_1_5_directory, filename)
+#         os.remove(fullpath)
+#
+#     # Populate new FOV 1.5 directory with all FOV 1.4 files, to begin:
+#     import shutil
+#     objectnames = os.listdir(fov_1_4_directory)
+#     filenames = [name for name in objectnames if name.endswith(".txt")]
+#     for filename in filenames:
+#         source_path = os.path.join(fov_1_4_directory, filename)
+#         shutil.copy2(source_path, fov_1_5_directory)
+#     print('All ' + str(len(filenames)) + ' FOVs copied.')
+#
+#     # Perform all one-line 1.4 --> 1.5 changes (in new directory):
+#     delete_directive(fov_1_5_directory, fov_1_5_directory, '#STARE_HOURS')
+#     delete_directive(fov_1_5_directory, fov_1_5_directory, '#ACP_DIRECTIVES')
+#     move_directive(fov_1_5_directory, fov_1_5_directory,
+#                    directive_to_move='#ACP_COMMENTS', directive_before_new_position='#MOTIVE')
+#     change_directive_value(fov_1_5_directory, fov_1_5_directory, '#FORMAT_VERSION', '1.5',
+#                            ' FOV format version defined April 24 2017')
+#     print('All one-line changes made.')
+#
+#     # For each FOV, update #STARS section to include mag errors from AAVSO VSP chart:
+#     names = all_fov_names(fov_1_5_directory)
+#     # names = [name for name in names if name.startswith('A')]  # <<< Remove this in production!
+#     all_warning_lines = []
+#     for name in names:
+#         warning_lines = insert_chart_data(name, fov_1_5_directory)
+#         all_warning_lines.extend(warning_lines)
+#     print('\n'.join(all_warning_lines) + '\nDone.')

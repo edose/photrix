@@ -700,6 +700,89 @@ def test_stare_comps():
     assert result_B1[1].strip() == '>>> One or zero qualifying images in dataframe.'
 
 
+def test_transform_model():
+    an_top_directory = TEST_TOP_DIRECTORY
+    an_rel_directory = '$an_for_test'
+    df_master = process.get_df_master(an_top_directory=an_top_directory,
+                                      an_rel_directory=an_rel_directory)
+
+    # Case: one FOV with one image:
+    tm = process.TransformModel(an_top_directory=an_top_directory,
+                                an_rel_directory=an_rel_directory,
+                                filter='V', ci_filters=['V', 'I'], fovs_to_include='RZ Mon',
+                                instrument_name='Borea', site_name='DSW')
+    assert tm.is_valid
+    assert len(tm.image_list) == 1
+    assert len(tm.fitted_values) == 12
+    assert list(tm.fitted_values[:2]) == pytest.approx([-20.2926, -20.2896], abs=0.0001)
+    assert tm.param_values['Intercept'] == pytest.approx(-20.1782, abs=0.0001)
+    assert set(tm.param_values.index) == set(['Intercept', 'SkyBias', 'LogADU', 'CI'])
+    assert len(tm.residuals) == 12
+    assert list(tm.residuals[:2]) == pytest.approx([-0.00568, -0.00614], abs=0.00001)
+    assert tm.transform_value == pytest.approx(-0.09770, abs=0.0001)
+    assert tm.sigma == pytest.approx(0.02151, abs=0.0001)
+    assert tm.image_effect is None
+
+    # Case: one FOV with multiple images:
+    tm = process.TransformModel(an_top_directory=an_top_directory,
+                                an_rel_directory=an_rel_directory,
+                                filter='V', ci_filters=['V', 'I'], fovs_to_include='Std_SA32',
+                                instrument_name='Borea', site_name='DSW')
+    assert tm.is_valid
+    assert len(tm.image_list) == 4
+    assert all([n.startswith('Std_SA32-00') for n in tm.image_list])
+    assert all([n.endswith('-V.fts') for n in tm.image_list])
+    assert tm.param_values['Intercept'] == pytest.approx(-20.488572, abs=0.0001)
+
+    # Case: list of FOVs:
+    tm = process.TransformModel(an_top_directory=an_top_directory,
+                                an_rel_directory=an_rel_directory,
+                                filter='V', ci_filters=['V', 'I'],
+                                fovs_to_include=['Std_SA32', 'RZ Mon'],
+                                instrument_name='Borea', site_name='DSW')
+    assert tm.is_valid
+    assert len(tm.image_list) == 5
+    assert tm.param_values['CI'] == pytest.approx(-0.027827, abs=0.0001)
+
+    # Case: fovs_to_include = "Standards" (test data selection only):
+    tm = process.TransformModel(an_top_directory=an_top_directory,
+                                an_rel_directory=an_rel_directory,
+                                filter='V', ci_filters=['V', 'I'], fovs_to_include='Standards',
+                                instrument_name='Borea', site_name='DSW')
+    assert tm.is_valid
+    assert len(tm.image_list) == 7
+    assert all([n.startswith('Std_') for n in tm.image_list])
+    assert all([n.endswith('-V.fts') for n in tm.image_list])
+    assert tm.param_values['CI'] == pytest.approx(-0.029374, abs=0.0001)
+
+    # Case: fovs_to_include = "All" (test data selection only):
+    tm = process.TransformModel(an_top_directory=an_top_directory,
+                                an_rel_directory=an_rel_directory,
+                                filter='V', ci_filters=['V', 'I'], fovs_to_include='All',
+                                instrument_name='Borea', site_name='DSW')
+    assert tm.is_valid
+    all_images = df_master['FITSfile'].drop_duplicates().tolist()
+    all_fovs = df_master['FOV'].drop_duplicates().tolist()
+    assert len(tm.image_list) == 119
+    assert set(tm.image_list) <= set(all_images)
+    assert len(tm.fov_list) == 26
+    assert set(tm.fov_list) <= set(all_fovs)
+    assert tm.param_values['CI'] == pytest.approx(-0.047128, abs=0.0001)
+    assert tm.transform_value == tm.param_values['CI']
+    assert tm.transform_sigma == pytest.approx(0.00606, abs=0.0001)
+    assert tm.sigma == pytest.approx(0.0215, abs=0.0001)
+
+    # Case: fovs_to_include = "All" w/ different color index (test data selection only):
+    tm = process.TransformModel(an_top_directory=an_top_directory,
+                                an_rel_directory=an_rel_directory,
+                                filter='R', ci_filters=['R', 'I'], fovs_to_include='All',
+                                instrument_name='Borea', site_name='DSW')
+    assert tm.is_valid
+    assert len(tm.image_list) == 18
+    assert tm.transform_value == pytest.approx(+0.077440, abs=0.0001)
+
+
+
 # ---------------  INTERNAL TEST-HELPER FUNCTIONS ----------------------------------------------
 
 def _overwrite_omit_txt(an_top_directory, an_rel_directory, directive_lines=None):

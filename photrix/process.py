@@ -2,17 +2,21 @@ import json
 import os
 from math import floor, sqrt
 from datetime import datetime, timezone
+import sys  # for sys.exit(0)
 
 import numpy as np
 import pandas as pd
 from scipy.interpolate import UnivariateSpline
+import statsmodels.formula.api as smf
 
 from .user import Instrument, Site
 from .util import MixedModelFit, weighted_mean
+from .fov import Fov
 
 __author__ = "Eric Dose :: New Mexico Mira Project, Albuquerque"
 
 AN_TOP_DIRECTORY = 'J:/Astro/Images/C14'
+MIN_FWHM = 1.0
 
 #######
 #
@@ -24,8 +28,9 @@ AN_TOP_DIRECTORY = 'J:/Astro/Images/C14'
 #    --> [do MaxIm DL calibration]
 #    post_cal(an_rel_directory='20170509', instrument_name='Borea')
 #    make_df_master(an_rel_directory='20170509', instrument_name='Borea')
-#    ----------- all the above will continue in R.
-#    ----------- The actual photrix.process workflow starts HERE:
+#    ----------- all the above will continue in R. ----------------------------
+#    --------------------------------------------------------------------------
+#    ----------- The actual photrix.process workflow starts HERE: -------------
 #    v = make_model(an_rel_directory='20170509', instrument_name='Borea', filter='V)
 #       ... and so on for other filters esp. 'R' and 'I'.
 #    --> [edit omit.txt until all models are right]
@@ -147,6 +152,7 @@ class SkyModel:
         df = df[df['CI'] <= self.max_color_vi]
         df = df[df['CatMagError'].notnull()]
         df = df[df['CatMagError'] <= self.max_cat_mag_error]
+        df = df[df['FWHM'] >= MIN_FWHM]
         self.df_model = df
 
         self._prep_and_do_regression()
@@ -594,6 +600,7 @@ class PredictionSet:
         df = df[df['CatMag'].notnull()]
         df = df[df['CI'].notnull()]
         df = df[df['Airmass'].notnull()]
+        df = df[df['FWHM'] >= MIN_FWHM]
         df_comp_obs_with_estimates = df
 
         # Make lists of images with comps, and of images with comps&targets:
@@ -874,7 +881,7 @@ class PredictionSet:
         df = df.sort_values(by=['Target', 'FITSfile', 'Filter', 'Exp'])
 
         # A nested helper function:
-        def make_column(iterable, decimal_pts=None, min_width=0, left_pad=1):
+        def format_column(iterable, decimal_pts=None, min_width=0, left_pad=1):
             if decimal_pts is not None:
                 this_list = [('{0:.' + str(decimal_pts) + 'f}').format(x) for x in iterable]
             else:
@@ -885,22 +892,22 @@ class PredictionSet:
         # Make dataframe df_text of text columns ~ ready to print:
         width_dict = dict()
         df_text = pd.DataFrame()
-        df_text['Serial'] = make_column(df['Serial'], min_width=6)
-        df_text['Target'] = make_column(df['Target'], min_width=6)
-        df_text['FITSfile'] = make_column(df['FITSfile'], min_width=8)
-        df_text['Filter'] = make_column(df['Filter'], min_width=4)  # 'Filt'
-        df_text['Exp'] = make_column(df['Exp'], decimal_pts=1, min_width=5)
-        df_text['Mag'] = make_column(df['Mag'], decimal_pts=3)
-        df_text['MaxADU'] = make_column(df['MaxADU'], min_width=6)
-        df_text['FWHM'] = make_column(df['FWHM'], decimal_pts=2, min_width=4)
-        df_text['JD_fract'] = make_column(df['JD_num'], decimal_pts=4, min_width=8)
-        df_text['Check'] = make_column(df['Check'], min_width=5)
-        df_text['CkMag'] = make_column(df['CkMag'], decimal_pts=3, min_width=5)
-        df_text['CkCat'] = make_column(df['CkCat'], decimal_pts=3, min_width=5)
-        df_text['Inst'] = make_column(round(df['InstMagSigma']*1000.0), min_width=5)
-        df_text['Model'] = make_column(round(df['ModelSigma']*1000.0), min_width=5)
-        df_text['Cirr'] = make_column(round(df['CirrusSigma']*1000.0), min_width=5)
-        df_text['Sigma'] = make_column(round(df['TotalSigma']*1000.0), min_width=5)
+        df_text['Serial'] = format_column(df['Serial'], min_width=6)
+        df_text['Target'] = format_column(df['Target'], min_width=6)
+        df_text['FITSfile'] = format_column(df['FITSfile'], min_width=8)
+        df_text['Filter'] = format_column(df['Filter'], min_width=4)  # 'Filt'
+        df_text['Exp'] = format_column(df['Exp'], decimal_pts=1, min_width=5)
+        df_text['Mag'] = format_column(df['Mag'], decimal_pts=3)
+        df_text['MaxADU'] = format_column(df['MaxADU'], min_width=6)
+        df_text['FWHM'] = format_column(df['FWHM'], decimal_pts=2, min_width=4)
+        df_text['JD_fract'] = format_column(df['JD_num'], decimal_pts=4, min_width=8)
+        df_text['Check'] = format_column(df['Check'], min_width=5)
+        df_text['CkMag'] = format_column(df['CkMag'], decimal_pts=3, min_width=5)
+        df_text['CkCat'] = format_column(df['CkCat'], decimal_pts=3, min_width=5)
+        df_text['Inst'] = format_column(round(df['InstMagSigma']*1000.0), min_width=5)
+        df_text['Model'] = format_column(round(df['ModelSigma']*1000.0), min_width=5)
+        df_text['Cirr'] = format_column(round(df['CirrusSigma']*1000.0), min_width=5)
+        df_text['Sigma'] = format_column(round(df['TotalSigma']*1000.0), min_width=5)
 
         # Make text lines of report:
         left_spacer = 5 * ' '
@@ -922,6 +929,218 @@ class PredictionSet:
                 if next_target != this_target:
                     lines.append('')
         return lines
+
+
+class TransformModel:
+    def __init__(self, an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None,
+                 filter=None, ci_filters=None, fovs_to_include="All",
+                 instrument_name='Borea', site_name='DSW',
+                 max_cat_mag_error=0.03, max_inst_mag_sigma=0.03, max_ci=+2.5,
+                 saturation_adu=None, fit_sky_bias=True,
+                 fit_extinction=True, fit_log_adu=True):
+        """
+        Constructs a transform on filter against filter pair ci_filters, given a df_master.csv
+            in the given directory.
+        :param an_top_directory: e.g., 'J:\Astro\Images\C14' [string]
+        :param an_rel_directory: e.g., '20170504'. The dir 'Photometry' is subdir of this. [string]
+        :param filter: name of filter to which this model applies [string, e.g., 'V' or 'R']
+        :param ci_filters: a list of two color-index filter names, e.g., ['V','I'] for V-I index
+        :param fovs_to_include: defines which eligible rows (by FOV) will be included:
+            Choices:
+                "All" will use all eligible rows in df_master;
+                "Standards" will use all eligible rows from all Standard FOVs in df_master;
+                One FOV name as a string will use that one FOV only;
+                A list of strings will use those FOV(s) only.
+        :param instrument_name: name of Instrument, e.g., 'Borea' [string; name of Instrument obj]
+        :param site_name: name of observing site, e.g., 'DSW' [string; name of Site object]
+        :param max_cat_mag_error: maximum catalog error allowed to stars in model [float]
+        :param max_inst_mag_sigma: max instrument magnitude error allowed star observations [float]
+        :param max_ci: maximum color index allowed to stars in model [float]
+        :param saturation_adu: ccd ADUs that constitute saturation [float; None if from Instrument]
+        :param fit_sky_bias: True to fit sky bias term [bool]
+        :param fit_log_adu: True to fit log(MaxADU_Ur) as CCD nonlinearity measure [bool]
+        :param fit_extinction: True to fit extinction terms; else use values from Site obj.
+            Used only if image_name==False and more than all images are used [bool]
+        """
+        self.an_top_directory = an_top_directory
+        self.an_rel_directory = an_rel_directory
+        self.filter = filter
+        self.ci_filters = ci_filters
+        self.fovs_to_include = fovs_to_include
+        self.instrument_name = instrument_name
+        self.site_name = site_name
+        self.max_cat_mag_error = max_cat_mag_error
+        self.max_inst_mag_sigma = max_inst_mag_sigma
+        self.max_ci = max_ci
+        if saturation_adu is not None:
+            self.saturation_adu = saturation_adu
+        else:
+            instrument = Instrument(self.instrument_name)
+            self.saturation_adu = instrument.camera['saturation_adu']
+        self.fit_sky_bias = fit_sky_bias
+        self.fit_extinction = fit_extinction
+        self.fit_log_adu = fit_log_adu
+        self.dep_var_name = 'InstMag_with_offsets'
+        self.df_model = None
+        self.fov_list = None
+        self.image_list = None
+        self.statsmodels_object = None
+        self.mm_fit_object = None  # populated only if >=2 images and mixed model used.
+        self.fitted_values = None
+        self.param_values = None
+        self.residuals = None
+        self.sigma = None
+        self.image_effect = None
+        self.is_valid = False  # default until object constructed.
+
+        # Execute steps:
+        self._make_and_curate_model_dataframe(fovs_to_include=self.fovs_to_include)
+        self._add_ci_column()  # to df_model, add new column CI (color index) from catalog mags.
+        self._prep_and_do_regression()
+        self._build_output()
+
+    def _make_and_curate_model_dataframe(self, fovs_to_include):
+        df, warning_lines = apply_omit_txt(self.an_top_directory, self.an_rel_directory)
+        master_fov_list = df['FOV'].drop_duplicates().tolist()
+
+        # Interpret fovs_to_include, ultimately yielding fov_list:
+        if isinstance(fovs_to_include, list):
+            fov_list = [fn for fn in master_fov_list if fn in fovs_to_include]
+        elif isinstance(fovs_to_include, str):
+            if fovs_to_include.lower() == 'all':
+                fov_list = master_fov_list.copy()
+            elif fovs_to_include.lower() in ['standard', 'standards']:
+                fov_list = [fn for fn in master_fov_list if Fov(fn).target_type.lower() == 'standard']
+            else:
+                fov_list = [fn for fn in master_fov_list if fn in [fovs_to_include]]
+        else:
+            print("Couldn't interpret input parm 'fovs_to_include'.")
+            self.is_valid = False
+            return
+        if len(fov_list) <= 0:
+            print("Input parm 'fovs_to_include' yielded no fovs for folder '",
+                  self.an_rel_directory, "'.")
+            self.is_valid = False
+            return
+
+        # Retain only the appropriate rows of raw dataframe:
+        df = df[df['FOV'].isin(fov_list)]
+        df = df[df['Filter'] == self.filter]
+        df = df[df['StarType'].isin(['Comp', 'Check'])]
+
+        # Retain only the needed columns of dataframe:
+        df = df[['Serial', 'StarID', 'FITSfile', 'InstMagSigma', 'FWHM', 'MaxADU_Ur', 'StarType',
+                 'JD_mid', 'Filter', 'Airmass', 'FOV', 'CatMag', 'CatMagError', 'InstMag',
+                 'SkyBias', 'LogADU']]
+
+        # Curate rows for various quality measures:
+        df = df[df['CatMag'].notnull()]
+        df = df[df['Airmass'].notnull()]
+        df = df[df['InstMagSigma'] <= self.max_inst_mag_sigma]
+        df = df[df['MaxADU_Ur'].notnull()]
+        df = df[df['MaxADU_Ur'] <= self.saturation_adu]
+        df = df[df['CatMagError'].notnull()]
+        df = df[df['CatMagError'] <= self.max_cat_mag_error]
+        df = df[df['FWHM'] >= MIN_FWHM]
+        self.df_model = df
+
+    def _add_ci_column(self):
+        df = self.df_model.copy()  # local working copy
+        df['CI'] = None  # new blank column
+        fov_names = df['FOV'].drop_duplicates()
+        for fov_name in fov_names:
+            df_fov = (df.copy())[df['FOV'] == fov_name]
+            this_fov = Fov(fov_name)
+            fov_stars = this_fov.aavso_stars  # a list of AavsoSequenceStar_WithMagError objects
+            star_ids = df_fov['StarID']
+            for star_id in star_ids:
+                # Extract proper AavsoSS_WME object & mags for this star (a dict):
+                star_list = [fs for fs in fov_stars if (fs.star_id == star_id and fs.is_valid)]
+                if len(star_list) == 1:
+                    fov_star = star_list[0]  # object found.
+                    # fov_star.mags is tuple (mag, mag_err)
+                    absent = (None, None)
+                    ci_mag_first = fov_star.mags.get(self.ci_filters[0], absent)[0]
+                    ci_mag_second = fov_star.mags.get(self.ci_filters[1], absent)[0]
+                else:
+                    ci_mag_first, ci_mag_second = (None, None)
+                if (ci_mag_first is not None) and (ci_mag_second is not None):
+                    this_ci = ci_mag_first - ci_mag_second
+                else:
+                    this_ci = None
+                if this_ci is not None:
+                    rows_to_update = (df['FOV'] == fov_name) & (df['StarID'] == star_id)
+                    df.loc[rows_to_update, 'CI'] = this_ci
+        rows_with_ci = [(ci is not None) for ci in df['CI']]
+        self.df_model = df[rows_with_ci]
+        self.fov_list = self.df_model['FOV'].drop_duplicates().tolist()
+        self.image_list = self.df_model['FITSfile'].drop_duplicates().tolist()
+
+    def _prep_and_do_regression(self):
+        if len(self.image_list) <= 0:
+            print("No images in image list.")
+            self.is_valid = False
+            return
+
+        # Build variable list & dep-var offset:
+        x_var_list = []  # fixed-effects only
+        dep_var_offset = self.df_model['CatMag'].copy()  # *copy* CatMag, or df_model risks damage.
+        if len(self.image_list) >= 2:  # if one image, do nothing (fold extinction into zero-point).
+            if self.fit_extinction:
+                x_var_list.append('Airmass')
+            else:
+                site = Site(self.site_name)
+                extinction = site.extinction[self.filter]
+                dep_var_offset += extinction * self.df_model['Airmass']
+        if self.fit_sky_bias:
+            if sum([x != 0 for x in self.df_model['SkyBias']]) > int(len(self.df_model) / 2):
+                x_var_list.append('SkyBias')
+        if self.fit_log_adu:
+            x_var_list.append('LogADU')
+        x_var_list.append('CI')  # to get transform value (the point of this class).
+        for var in x_var_list:
+            self.df_model[var] = np.float64(self.df_model[var])  # ensure float64 for statsmodels.
+
+        # Build the regression model (ordinary least-squares or mixed-model):
+        self.df_model['DepVar'] = self.df_model['InstMag'] - dep_var_offset  # dependent variable.
+        if len(self.image_list) == 1:
+            # Model with ordinary least squares (OLS, as no group/image effects possible):
+            formula = 'DepVar ~ ' + ' + '.join(x_var_list)
+            self.statsmodels_object = smf.ols(formula, data=self.df_model).fit()
+        else:
+            # Model with photrix.util.MixedModelFit (random effect is per-image, "cirrus effect"):
+            random_effect_var_name = 'FITSfile'  # cirrus effect is per-image
+            self.mm_fit_object = MixedModelFit(data=self.df_model, dep_var='DepVar',
+                                               fixed_vars=x_var_list,
+                                               group_var=random_effect_var_name)
+            self.statsmodels_object = self.mm_fit_object.statsmodels_object
+
+        if self.statsmodels_object.scale != 0.0 and \
+                self.statsmodels_object.nobs == len(self.df_model):
+            print(self.statsmodels_object.summary())
+            self.is_valid = True
+
+    def _build_output(self):
+        if len(self.image_list) == 1:
+            # Ordinary least squares case...image/cirrus effect folded into zero-point term:
+            so = self.statsmodels_object
+            self.fitted_values = so.fittedvalues
+            self.param_values = so.params
+            self.residuals = so.resid
+            self.sigma = so.mse_resid ** 0.5
+            self.transform_value = so.params['CI']
+            self.transform_sigma = so.bse['CI']
+            self.image_effect = None
+        else:
+            # Mixed-model case, data from util.MixedModelFit object:
+            so = self.mm_fit_object
+            self.fitted_values = so.df_observations['FittedValue']
+            self.param_values = so.df_fixed_effects['Value']
+            self.residuals = so.df_observations['Residual']
+            self.sigma = so.sigma
+            self.transform_value = self.param_values['CI']
+            self.transform_sigma = so.df_fixed_effects.loc['CI', 'Stdev']
+            self.image_effect = so.df_random_effects['GroupValue']
 
 
 def get_df_master(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):

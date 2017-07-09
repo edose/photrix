@@ -27,7 +27,7 @@
 
   "filters": {
     "B": {
-      "reference_exposure_mag10": 50,
+      "reference_exposure_mag10": 56,
       "transform": {
         "V-I": 0.0,
         "B-V": null,
@@ -43,7 +43,7 @@
       }
     },
     "R": {
-      "reference_exposure_mag10": 24,
+      "reference_exposure_mag10": 20,
       "transform": {
         "V-I": 0.0398,
         "B-V": null,

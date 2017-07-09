@@ -188,7 +188,7 @@ def complete_df_fov_an(df_fov, user_update_tolerance_days=DEFAULT_UPDATE_TOLERAN
         is_observable = enough_dark_time & moon_dist_ok
         df_fov = df_fov[is_observable]
 
-    return df_fov.sort_values(by=['mid', 'an_priority'])
+    return df_fov.sort_values(by=['mid', 'an_priority'], ascending=[True, False])
 
 
 class LocalObsCache:
@@ -657,7 +657,7 @@ def get_local_aavso_reports(report_dir=None, earliest_an=None):
 
 def make_an_roster(an_date_string, output_directory, site_name='DSW', instrument_name='Borea',
                    user_update_tolerance_days=DEFAULT_UPDATE_TOLERANCE_DAYS,
-                   exp_time_factor=1):
+                   exp_time_factor=1, min_an_priority=4):
     """
     Generates new .csv file containing info on each fov available this astronight.
        Typical usage: make_an_roster("2017127", "C:/Astro/ACP/AN20170127/"
@@ -666,6 +666,8 @@ def make_an_roster(an_date_string, output_directory, site_name='DSW', instrument
     :param site_name: [string]
     :param instrument_name: [string]
     :param user_update_tolerance_days: esp for user to force update [float]
+    :param exp_time_factor: multiply *raw* exp times by this; typically 0.6-0.9 [float]
+    :param min_an_priority: hide Monitor and LPV targets with an_priority < this [float]
     :return: tuple of number of fovs, each obs style: (n_std, n_monitor_lpv, n_stare). [ints]
     """
 
@@ -810,22 +812,23 @@ def make_an_roster(an_date_string, output_directory, site_name='DSW', instrument
                                         min_moon_degrees=MIN_MOON_DEGREES_DEFAULT,
                                         remove_zero_an_priority=True, remove_unobservables=True)
     for fov_index in df_fov_mon_lpv.index:
-        fov_name = df_fov_mon_lpv.loc[fov_index, 'fov_name']
-        available = df_fov_mon_lpv.loc[fov_index, 'available']
-        this_fov = Fov(fov_name)
-        transit_hhmm = hhmm_from_datetime_utc(an.transit(RaDec(this_fov.ra, this_fov.dec)))
-        _, _, _, target_overhead, repeat_duration = \
-            make_fov_exposure_data(fov_name, an, fov_dict=None, instrument=instrument,
-                                   exp_time_factor=exp_time_factor)
-        minutes = (target_overhead + repeat_duration) / 60.0
         an_priority = df_fov_mon_lpv.loc[fov_index, 'an_priority']
-        an_priority_bars = df_fov_mon_lpv.loc[fov_index, 'an_priority_bars']
-        motive = Fov(fov_name).motive
-        this_fov_line = ',' + fov_name + ',' + fov_name + ', ' + available + ',' + \
-                        "=\"" + transit_hhmm + "\"" + ',' + str(int(minutes)) + ',' +\
-                        str(int(round(an_priority))) + ' ,' + an_priority_bars + ',' + \
-                        "\"  " + motive + "\""  # formatting to placate Excel csv weirdness.
-        lines_mon_lpv.append(this_fov_line)
+        if an_priority >= min_an_priority:
+            fov_name = df_fov_mon_lpv.loc[fov_index, 'fov_name']
+            available = df_fov_mon_lpv.loc[fov_index, 'available']
+            this_fov = Fov(fov_name)
+            transit_hhmm = hhmm_from_datetime_utc(an.transit(RaDec(this_fov.ra, this_fov.dec)))
+            _, _, _, target_overhead, repeat_duration = \
+                make_fov_exposure_data(fov_name, an, fov_dict=None, instrument=instrument,
+                                       exp_time_factor=exp_time_factor)
+            minutes = (target_overhead + repeat_duration) / 60.0
+            an_priority_bars = df_fov_mon_lpv.loc[fov_index, 'an_priority_bars']
+            motive = Fov(fov_name).motive
+            this_fov_line = ',' + fov_name + ',' + fov_name + ', ' + available + ',' + \
+                            "=\"" + transit_hhmm + "\"" + ',' + str(int(minutes)) + ',' +\
+                            str(int(round(an_priority))) + ' ,' + an_priority_bars + ',' + \
+                            "\"  " + motive + "\""  # formatting to placate Excel csv weirdness.
+            lines_mon_lpv.append(this_fov_line)
 
     # Assemble all output lines:
     lines_all = lines_header + \
@@ -877,7 +880,7 @@ def make_an_plan(plan_excel_path='c:/24hrs/Planning.xlsx', site_name='DSW', inst
 
     output_directory = os.path.split(plan_excel_path)[0]  # output files -> same dir as excel input
     write_acp_plans(plan_list, output_directory, exp_time_factor=exp_time_factor)
-    write_summary(plan_list, an, output_directory, exp_time_factor=exp_time_factor)
+    write_summary(plan_list, an, fov_dict, output_directory, exp_time_factor=exp_time_factor)
 
 
 def parse_excel(excel_path, site_name='DSW'):
@@ -886,6 +889,20 @@ def parse_excel(excel_path, site_name='DSW'):
     :param excel_path: full path to Excel file holding all info for one night's observations [str].
     :param site_name: a Site object for location of observations [string]
     :return: list of actions [list of tuples]
+
+    Target types & their syntax:
+    FOV_name  ::  for LPV, standards, and other once-per-night targets having FOV files,
+       e.g., "FF Lyr" and "Std_SA32".
+    STARE nnn FOV_name  ::  for stare targets; nnn=number of obs cycles,
+       e.g., "STARE 100 ST Tri" (typically time-limited by QUITAT, not by number of obs cycles).
+    BURN  FOV_name  RA  Dec  ::  for 240-second images in V and I only; no FOV file necessary,
+       e.g., "BURN FF Lyr 12:00:00 +23:34:45".
+    IMAGE  target_name  filter_mag_string  RA  Dec  ::  arbitrary imaging,
+       e.g., "IMAGE New target V=12 B=12.5(2) 12:00:00 +23:34:45" to image New target in
+       V filter (once) at targeted mag 12, and B filter twice at targeted mag 12.5. All text between
+       "IMAGE" and first word having an "=" character is assumed to make up the target name.
+
+
     """
     df = pd.read_excel(excel_path, header=None).dropna(axis=0, how='all').dropna(axis=1, how='all')
     nrow = len(df)
@@ -1141,8 +1158,6 @@ def add_raw_durations_and_lines(plan_list, an, fov_dict, instrument, exp_time_fa
                 raw_duration = BURN_DURATION
             elif this_type == 'fov':
                 fov_name = parsed_action[1]
-                if fov_name == '':
-                    dummy = 0
                 summary_lines = ['fov ' + fov_name]
                 filters, counts, exp_times, target_overhead, repeat_duration = \
                     make_fov_exposure_data(fov_name, an, fov_dict, instrument,
@@ -1163,7 +1178,8 @@ def add_raw_durations_and_lines(plan_list, an, fov_dict, instrument, exp_time_fa
                 target_name = parsed_action[1]
                 summary_lines = ['Image target ' + target_name]
                 filters, counts, exp_times, target_overhead, repeat_duration = \
-                    make_image_exposure_data(parsed_action[2], instrument)
+                    make_image_exposure_data(parsed_action[2], instrument,
+                                             exp_time_factor=exp_time_factor)
                 raw_duration = target_overhead + 1 * repeat_duration
                 duration_comment = ' --> ' + str(round(raw_duration / 60.0, 1)) + ' min'
                 acp_plan_lines = [';', '#DITHER 0 ;',
@@ -1514,7 +1530,7 @@ def write_acp_plans(plan_list, output_directory, exp_time_factor):
             this_file.write('\n'.join(acp_plan_lines))
 
 
-def write_summary(plan_list, an, output_directory, exp_time_factor):
+def write_summary(plan_list, an, fov_dict, output_directory, exp_time_factor):
     # Unpack summary_lines:
     an_year = int(an.an_date_string[0:4])
     an_month = int(an.an_date_string[4:6])
@@ -1559,14 +1575,21 @@ def write_summary(plan_list, an, output_directory, exp_time_factor):
             else:
                 alt_string = '  '
 
-            # Warning if moon is closer than it should be.
+            # Insert warning line if moon is closer to this object than it should be.
             if moon_is_a_factor:
                 act = this_action.action_type.lower()
-                if act in ['burn', 'image']:
+                if act in ['burn', 'image', 'fov', 'stare']:
                     if act == 'burn':
                         ra, dec = this_action.parsed_action[2], this_action.parsed_action[3]
-                    else:
+                    elif act == 'image':
                         ra, dec = this_action.parsed_action[3], this_action.parsed_action[4]
+                    else:
+                        if act == 'fov':
+                            fov_name = this_action.parsed_action[1]  # non-stare FOV incl standards
+                        else:
+                            fov_name = this_action.parsed_action[2]  # stare
+                        this_fov = fov_dict[fov_name]
+                        ra, dec = this_fov.ra, this_fov.dec
 
                     moon_dist = an.moon_radec.degrees_from(RaDec(ra, dec))  # in degrees
                     if moon_dist < MIN_MOON_DEGREES_DEFAULT:

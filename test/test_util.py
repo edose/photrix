@@ -535,10 +535,20 @@ def test_mixed_model_fit_class():
                                                                        abs=0.00001)
 
     # Verify predictions on model data:
-    assert list(fit.predict(df_model)) == pytest.approx(fit.df_observations['FittedValue'])
-    # Verify predictions on test data:
-    assert list(fit.predict(df_test[0:4])) == pytest.approx([16.706808844306536, 18.50420441664172,
-                                                             20.533844119080726, 18.952844883150998])
+    # Case 1: INCLUDING random effects:
+    predictions_with_1 = fit.predict(df_model[0:4], include_random_effect=True)
+    predictions_with_2 = fit.predict(df_model[0:4])
+    assert list(predictions_with_1) == list(predictions_with_2)  # verify default is inclusion.
+    assert list(predictions_with_1) == pytest.approx(list(fit.df_observations['FittedValue'])[0:4])
+
+    # Case 2: OMITTING random effects:
+    predictions_without = fit.predict(df_model[0:4], include_random_effect=False)
+    random_effect_contributions = pd.Series([fit.df_random_effects.loc[group, 'GroupValue']
+                                             for group in df_model.iloc[0:4]['Ran']],
+                                            index=predictions_without.index)
+    expected_predictions = predictions_with_1 - random_effect_contributions
+    assert list(expected_predictions) == pytest.approx(list(predictions_without))
+
 
 
 

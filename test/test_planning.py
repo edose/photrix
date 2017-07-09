@@ -19,12 +19,12 @@ TEST_DATA_DIRECTORY = os.path.join(PHOTRIX_ROOT_DIRECTORY, "test", "$data_for_te
 
 def test_make_df_fov():
     df_fov = planning.make_df_fov(fov_directory=TEST_FOV_DIRECTORY)
-    required_columns = ["fov_name", "main_target", "fov_priority",
+    required_columns = ["fov_name", "fov", "main_target", "fov_priority",
                                     "obs_style", "ra", "dec", 'period',
                                     'target_type', 'max_exposure', 'radec']
     assert list(df_fov.columns) == required_columns  # in order
-    required_fov_names = set(['ASAS J162540_19123', 'AU Aur Modified', 'AU Aur', 'AU Aur BURN',
-                              'HAT_P_3', 'NSV 14581', 'ST Tri', 'Std_SA100'])
+    required_fov_names = set(['AU Aur multi-exposure', 'AU Aur',
+                              'NSV 14581', 'ST Tri', 'Std_SA100'])
     assert set(df_fov.fov_name) == required_fov_names  # not necessarily in order
     assert df_fov.shape == (len(required_fov_names), len(required_columns))
     assert df_fov['fov_name'].is_monotonic_increasing
@@ -35,13 +35,13 @@ def test_filter_df_fov_by_obs_styles():
     # Test normal case (as a list).
     df = planning.filter_df_fov_by_obs_styles(df_all, ["Standard", "LPV"])
     assert list(df.columns) == list(df_all.columns)
-    assert set(df["fov_name"]) == set(["AU Aur Modified", "Std_SA100", "AU Aur"])
+    assert set(df["fov_name"]) == set(["AU Aur multi-exposure", "Std_SA100", "AU Aur"])
     assert df.shape == (3, len(df_all.columns))
 
     # Test normal case (as a single string, not as list):
     df = planning.filter_df_fov_by_obs_styles(df_all, "LPV")
     assert list(df.columns) == list(df_all.columns)
-    assert set(df["fov_name"]) == set(["AU Aur Modified", "AU Aur"])
+    assert set(df["fov_name"]) == set(["AU Aur multi-exposure", "AU Aur"])
     assert df.shape == (2, len(df_all.columns))
 
     # Test empty obs_style list, returns input df_fov:
@@ -62,22 +62,20 @@ def test_filter_df_fov_by_fov_priority():
     # Test normal case (including standard fovs).
     min_priority = 3
     df = planning.filter_df_fov_by_fov_priority(df_all, min_priority)
-    assert df.shape == (7, len(df_all.columns))
+    assert df.shape == (5, len(df_all.columns))
     assert list(df.columns) == list(df_all.columns)
     assert set(df["fov_name"]) == \
-        {"AU Aur BURN", "AU Aur Modified", "ASAS J162540_19123",
-         "Std_SA100", "ST Tri", "NSV 14581", "AU Aur"}
+        {'AU Aur multi-exposure', 'AU Aur', 'NSV 14581', 'ST Tri', 'Std_SA100'}
     priority_ok = df["fov_priority"] >= min_priority
     is_standard_fov = (df["obs_style"].str.lower() == "Standard".lower())
     assert all(priority_ok | is_standard_fov)
 
     # Test exclude standard fovs.
-    min_priority = 3
+    min_priority = 4
     df = planning.filter_df_fov_by_fov_priority(df_all, min_priority, include_std_fovs=False)
-    assert df.shape == (6, len(df_all.columns))
+    assert df.shape == (3, len(df_all.columns))
     assert list(df.columns) == list(df_all.columns)
-    assert set(df["fov_name"]) == \
-        {"AU Aur BURN", "AU Aur Modified", "ASAS J162540_19123", "ST Tri", "NSV 14581", "AU Aur"}
+    assert set(df["fov_name"]) == {'AU Aur multi-exposure', 'AU Aur', 'ST Tri'}
     priority_ok = df["fov_priority"] >= min_priority
     is_standard_fov = (df["obs_style"].str.lower() == "Standard".lower())
     assert all(priority_ok)
@@ -92,66 +90,72 @@ def test_filter_df_fov_by_fov_priority():
 
 def test_filter_df_fov_available():
     df_all = planning.make_df_fov(fov_directory=TEST_FOV_DIRECTORY)
-    # Test normal case, no moon effect.
-    df = planning.complete_df_fov_an(df_all, an_string='20160919', site_name='BDO_Kansas',
-                                     min_moon_degrees=0, remove_unobservables=False)
-    moon_deg_expected = [143, 45, 45, 45, 118, 74, 25, 88]
-    seconds_expected = [8693, 22905, 22905, 22905, 4323, 35846, 28034, 0]
-    # print('\n', df)
-    assert all([list(df['moon_deg'])[i] == pytest.approx(moon_deg_expected[i], abs=1)
-                for i in range(len(df))])
-    assert all([list(df['seconds'])[i] == pytest.approx(seconds_expected[i], abs=60)
-                for i in range(len(df))])
+    # Test normal case, no moon avoidance.
+    df = planning.complete_df_fov_an(df_all, an_string='20160919', site_name='DSW',
+                                     min_moon_degrees=0, remove_zero_an_priority=False,
+                                     remove_unobservables=False)  # no removes, so test all FOVs
+    assert list(df['fov_name']) == \
+           ['NSV 14581', 'ST Tri', 'Std_SA100', 'AU Aur', 'AU Aur multi-exposure']
+    moon_deg_expected = [74, 24.5, 88, 45, 45]
+    seconds_expected = [37415, 26957, 0, 20989, 20989]
+    assert list(df['moon_deg']) == pytest.approx(moon_deg_expected, abs=1)
+    assert list(df['seconds']) == pytest.approx(seconds_expected, abs=60)
 
-    # Test normal case, big moon effect.
-    df = planning.complete_df_fov_an(df_all, an_string='20160919', site_name='BDO_Kansas',
-                                     min_moon_degrees=80, remove_unobservables=False)
-    moon_deg_expected = [143, 45, 45, 45, 118, 74, 25, 88]
-    seconds_expected = [8693, 0, 0, 0, 4323, 4776, 0, 0]
-    assert all([list(df['moon_deg'])[i] == pytest.approx(moon_deg_expected[i], abs=1)
-                for i in range(len(df))])
-    assert all([list(df['seconds'])[i] == pytest.approx(seconds_expected[i], abs=60)
-                for i in range(len(df))])
-    # print(df)
+    # Test normal case, wide moon avoidance.
+    df = planning.complete_df_fov_an(df_all, an_string='20160919', site_name='DSW',
+                                     min_moon_degrees=70, remove_zero_an_priority=False,
+                                     remove_unobservables=False)
+    assert list(df['fov_name']) == \
+           ['ST Tri', 'AU Aur', 'AU Aur multi-exposure', 'NSV 14581', 'Std_SA100']
+    moon_deg_expected = [24.5, 45, 45, 74, 88]
+    seconds_expected = [0, 0, 0, 37415, 0]
+    assert list(df['moon_deg']) == pytest.approx(moon_deg_expected, abs=1)
+    assert list(df['seconds']) == pytest.approx(seconds_expected, abs=60)
 
-    # Test case: 6 months before previous case (for opposite fov availabilities):
+    # Test case: 6 months after previous case (for opposite fov availabilities):
     df_all = planning.make_df_fov(fov_directory=TEST_FOV_DIRECTORY)
     # Test normal case, no moon effect.
-    df = planning.complete_df_fov_an(df_all, an_string='20160319', site_name='BDO_Kansas',
-                                     min_moon_degrees=65, remove_unobservables=True)
-    moon_deg_expected = [97, 70, 70, 70, 62, 86, 96]
-    seconds_expected = [19589, 15848, 15878, 15878, 2165, 36198, 5120]
-    assert all([list(df['moon_deg'])[i] == pytest.approx(moon_deg_expected[i], abs=1)
-                for i in range(len(df))])
-    assert all([list(df['seconds'])[i] == pytest.approx(seconds_expected[i], abs=60)
-                for i in range(len(df))])
-    # print('\n', df)
+    df = planning.complete_df_fov_an(df_all, an_string='20170319', site_name='DSW',
+                                     min_moon_degrees=65, remove_zero_an_priority=False,
+                                     remove_unobservables=False)
+    assert list(df['fov_name']) == \
+           ['ST Tri', 'AU Aur', 'AU Aur multi-exposure', 'Std_SA100', 'NSV 14581']
+    moon_deg_expected = [136.4, 147.5, 147.5, 130, 108]
+    seconds_expected = [4080, 13968, 13968, 20471, 2908]
+    assert list(df['moon_deg']) == pytest.approx(moon_deg_expected, abs=1)
+    assert list(df['seconds']) == pytest.approx(seconds_expected, abs=60)
 
     # Test case: near-new moon (moon 3% phase, no factor at all whatever targets' sky position):
     df_all = planning.make_df_fov(fov_directory=TEST_FOV_DIRECTORY)
     # Test normal case, no moon effect.
-    df = planning.complete_df_fov_an(df_all, an_string='20161226', site_name='BDO_Kansas',
-                                     min_moon_degrees=120, remove_unobservables=True)
-    moon_deg_expected = [37, 148, 148, 148, 78, 109, 146, 118]
-    seconds_expected = [4122, 40384, 40384, 40384, 19071, 45262, 29656, 27029]
-    assert all([list(df['moon_deg'])[i] == pytest.approx(moon_deg_expected[i], abs=1)
-                for i in range(len(df))])
-    assert all([list(df['seconds'])[i] == pytest.approx(seconds_expected[i], abs=60)
-                for i in range(len(df))])
-    # print('\n', df)
+    df = planning.complete_df_fov_an(df_all, an_string='20161226', site_name='DSW',
+                                     min_moon_degrees=120, remove_zero_an_priority=False,
+                                     remove_unobservables=False)
+    assert list(df['fov_name']) == \
+           ['NSV 14581', 'ST Tri', 'AU Aur', 'AU Aur multi-exposure', 'Std_SA100']
+    moon_deg_expected = [109, 146, 148, 148, 118]
+    seconds_expected = [23005, 28004, 37892, 37892, 25350]
+    assert list(df['moon_deg']) == pytest.approx(moon_deg_expected, abs=1)
+    assert list(df['seconds']) == pytest.approx(seconds_expected, abs=60)
 
     # Test case: moon very near at least one FOV:
     df_all = planning.make_df_fov(fov_directory=TEST_FOV_DIRECTORY)
     # Test normal case, no moon effect.
-    df = planning.complete_df_fov_an(df_all, an_string='20170113', site_name='BDO_Kansas',
-                                     min_moon_degrees=70, remove_unobservables=True)
-    # print('\n', df)
-    moon_deg_expected = [100, 65, 65, 65, 83, 90]
-    seconds_expected = [8423, 2674, 2674, 2674, 44439, 24531]
-    assert all([list(df['moon_deg'])[i] == pytest.approx(moon_deg_expected[i], abs=1)
-                for i in range(len(df))])
-    assert all([list(df['seconds'])[i] == pytest.approx(seconds_expected[i], abs=60)
-                for i in range(len(df))])
+    df = planning.complete_df_fov_an(df_all, an_string='20170113', site_name='DSW',
+                                     min_moon_degrees=70, remove_zero_an_priority=False,
+                                     remove_unobservables=False)
+    assert list(df['fov_name']) == \
+           ['AU Aur', 'AU Aur multi-exposure', 'NSV 14581', 'ST Tri', 'Std_SA100']
+    moon_deg_expected = [65, 65, 83, 90, 16]
+    seconds_expected = [3422, 3422, 17920, 22922, 0]
+    assert list(df['moon_deg']) == pytest.approx(moon_deg_expected, abs=1)
+    assert list(df['seconds']) == pytest.approx(seconds_expected, abs=60)
+
+    # Test removing unobservables:
+    df = planning.complete_df_fov_an(df_all, an_string='20160919', site_name='DSW',
+                                     min_moon_degrees=70, remove_zero_an_priority=False,
+                                     remove_unobservables=True)  # NB: remove-unobs. == True here.
+    assert list(df['fov_name']) == ['NSV 14581']  # from wide moon avoidance case, above.
 
 
 def test_reorder_actions():
@@ -218,11 +222,11 @@ def test_class_aavso_webobs():
     assert aw.star_id == df192['target_name'].iloc[0]
 
 
-def test_class_local_obs_cache():
-    # First, make a small df_fov_avail.
-    df_fov = planning.make_df_fov()
-    df_fov_avail = planning.complete_df_fov_an(df_fov, an_string='20170127', site_name='BDO_Kansas',
-                                               min_moon_degrees=60, remove_unobservables=True)
-    df_fov = df_fov.iloc[0:20]
+# def test_class_local_obs_cache():
+#     # First, make a small df_fov_avail.
+#     df_fov = planning.make_df_fov()
+#     df_fov_avail = planning.complete_df_fov_an(df_fov, an_string='20170127', site_name='BDO_Kansas',
+#                                                min_moon_degrees=60, remove_unobservables=True)
+#     df_fov = df_fov.iloc[0:20]
 
 
