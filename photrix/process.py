@@ -1,8 +1,6 @@
-import json
 import os
 from math import floor, sqrt
 from datetime import datetime, timezone
-import sys  # for sys.exit(0)
 
 import numpy as np
 import pandas as pd
@@ -17,6 +15,8 @@ __author__ = "Eric Dose :: New Mexico Mira Project, Albuquerque"
 
 AN_TOP_DIRECTORY = 'J:/Astro/Images/C14'
 MIN_FWHM = 1.0
+THIS_SOFTWARE_VERSION = '2.0.0'  # as of 20170716
+AAVSO_REPORT_DELIMITER = ','
 
 #######
 #
@@ -37,12 +37,12 @@ MIN_FWHM = 1.0
 #    pred = PredictionSet(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None,
 #       instrument_name='Borea', site_name='DSW',
 #       max_inst_mag_sigma=0.05, skymodel_list=[v, r, i])  # skymodel_list = list of SkyModel objs
-#    IF STARES IN THIS AN:
-#        show_stare_comps(an_rel_directory='20170509', instrument_name='Borea')
+#    IF STARES exist in this AN:
+#        stare_comps(an_rel_directory='20170509', instrument_name='Borea')
 #        --> [edit stare_comps.txt to reflect choice of stare comps, each filter]
 #        plot_stare_target(an_rel_directory='20170509', fov=FOV)  # ensure OK
 #    make_report_map(an_rel_directory='20170509')
-#    make_aavso_report(an_rel_directory='20170509', software_version='2.0.5')
+#    aavso_report(an_rel_directory='20170509', software_version='2.0.5')
 #    --> [upload to AAVSO]
 #    --> [LCG review; edit FOV files if needed]
 #
@@ -53,7 +53,7 @@ def precheck(an_rel_directory=None, instrument_name='Borea'):
     """
     First check on new FITS files, at beginning of processing. Prints exceptions and summary stats.
     :param an_rel_directory: [string]
-    :param instrument_name: [string
+    :param instrument_name: [string]
     :return: [None]
     """
     if an_rel_directory is None:
@@ -138,7 +138,7 @@ class SkyModel:
         self.df_image = None    # one row per image, placeholder
 
         # Rows from df_master, as curated by user in file omit.txt:
-        df, warning_lines = apply_omit_txt(self.an_top_directory, self.an_rel_directory)
+        df, warning_lines = _apply_omit_txt(self.an_top_directory, self.an_rel_directory)
 
         # Remove rows for several causes of ineligibility to help form a sky model:
         df = df[df['Filter'] == self.filter]
@@ -160,19 +160,20 @@ class SkyModel:
         if do_plots:
             self.plots()
         # self.to_json_file()  # GIVE UP on JSON -- it can't handle DataFrames and Series.
-        write_stare_comps_txt_stub(self.an_top_directory, self.an_rel_directory)
+        _write_stare_comps_txt_stub(self.an_top_directory, self.an_rel_directory)
 
     # @classmethod
     # def from_json(cls, an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None, filter=None):
     #     """
     #     Alternate constructor, reads from JSON file previously written.
-    #        Normally used by predict_fixed_only(), which requires final (immutable) Models.
+    #        Normally used by _predict_fixed_only(), which requires final (immutable) Models.
     #     :param an_top_directory: path to an_rel_folder [str]
     #     :param an_rel_directory: folder for this instrument on this Astronight [string]
     #     :param filter: the filter to which this model applies [string, e.g., 'V' or 'R']
     #     :return: newly constructed Model object [class Model]
     #     """
-    #     json_fullpath = os.path.join(an_top_directory, an_rel_directory, "model-" + filter + ".txt")
+    #     json_fullpath = os.path.join(an_top_directory, an_rel_directory, "model-" +
+    #         filter + ".txt")
     #     with open(json_fullpath, 'r') as f:
     #         d = json.load(f)
     #     # Series and DataFrames (pandas) were stored as dictionaries, so convert them back:
@@ -254,6 +255,9 @@ class SkyModel:
         self.mm_fit = MixedModelFit(data=self.df_model, dep_var=self.dep_var_name,
                                     fixed_vars=fixed_effect_var_list,
                                     group_var=random_effect_var_name)
+        if self.mm_fit.statsmodels_object.scale != 0.0 and \
+                self.mm_fit.statsmodels_object.nobs == len(self.df_model):
+            print(self.mm_fit.statsmodels_object.summary())
 
     def _build_output(self):
         """
@@ -307,8 +311,58 @@ class SkyModel:
         print('\n', len(self.df_model), ' observations --> sigma=',
               round((1000.0 * self.sigma), 1), ' mMag')
 
+    def _predict_fixed_only(self, df_predict_input):
+        """
+        Uses current model to predict best star magnitudes for *observed* InstMag and other inputs.
+        FIXED-EFFECTS ONLY: does not include random effect.
+        :param df_predict_input: data, all needed input columns for skymodel [pandas DataFrame]
+            will NOT include or use random effects.
+        :return: a dependent variable prediction for each input row [pandas Series of floats,
+            with index = index of predict_input]
+        """
+        # First, verify that input is a DataFrame and that all needed columns are present.
+        #    Names must be same as in model.
+        if not isinstance(df_predict_input, pd.DataFrame):
+            print('>>>>> SkyModel._predict_fixed_only(): predict_input is not a pandas DataFrame.')
+            return None
+        required_input_columns = ['Serial', 'FITSfile', 'InstMag', 'CI', 'Airmass']
+        if self.fit_sky_bias:
+            required_input_columns.append('SkyBias')
+        if self.fit_log_adu:
+            required_input_columns.append('LogADU')
+        if self.fit_vignette:
+            required_input_columns.append('Vignette')
+        if self.fit_xy:
+            required_input_columns.extend(['X1024', 'Y1024'])
+        all_present = all([name in df_predict_input.columns for name in required_input_columns])
+        if not all_present:
+            print('>>>>> SkyModel._predict_fixed_only(): at least one column missing.')
+            print('      Current model requires these columns:')
+            print('         ' + ', '.join(required_input_columns))
+            return None
+
+        # Make parsimonious copy of dataframe; add bogus CatMag column (required by model):
+        df_for_mm_predict = (df_predict_input.copy())[required_input_columns]
+        bogus_cat_mag = 0.0
+        df_for_mm_predict['CatMag'] = bogus_cat_mag  # totally bogus local value, reversed later
+
+        # Execute MixedModelFit.predict(), giving Intercept + bogus CatMag + FEs + REs (pd.Series)
+        #    DOES NOT INCLUDE RANDOM EFFECTS (these will be added back as Cirrus Effect terms):
+        raw_predictions = self.mm_fit.predict(df_for_mm_predict, include_random_effect=False)
+
+        # Compute dependent-variable offsets for unknown stars:
+        dep_var_offsets = pd.Series(len(df_for_mm_predict) * [0.0], index=raw_predictions.index)
+        if self.fit_transform is False:
+            dep_var_offsets += self.transform * df_for_mm_predict['CI']
+        if self.fit_extinction is False:
+            dep_var_offsets += self.extinction * df_for_mm_predict['Airmass']
+
+        # Extract best CatMag d'un seul coup, per (eq B - eq A), above:
+        predicted_star_mags = \
+            df_for_mm_predict['InstMag'] - dep_var_offsets - raw_predictions + bogus_cat_mag
+        return predicted_star_mags
+
     def plots(self):
-        import numpy as np
         import matplotlib.pyplot as plt
 
         # Setup for all Figures.
@@ -465,66 +519,6 @@ class SkyModel:
                      color='darkblue', fontsize=20, weight='bold')
         plt.show()
 
-    def predict_fixed_only(self, df_predict_input):
-        """
-        Uses current model to predict best star magnitudes for *observed* InstMag and other inputs.
-        FIXED-EFFECTS ONLY: does not include random effect.
-        :param df_predict_input: data, all needed input columns for skymodel [pandas DataFrame]
-            will NOT include or use random effects.
-        :return: a dependent variable prediction for each input row [pandas Series of floats,
-            with index = index of predict_input]
-        """
-        # First, verify that input is a DataFrame and that all needed columns are present.
-        #    Names must be same as in model.
-        if not isinstance(df_predict_input, pd.DataFrame):
-            print('>>>>> SkyModel.predict_fixed_only(): predict_input is not a pandas DataFrame.')
-            return None
-        required_input_columns = ['Serial', 'FITSfile', 'InstMag', 'CI', 'Airmass']
-        if self.fit_sky_bias:
-            required_input_columns.append('SkyBias')
-        if self.fit_log_adu:
-            required_input_columns.append('LogADU')
-        if self.fit_vignette:
-            required_input_columns.append('Vignette')
-        if self.fit_xy:
-            required_input_columns.extend(['X1024', 'Y1024'])
-        all_present = all([name in df_predict_input.columns for name in required_input_columns])
-        if not all_present:
-            print('>>>>> SkyModel.predict_fixed_only(): at least one column missing.')
-            print('      Current model requires these columns:')
-            print('         ' + ', '.join(required_input_columns))
-            return None
-
-        # Make parsimonious copy of dataframe; add bogus CatMag column (required by model):
-        df_for_mm_predict = (df_predict_input.copy())[required_input_columns]
-        bogus_cat_mag = 0.0
-        df_for_mm_predict['CatMag'] = bogus_cat_mag  # totally bogus local value, reversed later
-
-        # Execute MixedModelFit.predict(), giving Intercept + bogus CatMag + FEs + REs (pd.Series)
-        #    DOES NOT INCLUDE RANDOM EFFECTS (these will be added back as Cirrus Effect terms):
-        raw_predictions = self.mm_fit.predict(df_for_mm_predict, include_random_effect=False)
-
-        # Now, the tricky part: estimating best magnitudes for unknowns/targets
-        #   (effectively get best CatMag per star).
-        # eq A: predict_fixed_only() = Intercept + bogus CatMag + FEs + REs
-        #       (per MixedModelFit.predict()).
-        # eq B: obs InstMag - offsets ~~ Intercept + best CatMag + FEs + REs (as in regression).
-        # so (eq B - eq A) -> best CatMag ~~
-        #       obs InstMag - offsets - predict_fixed_only() + bogus CatMag
-        # We still need to get: offsets (just as done in regression), then estimate best catMag:
-
-        # Compute dependent-variable offsets for unknown stars:
-        dep_var_offsets = pd.Series(len(df_for_mm_predict) * [0.0], index=raw_predictions.index)
-        if self.fit_transform is False:
-            dep_var_offsets += self.transform * df_for_mm_predict['CI']
-        if self.fit_extinction is False:
-            dep_var_offsets += self.extinction * df_for_mm_predict['Airmass']
-
-        # Extract best CatMag d'un seul coup, per (eq B - eq A), above:
-        predicted_star_mags = \
-            df_for_mm_predict['InstMag'] - dep_var_offsets - raw_predictions + bogus_cat_mag
-        return predicted_star_mags
-
 
 class PredictionSet:
     def __init__(self, an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None,
@@ -566,23 +560,22 @@ class PredictionSet:
         self.images_with_targets_and_comps = None  # list of strings
 
         # Do workflow steps:
-        self.df_all_eligible_obs, warning_lines = apply_omit_txt(self.an_top_directory,
-                                                                 self.an_rel_directory)
+        self.df_all_eligible_obs, warning_lines = _apply_omit_txt(self.an_top_directory,
+                                                                  self.an_rel_directory)
 
-        self.df_all_curated_obs, warning_lines = curate_stare_comps(self.an_top_directory,
-                                                                    self.an_rel_directory,
-                                                                    self.df_all_eligible_obs)
+        self.df_all_curated_obs, warning_lines = _curate_stare_comps(self.an_top_directory,
+                                                                     self.an_rel_directory,
+                                                                     self.df_all_eligible_obs)
 
         self.df_comp_mags = self.compute_comp_mags()
 
-        self.df_cirrus_effect = self.compute_cirrus_effect(self.df_comp_mags)
+        self.df_cirrus_effect = self._compute_cirrus_effect(self.df_comp_mags)
 
-        df_transformed_without_errors = self.compute_transformed_mags()
+        df_transformed_without_errors = self._compute_transformed_mags()
 
-        self.df_transformed = self.compute_all_errors(df_transformed_without_errors)
+        self.df_transformed = self._compute_all_errors(df_transformed_without_errors)
 
-        write_aavso_report_map_stub(self.an_top_directory, self.an_rel_directory)
-
+        _write_aavso_report_map_stub(self.an_top_directory, self.an_rel_directory)
 
     def compute_comp_mags(self):
         """
@@ -626,7 +619,7 @@ class PredictionSet:
                                   'Vignette']]
             # column 'EstimatedMag' does NOT include image/cirrus effect!
             df_estimates_this_skymodel.loc[:, 'EstimatedMag'] = \
-                skymodel.predict_fixed_only(df_predict_input)
+                skymodel._predict_fixed_only(df_predict_input)
             df_list.append(df_estimates_this_skymodel)  # list.append() performs in-place
         # Collect and return the dataframe:
         df_comp_mags = pd.concat(df_list, ignore_index=True)
@@ -634,7 +627,7 @@ class PredictionSet:
         df_comp_mags.index = df_comp_mags['Serial']
         return df_comp_mags
 
-    def compute_cirrus_effect(self, df_comp_mags):
+    def _compute_cirrus_effect(self, df_comp_mags):
         """
         Generates per-image cirrus effect with more careful inclusion/exclusion criteria than
             were used in the MixedModelFit, esp. in rejecting outlier comp observations.
@@ -658,7 +651,8 @@ class PredictionSet:
             raw_weights = pd.Series([1.0 / max(s2, least_allowed_sigma**2) for s2 in sigma2],
                                     index=sigma2.index)
             normalized_weights = raw_weights / sum(raw_weights)
-            # Compute cirrus effect of mean value (+ sigma of mean rather than of indiv comp vals):
+
+            # Compute cirrus effect of mean value & sigma of mean (not sigma of indiv comp values):
             cirrus_effect_this_image, _, cirrus_sigma_this_image = \
                 weighted_mean(cirrus_effect_from_comps, normalized_weights)
             if len(df_estimates_comps_this_image) == 1:
@@ -723,7 +717,7 @@ class PredictionSet:
         df_cirrus_effect.index = df_cirrus_effect['Image']
         return df_cirrus_effect
 
-    def compute_transformed_mags(self):
+    def _compute_transformed_mags(self):
         """
         Return best mag estimates for all target and check stars, all observations, all filters.
         :return: 
@@ -746,7 +740,7 @@ class PredictionSet:
                              (df_input_checks_targets['FITSfile']\
                               .isin(self.images_with_targets_and_comps))
             df_input_this_skymodel = (df_input_checks_targets.copy())[rows_to_select]
-            predict_output = skymodel.predict_fixed_only(df_input_this_skymodel)
+            predict_output = skymodel._predict_fixed_only(df_input_this_skymodel)
             df_estimates_this_filter = df_input_this_skymodel.copy()
             df_estimates_this_filter['PredictedMag'] = predict_output
             df_filter_list.append(df_estimates_this_filter)
@@ -762,7 +756,6 @@ class PredictionSet:
         df_estimates_checks_targets = df_estimates_checks_targets.drop(['CatMagSaved'], axis=1)
         df_estimates_checks_targets['UseInEnsemble'] = None
 
-
         # CIRRUS CORRECTION: Apply per-image cirrus-effect to checks and targets (for all filters):
         df_predictions_checks_targets = pd.merge(left=df_estimates_checks_targets,
                                                  right=self.df_cirrus_effect,
@@ -777,9 +770,9 @@ class PredictionSet:
 
         # COLOR CORRECTION: interpolate Color Index values, then apply them (transform):
         transforms = {k: v.transform for (k, v) in self.skymodels.items()}  # a dict of transforms
-        df_predictions_checks_targets = impute_target_ci(df_predictions_checks_targets,
-                                                         ci_filters=['V', 'I'],
-                                                         transforms=transforms)
+        df_predictions_checks_targets = _impute_target_ci(df_predictions_checks_targets,
+                                                          ci_filters=['V', 'I'],
+                                                          transforms=transforms)
         df_transforms = pd.DataFrame([transforms], index=['Transform']).transpose()  # lookup table
         df = pd.merge(df_predictions_checks_targets, df_transforms,
                       how='left', left_on='Filter', right_index=True)
@@ -788,7 +781,7 @@ class PredictionSet:
         df_transformed_without_errors = df
         return df_transformed_without_errors
 
-    def compute_all_errors(self, df_transformed_without_errors):
+    def _compute_all_errors(self, df_transformed_without_errors):
         """
         Compute 3 error contributors and total sigma for each target and check star in each image. 
            model_sigma: from mixed-model regression (same for all observations in this filter).
@@ -801,29 +794,30 @@ class PredictionSet:
 
         # Make new empty columns in df_transformed, to be populated later:
         #    (note: column InstMagSigma already exists from photometry)
-        df_transformed['ModelSigma'] = None
-        df_transformed['CirrusSigma'] = None
-        df_transformed['TotalSigma'] = None
+        df_transformed['ModelSigma'] = np.float64(np.NaN)
+        df_transformed['CirrusSigma'] = np.float64(np.NaN)
+        df_transformed['TotalSigma'] = np.float64(np.NaN)
         for this_filter, skymodel in self.skymodels.items():
-            model_sigma = skymodel.sigma
             images_this_filter = (self.df_comp_mags[self.df_comp_mags['Filter'] ==
                                                     this_filter])['FITSfile'].drop_duplicates()
             for image in images_this_filter:
                 n = max(1, len(self.df_comp_mags[(self.df_comp_mags['FITSfile'] == image) &
                                                  (self.df_comp_mags['UseInEnsemble'] == True)]))
+                model_sigma = skymodel.sigma / sqrt(n)
                 cirrus_sigma = \
                     float(self.df_cirrus_effect.loc[self.df_cirrus_effect['Image'] == image,
                                                     'CirrusSigma'])
-                df_targets_checks = (df_transformed[df_transformed['FITSfile'] == image]) \
+                df_targets_checks = (df_transformed[df_transformed['FITSfile'] == image])\
                     [['Serial', 'InstMagSigma']]
                 for serial in df_targets_checks['Serial']:
                     inst_mag_sigma = \
                         float(df_targets_checks.loc[df_targets_checks['Serial'] == serial,
                                                     'InstMagSigma'])
                     # Add up total error in quadrature:
-                    total_sigma = sqrt((model_sigma**2)/n + cirrus_sigma**2 + inst_mag_sigma**2)
+                    total_sigma = sqrt(model_sigma**2 + cirrus_sigma**2 + inst_mag_sigma**2)
                     # Write new data into correct cells in df_transformed:
                     this_row = (df_transformed['Serial'] == serial)
+                    df_transformed.loc[this_row, 'InstMagSigma'] = inst_mag_sigma
                     df_transformed.loc[this_row, 'ModelSigma'] = model_sigma
                     df_transformed.loc[this_row, 'CirrusSigma'] = cirrus_sigma
                     df_transformed.loc[this_row, 'TotalSigma'] = total_sigma
@@ -852,15 +846,19 @@ class PredictionSet:
 
         return df_transformed
 
-    def print_stare_comps(self, fov, star_id, this_filter):
+    def stare_comps(self, fov, star_id, this_filter):
         lines = stare_comps(self.df_transformed, fov, star_id, this_filter)
         print('\n'.join(lines))
 
-    def make_markup_report(self):
+    def markup_report(self, write_txt_file=True):
         """
         Makes markup report from current PredictionSet object.
+        :param write_txt_file: True iff markup_report.txt to be written to current directory.
         :return: text string ready for printing (e.g., by copy/paste into Microsoft Word).
         """
+
+        print('\nWriting \'markup_report.txt\'...', end='', flush=True)
+
         # First, make check-star dataframe:
         df = self.df_transformed.copy()
         df_check_stars = df.loc[df['StarType'] == 'Check',
@@ -873,12 +871,13 @@ class PredictionSet:
         df = df[df['StarType'] == 'Target']
         df = df[['Serial', 'FITSfile', 'StarID', 'Filter', 'Exposure', 'TransformedMag',
                  'InstMagSigma', 'ModelSigma', 'CirrusSigma', 'TotalSigma', 'MaxADU_Ur',
-                 'FWHM', 'JD_num']]
+                 'FWHM', 'JD_num', 'FOV']]
         df = df.rename(columns={'StarID': 'Target', 'Exposure': 'Exp', 'TransformedMag': 'Mag',
                                 'MaxADU_Ur': 'MaxADU'})
         df = pd.merge(df, df_check_stars, how='left', on='FITSfile')
         df.index = df['Serial']
-        df = df.sort_values(by=['Target', 'FITSfile', 'Filter', 'Exp'])
+        # df = df.sort_values(by=['Target', 'FITSfile', 'Filter', 'Exp'])
+        df = df.sort_values(by=['FOV', 'Target', 'FITSfile'])
 
         # A nested helper function:
         def format_column(iterable, decimal_pts=None, min_width=0, left_pad=1):
@@ -887,48 +886,347 @@ class PredictionSet:
             else:
                 this_list = [str(x) for x in iterable]
             n_chars = max(min_width, max([len(x) for x in this_list])) + left_pad
-            return [x.rjust(n_chars) for x in this_list]
+            return pd.Series([x.rjust(n_chars) for x in this_list])
 
-        # Make dataframe df_text of text columns ~ ready to print:
-        width_dict = dict()
+        # Make dataframe df_text of text columns ~ ready to print (column FOV omitted from text):
         df_text = pd.DataFrame()
-        df_text['Serial'] = format_column(df['Serial'], min_width=6)
+        df_text['Serial'] = format_column(df['Serial'], min_width=4)
         df_text['Target'] = format_column(df['Target'], min_width=6)
         df_text['FITSfile'] = format_column(df['FITSfile'], min_width=8)
-        df_text['Filter'] = format_column(df['Filter'], min_width=4)  # 'Filt'
+        df_text['FITSfile'] = [f.split('.fts')[0]
+                               for f in df_text['FITSfile']]  # remove '.fts'
+        df_text['Filt'] = format_column(df['Filter'], min_width=4)
         df_text['Exp'] = format_column(df['Exp'], decimal_pts=1, min_width=5)
+        df_text['Exp'] = [s[:-2] + '  ' if s.endswith('.0') else s
+                          for s in df_text['Exp']]  # remove any trailing decimal point and zero
         df_text['Mag'] = format_column(df['Mag'], decimal_pts=3)
-        df_text['MaxADU'] = format_column(df['MaxADU'], min_width=6)
+        df_text['MaxADU'] = format_column(df['MaxADU'], min_width=5)
         df_text['FWHM'] = format_column(df['FWHM'], decimal_pts=2, min_width=4)
-        df_text['JD_fract'] = format_column(df['JD_num'], decimal_pts=4, min_width=8)
-        df_text['Check'] = format_column(df['Check'], min_width=5)
+        df_text['JD_fract'] = format_column(df['JD_num'], decimal_pts=4, min_width=6)
+        df_text['Check'] = format_column(df['Check'], min_width=3)
         df_text['CkMag'] = format_column(df['CkMag'], decimal_pts=3, min_width=5)
         df_text['CkCat'] = format_column(df['CkCat'], decimal_pts=3, min_width=5)
-        df_text['Inst'] = format_column(round(df['InstMagSigma']*1000.0), min_width=5)
-        df_text['Model'] = format_column(round(df['ModelSigma']*1000.0), min_width=5)
-        df_text['Cirr'] = format_column(round(df['CirrusSigma']*1000.0), min_width=5)
-        df_text['Sigma'] = format_column(round(df['TotalSigma']*1000.0), min_width=5)
+        df_text['Inst'] = format_column(round(df['InstMagSigma']*1000.0).astype(int), min_width=3)
+        df_text['Model'] = format_column(round(df['ModelSigma']*1000.0).astype(int), min_width=3)
+        df_text['Cirr'] = format_column(round(df['CirrusSigma']*1000.0).astype(int), min_width=3)
+        df_text['Sigma'] = format_column(round(df['TotalSigma']*1000.0).astype(int), min_width=3)
 
-        # Make text lines of report:
-        left_spacer = 5 * ' '
-        column_list = ['Serial', 'Target', 'FITSfile', 'Filter', 'Exp', 'Mag', 'MaxADU',
+        # Make dict of just-sufficient column widths:
+        column_list = ['Serial', 'Target', 'FITSfile', 'Filt', 'Exp', 'Mag', 'MaxADU',
                        'FWHM', 'JD_fract', 'Check', 'CkMag', 'CkCat',
                        'Inst', 'Model', 'Cirr', 'Sigma']
-        header_line = left_spacer + ' '.join([col.rjust(len(df_text.iloc[0][col]))
-                                              for col in column_list])
+        dict_widths = {col: max(len(col), max([len(ss) for ss in df_text[col]]))
+                       for col in column_list}
 
-        # header_line = left_spacer + ' '.join(column_list)
-        lines = [header_line]
+        # Make text lines of report:
+        lines = ['MARKUP REPORT for ' + self.an_rel_directory +
+                 '        generated by photrix ' + THIS_SOFTWARE_VERSION +
+                 '  at  ' + '{:%Y-%m-%d %H:%M  UTC}'.format(datetime.now(timezone.utc))]
+        left_spacer = 2 * ' '
+        nan_text = ' - '
+        header_line = left_spacer + ' '.join([col.rjust(dict_widths[col]) for col in column_list])
+        line_length = len(header_line)
+        lines.extend(['', line_length * '_', '', header_line, ''])
         for i in range(len(df)):
-            line = left_spacer + ''.join([df_text.iloc[i][col] for col in column_list])
+            this_row = pd.Series([s if s.strip().lower() != 'nan' else nan_text
+                                  for s in df_text.iloc[i]], index=column_list)
+            line = left_spacer + ' '.join(this_row[col].rjust(dict_widths[col])
+                                          for col in column_list)
             lines.append(line)
-            # Spacer line between targets:
+            # Add blank line between targets:
             if i < len(df) - 1:
                 this_target = df_text.iloc[i]['Target']
                 next_target = df_text.iloc[i+1]['Target']
                 if next_target != this_target:
                     lines.append('')
+        lines.extend(['', line_length * '_'])
+        lines = [line + '\n' for line in lines]
+
+        output_fullpath = os.path.join(self.an_top_directory, self.an_rel_directory,
+                                       'Photometry', 'markup_report.txt')
+        with open(output_fullpath, 'w') as this_file:
+            this_file.write(''.join(lines))
+        print('Done.\n' + 'Written to file \'' + output_fullpath + '\'.', flush=True)
         return lines
+
+    def aavso_report(self, write_file=True, return_df=False):
+        """
+        Construct AAVSO report (Enhanced Format) from this PredictionSet object.
+        Writes this report as a text file in current (PredictionSet's) directory.
+        :param write_file: True to write text file to current dir, False to not write.
+        :param return_df: True to return a DataFrame of results, False to return None.
+        :return: table of results if requested [DataFrame], else None.
+        """
+
+        df_report = self._apply_report_map_txt()
+
+        # Construct text header lines:
+        header = ["#TYPE=Extended",
+                  "#OBSCODE=DERA",  # DERA = Eric Dose's observer code @ AAVSO
+                  "#SOFTWARE=python scripts, https://github.com/edose/photrix tag/version=" +
+                  THIS_SOFTWARE_VERSION,
+                  "#DELIM=" + AAVSO_REPORT_DELIMITER,
+                  "#DATE=JD",
+                  "#OBSTYPE=CCD",
+                  "#This report of " + str(len(df_report)) + " observations was generated " +
+                  '{:%Y-%m-%d %H:%M:%S UTC}'.format(datetime.now(timezone.utc)) +
+                  " from raw data in directory " + self.an_rel_directory + ".",
+                  "#Interim software platforms:",
+                  "#--- FITS handling and Aperture photometry: "
+                  "R scripts, https://github.com/edose/photometry-R tag/version 1.2.2",
+                  "#--- Transforms, sky models, and report generation: "
+                  "python scripts, https//github.com/edose/photrix tag/version 2.0.0",
+                  "#Eric Dose, New Mexico Mira Project, ABQ, NM",
+                  "#",
+                  "#NAME,DATE,MAG,MERR,FILT,TRANS,MTYPE,CNAME,CMAG,KNAME,KMAG,AMASS," +
+                  "GROUP,CHART,NOTES"
+                  ]
+
+        # Format observation report text fields, building df_formatted by columns left to right:
+        df_formatted = pd.DataFrame()  # empty
+        if len(df_report) == 0:
+            obs_lines = ['\n\n\n              >>>>>>>>> NO OBSERVATIONS TO PRINT\n']
+        else:
+            df_formatted['TargetName'] = df_report['TargetName'].str.strip().str.upper()
+            df_formatted['JD'] = df_report['JD'].astype(np.float64).map('{:.5f}'.format)
+            df_formatted['Mag'] = df_report['Mag'].map('{:.3f}'.format)
+            df_formatted['MagErr'] = df_report['TotalSigma'].map('{:.3f}'.format)
+            df_formatted['Filter'] = df_report['Filter'].str.strip().str.upper()
+            df_formatted['Transformed'] = 'YES'  # we always transform our reported data
+            df_formatted['MType'] = 'STD'  # we use std comp stars, not "differential mode"
+            df_formatted['CompName'] = df_report['CompName'].str.strip().str.upper()
+            df_formatted['CompMag'] = ['{:.3f}'.format(mag) if not np.isnan(mag) else 'na'
+                                       for mag in df_report['CompMag']]
+            df_formatted['CheckName'] = [name.strip().upper() if isinstance(name, str) else 'na'
+                                         for name in df_report['CheckName']]
+            df_formatted['CheckMag'] = ['{:.3f}'.format(mag) if not np.isnan(mag) else 'na'
+                                        for mag in df_report['CheckMag']]
+            df_formatted['Airmass'] = df_report['Airmass'].map('{:.4f}'.format)
+            df_formatted['Group'] = 'na'  # we don't use the observation grouping facility
+            df_formatted['Chart'] = df_report['Chart'].str.upper()
+            df_formatted['Notes'] = [note.strip() if note != '' else 'na'
+                                     for note in df_report['Notes']]
+
+            # Make all observation text lines:
+            obs_column_list = ['TargetName', 'JD', 'Mag', 'MagErr', 'Filter', 'Transformed',
+                               'MType', 'CompName', 'CompMag', 'CheckName', 'CheckMag',
+                               'Airmass', 'Group', 'Chart', 'Notes']
+            obs_lines = df_formatted.loc[:, obs_column_list].\
+                apply(lambda x: AAVSO_REPORT_DELIMITER.join(x), axis=1).tolist()
+
+        # Write file if requested:
+        if write_file:
+            lines_to_write = [line + '\n' for line in (header + obs_lines)]
+            filename = 'AAVSOreport-' + self.an_rel_directory + '.txt'
+            fullpath = os.path.join(self.an_top_directory, self.an_rel_directory,
+                                    'Photometry', filename)
+            with open(fullpath, 'w') as f:
+                f.writelines(lines_to_write)
+            print('AAVSO report for AN ' + self.an_rel_directory + ' written to: ' +
+                  fullpath + '\n   = ' + str(len(df_formatted)) + ' observations.')
+
+        # Return DataFrame if requested:
+        if return_df:
+            return df_report
+        return None
+
+    def _apply_report_map_txt(self):
+        """
+        [Called only by other PredictionSet method.]
+        :return: df_report: all observation data to construct AAVSO photometry report [DataFrame].
+        """
+
+        df_report = self.df_transformed.copy()
+        df_report = df_report[['Serial', 'StarType', 'StarID', 'JD_mid',
+                              'TransformedMag', 'TotalSigma', 'InstMagSigma',
+                              'ModelSigma', 'CirrusSigma', 'Filter']]
+        df_report.rename(columns={'StarID': 'TargetName', 'JD_mid': 'JD', 'TransformedMag': 'Mag'},
+                         inplace=True)
+        df_report['CompName'] = ''
+        df_report['CompMag'] = np.float64(np.nan)
+        df_report['NComps'] = 0
+        # df_report['CheckName'] = ''
+        # df_report['CheckMag'] = np.float64(np.nan)
+        df_report['Airmass'] = self.df_transformed['Airmass']  # to get column order
+        df_report['Chart'] = self.df_transformed['Chart']  # "
+        df_report['Notes'] = ['obs#' + str(s) for s in df_report['Serial']]
+        df_report = df_report[df_report['StarType'] == 'Target']
+        df_report.drop('StarType', axis=1, inplace=True)  # remove column no longer needed
+
+        # Get report_map.txt
+        fullpath = os.path.join(self.an_top_directory, self.an_rel_directory, 'Photometry',
+                                'report_map.txt')
+        if not os.path.exists(fullpath):
+            _write_report_map_stub(self.an_top_directory, self.an_rel_directory)
+        with open(fullpath) as f:
+            lines = f.readlines()
+        lines = [line for line in lines if line is not None]  # remove empty list elements
+        lines = [line.split(";")[0] for line in lines]  # remove all comments
+        lines = [line.strip() for line in lines]  # remove lead/trail blanks
+        lines = [line for line in lines if line != '']  # remove empty lines
+        lines = [line for line in lines if line.startswith('#')]  # keep only directive lines
+
+        # Apply #TARGET omissions:
+        omit_lines = [line for line in lines if line.startswith('#TARGET')]
+        for this_line in omit_lines:
+            parms, warning_lines = _get_line_parms(this_line, '#TARGET', False, 1, 1)
+            if warning_lines is not None:
+                print('>>>>> Can\'t parse line:', warning_lines)
+            else:
+                target_to_omit = parms[0]
+                if target_to_omit is not None:
+                    rows_to_keep = [t.lower() != target_to_omit.lower()
+                                    for t in df_report['TargetName']]
+                    df_report = df_report[rows_to_keep]
+                    print('Target removed:', target_to_omit, '.')
+
+        # Apply #SERIAL omissions:
+        rows_before = len(df_report)
+        omit_lines = [line for line in lines if line.startswith('#SERIAL')]
+        for this_line in omit_lines:
+            parms, warning_lines = _get_line_parms(this_line, '#SERIAL', True, 1, None)
+            if warning_lines is not None:
+                print('>>>>> Can\'t parse line:', warning_lines)
+            else:
+                if parms is not None:
+                    serials_to_omit = [int(p) for p in parms]
+                    rows_to_keep = ~ df_report['Serial'].isin(serials_to_omit)
+
+                    df_report = df_report[rows_to_keep]
+        rows_after = len(df_report)
+        print(str(rows_before - rows_after), 'serials removed altogether.')
+
+        # Apply #JD directives:
+        rows_before = len(df_report)
+        omit_lines = [line for line in lines if line.startswith('#JD')]
+        for this_line in omit_lines:
+            raw_parms, warning_lines = _get_line_parms(this_line, '#JD', True, 2, 2)
+            if warning_lines is not None:
+                print('>>>>> Can\'t parse line:', warning_lines)
+            else:
+                min_jd_fract, max_jd_fract = np.float64(raw_parms)
+                if (min_jd_fract >= 0.0) or (max_jd_fract < 2.0):
+                    floor_jd = floor(min(df_report['JD']))
+                    rows_to_keep = ((df_report['JD'] < floor_jd + min_jd_fract)|\
+                                     (df_report['JD'] > floor_jd + max_jd_fract))
+                    df_report = df_report[rows_to_keep]
+                    rows_after = len(df_report)
+                    print('Omitted fractional JD range:', '.4f'.format(min_jd_fract), 'to',
+                          '.4f'.format(max_jd_fract), '=',
+                          str(rows_before - rows_after), 'observations.')
+
+        # Add check-star names and mags  as new columns (look up from self.df_transformed):
+        df_checks = ((self.df_transformed.copy())[self.df_transformed['StarType'] == 'Check'])\
+            [['JD_mid', 'StarID', 'TransformedMag']]
+        df_checks.rename(columns={'JD_mid': 'JD', 'StarID': 'CheckName',
+                                  'TransformedMag': 'CheckMag'}, inplace=True)
+        df_report = pd.merge(left=df_report, right=df_checks, how='left', on='JD')
+        df_report.index = df_report['Serial']
+
+        # Apply comp-star names and mags:
+        df_comps = self.df_comp_mags[['Serial', 'JD_mid', 'StarID', 'Filter']].copy()
+        df_comps['ObsMag'] = self.df_comp_mags['EstimatedMag']
+        report_jds = df_report['JD'].drop_duplicates().sort_values()
+        for this_jd in report_jds:
+            df_comps_this_jd = df_comps[df_comps['JD_mid'] == this_jd]
+            n_comps_this_jd = len(df_comps_this_jd)
+            rows_to_update = (df_report['JD'] == this_jd)
+            df_report.loc[rows_to_update, 'NComps'] = n_comps_this_jd
+            if n_comps_this_jd <= 0:
+                print('>>>>> No comp stars in model for JD = ', this_jd)
+                return None
+            if n_comps_this_jd > 1:
+                # 'Ensemble' photometry case:
+                df_report.loc[rows_to_update, 'CompName'] = 'ENSEMBLE'  # 'CompMag' remains NA.
+                df_report.loc[rows_to_update, 'Notes'] += ' / ' + str(n_comps_this_jd) + ' comps'
+            else:
+                # Single comp-star case:
+                df_report.loc[rows_to_update, 'CompName'] = (df_comps_this_jd['StarID']).iloc[0]
+                df_report.loc[rows_to_update, 'CompMag'] = (df_comps_this_jd['ObsMag']).iloc[0]
+                # df_report.loc[rows_to_update, 'Notes'] += ' / 1 comp'
+
+        # Nested function for convenience:
+        def all_same(list_or_series):
+            this_list = list(list_or_series)
+            return this_list.count(this_list[0]) == len(this_list)
+
+        # Apply #COMBINE directives last (& verify check and comp stars are in fact associated):
+        combine_lines = [line for line in lines if line.startswith('#COMBINE')]
+        for this_line in combine_lines:
+            raw_parms, warning_lines = _get_line_parms(this_line, '#COMBINE', True, 1, None)
+            if warning_lines is not None:
+                print('>>>>> Can\'t parse line:', warning_lines)
+                continue
+            else:
+                serials_to_combine = [int(rp) for rp in raw_parms if int(rp) >= 1]
+                df_combine = df_report[df_report['Serial'].isin(serials_to_combine)]
+                # Verify that user-selected combine obs are in fact eligible to be combined:
+                if len(df_combine) <= 1:
+                    print('>>>>> Fewer than 2 obs to combine for line: \'' + this_line + '\'')
+                    continue  # skip this #COMBINE line.
+                if not all_same(df_combine['TargetName']):
+                    print('>>>>> Non-uniform target names for line: \'' + this_line +
+                          '\'...Combine is skipped.')
+                    continue
+                if not all_same(df_combine['Filter']):
+                    print('>>>>> Non-uniform Filter for line: \'' + this_line +
+                          '\'...Combine is skipped.')
+                    continue
+                if not all_same(df_combine['CompName']):
+                    print('>>>>> Non-uniform Comp Names for line: \'' + this_line +
+                          '\'...Combine is skipped.')
+                    continue
+                real_check_names = [cn for cn in df_combine['CheckName'] if not np.isnan(cn)]
+                if len(real_check_names) >= 2:
+                    if not all_same(real_check_names):
+                        print('>>>>> Non-uniform Check Stars for line: \'' + this_line +
+                              '\'...Combine is skipped.')
+                        continue
+                if not all_same(df_combine['Chart']):
+                    print('>>>>> Non-uniform Chart IDs for line: \'' + this_line +
+                          '\'...Combine is skipped.')
+                    continue
+                jd = df_combine['JD'].astype(np.float64)
+                if max(jd) - min(jd) > 1.0 / 24.0:  # one hour
+                    print('>>>>> Range of JD times is too large for line: \'' + this_line +
+                          '\'...Combine is skipped.')
+                    continue
+                airmass = df_combine['Airmass'].astype(np.float64)
+                if max(airmass) - min(airmass) > 0.400:
+                    print('>>>>> Range of Airmasses is too large to combine for line: \'' +
+                          this_line + '\'...Combine is skipped.')
+                    continue
+
+            # This #COMBINE line has passed all the tests, now execute it:
+            df_new = df_combine.iloc[0:1].copy()  # a 1-row df; will combine rows into this.
+            serial_to_replace = df_new['Serial'].iloc[0]  # scalar
+            serials_to_delete = df_combine.loc[df_combine['Serial'] != serial_to_replace, 'Serial']
+            # TODO: Consider weighted mean for combinations (w/limits on differences in weights?).
+            df_new['JD'] = df_combine['JD'].astype(np.float64).mean()
+            df_new['Mag'] = df_combine['Mag'].mean()
+            n_combine = len(df_combine)
+            # Instrument Mag sigmas are independent.
+            inst_mag_sigma = sqrt(df_combine['InstMagSigma'].
+                                  clip_lower(0.001).pow(2).mean()) / sqrt(n_combine)
+            # Model sigma is uniform, but not independent and so not decreased by multiple images.
+            model_sigma = df_combine['ModelSigma'].iloc[0]  # uniform across images to combine.
+            # Cirrus_sigma ~ independent if no extreme outlier comp stars (which would correlate).
+            cirrus_sigma = sqrt(df_combine['CirrusSigma'].
+                                clip_lower(0.001).pow(2).mean()) / sqrt(n_combine)
+            df_new['InstMagSigma'] = inst_mag_sigma
+            df_new['ModelSigma'] = model_sigma
+            df_new['CirrusSigma'] = cirrus_sigma
+            df_new['TotalSigma'] = sqrt(model_sigma**2 + cirrus_sigma**2 + inst_mag_sigma**2)
+            df_new['CheckMag'] = df_combine['CheckMag'].mean()
+            df_new['NComps'] = df_combine['NComps'].min()
+            df_new['Airmass'] = df_combine['Airmass'].mean()
+            df_new['Notes'] = str(n_combine) + ' obs  >= ' + \
+                str(df_new['NComps'].iloc[0]) + ' comps'
+            df_report.update(df_new)
+            df_report.drop(serials_to_delete, inplace=True)  # drop rows by index
+            print('Combination of Serials ' + ' '.join(df_combine['Serial'].astype(str)) +
+                  ': done.')
+        return df_report
 
 
 class TransformModel:
@@ -1000,7 +1298,7 @@ class TransformModel:
         self._build_output()
 
     def _make_and_curate_model_dataframe(self, fovs_to_include):
-        df, warning_lines = apply_omit_txt(self.an_top_directory, self.an_rel_directory)
+        df, warning_lines = _apply_omit_txt(self.an_top_directory, self.an_rel_directory)
         master_fov_list = df['FOV'].drop_duplicates().tolist()
 
         # Interpret fovs_to_include, ultimately yielding fov_list:
@@ -1010,7 +1308,8 @@ class TransformModel:
             if fovs_to_include.lower() == 'all':
                 fov_list = master_fov_list.copy()
             elif fovs_to_include.lower() in ['standard', 'standards']:
-                fov_list = [fn for fn in master_fov_list if Fov(fn).target_type.lower() == 'standard']
+                fov_list = [fn for fn in master_fov_list
+                            if Fov(fn).target_type.lower() == 'standard']
             else:
                 fov_list = [fn for fn in master_fov_list if fn in [fovs_to_include]]
         else:
@@ -1162,7 +1461,7 @@ def get_df_master(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
     return df_master
 
 
-def apply_omit_txt(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
+def _apply_omit_txt(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
     """
     Gets df_master and omit.txt and returns filtered DataFrame.
     :param an_top_directory: [string]
@@ -1177,7 +1476,7 @@ def apply_omit_txt(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
 
     fullpath = os.path.join(an_top_directory, an_rel_directory, 'Photometry', 'omit.txt')
     if not os.path.exists(fullpath):
-        write_omit_txt_stub(an_top_directory, an_rel_directory)
+        _write_omit_txt_stub(an_top_directory, an_rel_directory)
         return df_master.copy(), []  # no change or warnings, since omit.txt absent
 
     with open(fullpath) as f:
@@ -1192,7 +1491,7 @@ def apply_omit_txt(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
         warning_line = None
         rows_to_omit = len(df_filtered) * [False]  # default to be overwritten
         if line.startswith('#OBS'):
-            parms, warning_line = get_line_parms(line, "#OBS", 2, 2)
+            parms, warning_line = _get_line_parms(line, "#OBS", False, 2, 2)
             if parms is not None:
                 fits_file_name = parms[0] + '.fts'
                 star_id = parms[1]
@@ -1201,7 +1500,7 @@ def apply_omit_txt(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
             else:
                 warning_lines.append(warning_line)
         elif line.startswith('#STAR'):
-            parms, warning_line = get_line_parms(line, "#STAR", 2, 3)
+            parms, warning_line = _get_line_parms(line, "#STAR", False, 2, 3)
             if parms is not None:
                 fov = parms[0]
                 star_id = parms[1]
@@ -1213,28 +1512,27 @@ def apply_omit_txt(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
             else:
                 warning_lines.append(warning_line)
         elif line.startswith('#SERIAL'):
-            raw_parms, warning_line = get_line_parms(line, "#SERIAL", 1, None)
-            if raw_parms is not None:
-                parms = ' '.join(raw_parms).split()  # resep. on whitespace;  no empty elements
+            parms, warning_line = _get_line_parms(line, "#SERIAL", True, 1, None)
+            if parms is not None:
                 serials_to_omit = [int(p) for p in parms]
                 rows_to_omit = df_filtered['Serial'].isin(serials_to_omit)
             else:
                 warning_lines.append(warning_line)
         elif line.startswith('#IMAGE'):
-            parms, warning_line = get_line_parms(line, "#IMAGE", 1, 1)
+            parms, warning_line = _get_line_parms(line, "#IMAGE", False, 1, 1)
             if parms is not None:
                 image_to_omit = parms[0] + '.fts'
                 rows_to_omit = df_filtered['FITSfile'] == image_to_omit
             else:
                 warning_lines.append(warning_line)
         elif line.startswith('#JD'):
-            parms, warning_line = get_line_parms(line, "#JD", 2, 2)
+            parms, warning_line = _get_line_parms(line, "#JD", True, 2, 2)
             if parms is not None:
                 jd_floor = floor(min(df_filtered['JD_mid']))
                 jd_start = float(parms[0]) + jd_floor
                 jd_end = float(parms[1]) + jd_floor
                 rows_to_omit = (df_filtered['JD_mid'] >= jd_start) & \
-                          (df_filtered['JD_mid'] <= jd_end)
+                    (df_filtered['JD_mid'] <= jd_end)
             else:
                 warning_lines.append(warning_line)
         else:
@@ -1254,7 +1552,7 @@ def apply_omit_txt(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
     return df_filtered, warning_lines
 
 
-def write_omit_txt_stub(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
+def _write_omit_txt_stub(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
     """
     Will NOT overwrite existing omit.txt.
     """
@@ -1284,7 +1582,7 @@ def write_omit_txt_stub(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None
     return lines_written
 
 
-def curate_stare_comps(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None, df_in=None):
+def _curate_stare_comps(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None, df_in=None):
     """
     Using user's stare_comps.txt in this an_rel_directory, 
        remove unwanted (stare) comp observations from further use.
@@ -1297,7 +1595,7 @@ def curate_stare_comps(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None,
     # Read & parse control file stare_comps.txt:
     fullpath = os.path.join(an_top_directory, an_rel_directory, 'Photometry', 'stare_comps.txt')
     if not os.path.exists(fullpath):
-        write_stare_comps_txt_stub(an_top_directory, an_rel_directory)
+        _write_stare_comps_txt_stub(an_top_directory, an_rel_directory)
         return None  # no change or warnings as stare_comps.txt absent
     with open(fullpath) as f:
         lines = f.readlines()
@@ -1311,7 +1609,8 @@ def curate_stare_comps(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None,
     for line in lines:
         warning_line = None
         if line.startswith("#COMPS"):
-            parms, warning_line = get_line_parms(line, "#COMPS", 3, None)
+            # Do not split on spaces, because FOV name could contain spaces.
+            parms, warning_line = _get_line_parms(line, "#COMPS", False, 3, None)
             if parms is not None:
                 fov_name = parms[0]
                 filter_name = parms[1]
@@ -1329,12 +1628,13 @@ def curate_stare_comps(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None,
     return df, warning_lines
 
 
-def write_stare_comps_txt_stub(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
+def _write_stare_comps_txt_stub(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
     """
     Will NOT overwrite existing stare_comps.txt file.
     """
     lines = [';----- This is stare_comps.txt for AN directory ' + an_rel_directory,
-             ';----- Select comp stars (by FOV, filter, StarID) from input to predict_fixed_only()',
+             ';----- Select comp stars (by FOV, filter, StarID) from input to '
+             '_predict_fixed_only()',
              ';----- Example directive line:',
              ';',
              ';#COMPS  Obj, V, 132, 133 144    ; to KEEP from FOV \'Obj\': '
@@ -1353,7 +1653,7 @@ def write_stare_comps_txt_stub(an_top_directory=AN_TOP_DIRECTORY, an_rel_directo
     return lines_written
 
 
-def write_report_map_stub(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
+def _write_report_map_stub(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
     """
     Will NOT overwrite existing report.map file.
     """
@@ -1379,8 +1679,24 @@ def write_report_map_stub(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=No
     return lines_written
 
 
-def get_line_parms(line, directive, nparms_min=None, nparms_max=None):
-    line_parms = [p.strip() for p in line[(len(directive)):].split(',')]
+def _get_line_parms(line, directive, sep_by_spaces=False, nparms_min=None, nparms_max=None):
+    """
+    Take directive line and return parms and possible warning text lines.
+    :param line: the line to parse [string]
+    :param directive: the directive [string, e.g., '#SERIAL']
+    :param sep_by_spaces: False if parms may include spaces [e.g., '#IMAGE' and '#TARGET',
+        which may include spaces, e.g., 'ST Tri';
+        True if spaces may separate parms [e.g., '#SERIAL' and '#COMBINE' directives]  [bool]
+    :param nparms_min:  min number of parms to accept, or None to ignore [int]
+    :param nparms_max:  max number of parms to accept, or None to ignore [int]
+    :return: 2-tuple of parm list [list of strings] and warning lines [list of strings]
+    """
+    directive_text = line.split(';')[0].strip()  # remove any comment text
+    if directive_text.startswith(directive) is False:
+        return None, 'Line does not begin with correct directive: \'' + line + '\'.'
+    line_parms = [p.strip() for p in directive_text[(len(directive)):].split(',')]
+    if sep_by_spaces is True:
+        line_parms = ' '.join(line_parms).split()
     valid_num_line_parms = True  # until falsified
     if nparms_min is not None:  # ignore nparms_min if None.
         valid_num_line_parms = valid_num_line_parms & (len(line_parms) >= nparms_min)
@@ -1392,27 +1708,19 @@ def get_line_parms(line, directive, nparms_min=None, nparms_max=None):
         return None, 'Line has wrong number of parameters: \'' + line + '\'.'
 
 
-    # def get_transform_preferences(self, instrument):
-    #     # transform_preferences: for each observation filter, one or more filter pairs, in
-    #     #    descending order of preference, used to make transform corrections, in the form
-    #     #    {'V':['V-I', 'B-V'], 'R':['V-I', 'V-R', 'B-V'], 'I':['V-I', 'R-I', 'V-R', 'B-V']}
-    #     #    None -> get from Instrument object [dict of {str:list of strings}]
-    #     pass
-
-
-def impute_target_ci(df_predictions_checks_targets, ci_filters, transforms):
+def _impute_target_ci(df_predictions_checks_targets, ci_filters, transforms):
     """
     Impute Color Index value for each target and check star, by time-interpolation from known
        (comp) Color Index values. This will REPLACE CI values for Target and Check stars
        (which probably had been set to zero for targets but catalog CI for checks).
-       CALLS extract_ci_points() to get list of ci_filter observations to interpolate.
+       CALLS _extract_ci_points() to get list of ci_filter observations to interpolate.
     :param df_predictions_checks_targets: [pandas DataFrame] 
     :param ci_filters: ['V', 'I'] for the time being (May 2017).
     :param transforms: transforms for all skymodels [dict filter:transform(V-I)]
     :return: updated_df_predictions_checks_targets: updated with CI color index for targets 
     """
-    JD_floor = floor(min(df_predictions_checks_targets['JD_mid']))
-    df_predictions_checks_targets['JD_num'] = df_predictions_checks_targets['JD_mid'] - JD_floor
+    jd_floor = floor(min(df_predictions_checks_targets['JD_mid']))
+    df_predictions_checks_targets['JD_num'] = df_predictions_checks_targets['JD_mid'] - jd_floor
 
     # Only target & check stars:
     target_and_check_rows = df_predictions_checks_targets['StarType'].isin(['Target', 'Check'])
@@ -1425,9 +1733,9 @@ def impute_target_ci(df_predictions_checks_targets, ci_filters, transforms):
     for this_star_id in star_ids_targets_checks:
         rows_this_star_id = df_predictions_checks_targets['ModelStarID'] == this_star_id
         df_star_id = (df_predictions_checks_targets[rows_this_star_id])\
-            [['Serial', 'ModelStarID', 'Filter', 'JD_num', 'CI', 'UntransformedMag']] \
+            [['Serial', 'ModelStarID', 'Filter', 'JD_num', 'CI', 'UntransformedMag']]\
             .sort_values(by='JD_num')
-        df_ci_points = extract_ci_points(df_star_id, ci_filters, transforms)
+        df_ci_points = _extract_ci_points(df_star_id, ci_filters, transforms)
         if len(df_ci_points) <= 0:
             df_predictions_checks_targets.loc[rows_this_star_id, 'CI'] = None
             print(">>>>> ModelStarID=", this_star_id,
@@ -1469,13 +1777,14 @@ def impute_target_ci(df_predictions_checks_targets, ci_filters, transforms):
     return df_predictions_checks_targets
 
 
-def extract_ci_points(df_star_id, ci_filters, transforms):
+def _extract_ci_points(df_star_id, ci_filters, transforms):
     """
-    
+    Derive credible raw Color Index points from continguous observations in the Color Index filters.
     :param df_star_id: rows from df_predictions holding one ModelStarID [pandas DataFrame] 
-    :param ci_filters: 
-    :param transforms: 
-    :return: small dataframe of JD and Color Index for this star.
+    :param ci_filters: exactly two filters, in order, defining Color Index [e.g., ['V','I']]
+    :param transforms: transforms in the ci_filters base, from which the relevant transform is
+               extracted [dict, e.g., {'V': 0.025, 'I': -0.044} ]
+    :return: very small dataframe of JD and Color Index for this star.
     """
     max_diff_jd = 60.0 / (24 * 60)  # 60 minutes in days; max time between adjacent obs for color
     rows_to_keep = df_star_id['Filter'].isin(ci_filters)
@@ -1494,7 +1803,7 @@ def extract_ci_points(df_star_id, ci_filters, transforms):
             if (jd[ind+1] - jd[ind]) < max_diff_jd:  # ...and if not too different in time
                 new_point_jd = (jd[ind+1] + jd[ind]) / 2.0
                 new_point_ci = \
-                    solve_for_real_ci(
+                    _solve_for_real_ci(
                         untransformed_mags={filter[ind]: u_mag[ind], filter[ind+1]: u_mag[ind+1]},
                         ci_filters=ci_filters,
                         transforms=transforms)
@@ -1503,7 +1812,7 @@ def extract_ci_points(df_star_id, ci_filters, transforms):
     return df_ci_point
 
 
-def solve_for_real_ci(untransformed_mags, ci_filters, transforms):
+def _solve_for_real_ci(untransformed_mags, ci_filters, transforms):
     """
     Solves for best estimate of real (transformed) Color Index.
     Dicts are passed (unordered); this function safely deduces the sign of the Color Index.
@@ -1521,7 +1830,7 @@ def solve_for_real_ci(untransformed_mags, ci_filters, transforms):
     return real_ci
 
 
-def write_aavso_report_map_stub(an_top_directory, an_rel_directory):
+def _write_aavso_report_map_stub(an_top_directory, an_rel_directory):
     lines = [";----- This is report_map.txt for AN folder " + an_rel_directory,
              ";----- Use this file to omit and/or combine target observations from AAVSO report.",
              ";----- Example directive lines:",
@@ -1531,7 +1840,7 @@ def write_aavso_report_map_stub(an_top_directory, an_rel_directory):
              ";#SERIAL  34 44,129  32  1202 ; to omit these 5 Serial numbers from AAVSO report.",
              ";#COMBINE  80,128 ; to combine (average) these 2 Serial numbers within AAVSO report.",
              ";----- Add your directive lines:",
-             ";" ]
+             ";"]
     lines = [line + '\n' for line in lines]
     fullpath = os.path.join(an_top_directory, an_rel_directory, 'Photometry',
                             'aavso_report_map.txt')
@@ -1550,7 +1859,7 @@ def stare_comps(df_transformed, fov=None, star_id=None, this_filter=None):
     df = df[df['StarID'] == star_id]
     df = df[df['Filter'] == this_filter]
     joined_comp_stars = ','.join(df['CompIDsUsed'])
-    comp_stars_available = pd.Series(joined_comp_stars.split(',')).drop_duplicates()  # = R var 'set'
+    comp_stars_available = pd.Series(joined_comp_stars.split(',')).drop_duplicates()
     df_comps = pd.DataFrame({'CompID': comp_stars_available, 'IsIncluded': False})
     result_lines = ["EDIT file 'pre-predict' with one of the following lines:"]
     if len(df) <= 1:
@@ -1580,4 +1889,3 @@ def stare_comps(df_transformed, fov=None, star_id=None, this_filter=None):
                     ', '.join(df_comps.loc[df_comps['IsIncluded'], 'CompID'])
         result_lines.append(this_line)
     return result_lines
-

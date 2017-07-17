@@ -13,6 +13,21 @@ PHOTRIX_ROOT_DIRECTORY = os.path.dirname(os.path.dirname(os.path.abspath(__file_
 TEST_TOP_DIRECTORY = os.path.join(PHOTRIX_ROOT_DIRECTORY, "test")
 
 
+def test__get_line_parms():
+    assert process._get_line_parms('#SERIAL  12, 34 44 , 42  ;  this is a comment',
+                                   '#SERIAL', True, 1, None) == (['12', '34', '44', '42'], None)
+    assert process._get_line_parms('#SERIAL  ST Tri-0000-V  ;  this is a comment',
+                                   '#SERIAL', False, 1, None) == (['ST Tri-0000-V'], None)
+    assert process._get_line_parms('#JD  0.25 0.5 ;  this is a comment',
+                                   '#JD', True, 2, 2) == (['0.25', '0.5'], None)
+    parms = process._get_line_parms('#JD  0.3  ;  this is a comment', '#JD', True, 2, 2)
+    assert parms[0] is None
+    assert 'wrong number of parameters: ' in parms[1]
+    parms = process._get_line_parms('#JX  0.3  ;  this is a comment', '#JD', True, 2, 2)
+    assert parms[0] is None
+    assert 'does not begin with correct directive: ' in parms[1]
+
+
 def test__write_omit_txt_stub():
     an_top_directory = TEST_TOP_DIRECTORY
     an_rel_directory = '$an_for_test'
@@ -24,8 +39,8 @@ def test__write_omit_txt_stub():
     if os.path.exists(fullpath):
         os.remove(fullpath)
     assert os.path.exists(fullpath) is False
-    lines_written = process.write_omit_txt_stub(an_top_directory=TEST_TOP_DIRECTORY,
-                                                an_rel_directory=an_rel_directory)
+    lines_written = process._write_omit_txt_stub(an_top_directory=TEST_TOP_DIRECTORY,
+                                                 an_rel_directory=an_rel_directory)
     assert os.path.exists(fullpath) is True
     with open(fullpath, 'r') as f:
         lines = f.readlines()
@@ -36,8 +51,8 @@ def test__write_omit_txt_stub():
     shutil.move(savepath, fullpath)  # restore saved copy.
 
     # Case: omit.txt does already exist (written just above):
-    lines_written = process.write_omit_txt_stub(an_top_directory=TEST_TOP_DIRECTORY,
-                                                an_rel_directory=an_rel_directory)
+    lines_written = process._write_omit_txt_stub(an_top_directory=TEST_TOP_DIRECTORY,
+                                                 an_rel_directory=an_rel_directory)
     assert os.path.exists(fullpath) is True
     assert lines_written == 0
     with open(fullpath, 'r') as f:
@@ -57,8 +72,8 @@ def test__write_stare_comps_txt_stub():
     if os.path.exists(fullpath):
         os.remove(fullpath)
     assert os.path.exists(fullpath) is False
-    lines_written = process.write_stare_comps_txt_stub(an_top_directory=TEST_TOP_DIRECTORY,
-                                                       an_rel_directory=an_rel_directory)
+    lines_written = process._write_stare_comps_txt_stub(an_top_directory=TEST_TOP_DIRECTORY,
+                                                        an_rel_directory=an_rel_directory)
     assert os.path.exists(fullpath) is True
     assert lines_written == 8
     with open(fullpath, 'r') as f:
@@ -69,8 +84,8 @@ def test__write_stare_comps_txt_stub():
     shutil.move(savepath, fullpath)  # restore saved copy.
 
     # Case: stare_comps.txt does already exist (as written just above):
-    lines_written = process.write_stare_comps_txt_stub(an_top_directory=TEST_TOP_DIRECTORY,
-                                                       an_rel_directory=an_rel_directory)
+    lines_written = process._write_stare_comps_txt_stub(an_top_directory=TEST_TOP_DIRECTORY,
+                                                        an_rel_directory=an_rel_directory)
     assert os.path.exists(fullpath) is True
     assert lines_written == 0
     with open(fullpath, 'r') as f:
@@ -100,8 +115,8 @@ def test_apply_omit_txt():
                             an_rel_directory=an_rel_directory,
                             directive_lines=directive_lines)
         # Make & return output data:
-        df_filtered, warning_lines = process.apply_omit_txt(an_top_directory=TEST_TOP_DIRECTORY,
-                                                            an_rel_directory=an_rel_directory)
+        df_filtered, warning_lines = process._apply_omit_txt(an_top_directory=TEST_TOP_DIRECTORY,
+                                                             an_rel_directory=an_rel_directory)
         return df_filtered, warning_lines
 
     # Case: #OBS directives:
@@ -181,8 +196,8 @@ def test_class_skymodel():
     fullpath = os.path.join(an_top_directory, an_rel_directory, 'Photometry', 'omit.txt')
 
     # Write new omit.txt with test directive lines:
-    process.write_omit_txt_stub(an_top_directory=TEST_TOP_DIRECTORY,
-                                an_rel_directory=an_rel_directory)
+    process._write_omit_txt_stub(an_top_directory=TEST_TOP_DIRECTORY,
+                                 an_rel_directory=an_rel_directory)
     with open(fullpath) as f:
         lines = f.readlines()
         directive_lines = [line + '\n' for line in directive_lines]
@@ -221,13 +236,13 @@ def test_class_skymodel():
     assert modelV.transform ==\
         (Instrument(modelV.instrument_name)).filters[modelV.filter]['transform']['V-I']
     assert modelV.extinction == Site(modelV.site_name).extinction[modelV.filter]
-    assert modelV.vignette == pytest.approx(-0.00578, abs=0.00005)
+    assert modelV.vignette == pytest.approx(-0.00586, abs=0.0001)  # changed
     assert modelV.x == 0
     assert modelV.y == 0
-    assert modelV.sky_bias == pytest.approx(0.6630, abs=0.0001)
+    assert modelV.sky_bias == pytest.approx(0.6653, abs=0.001)
     assert modelV.log_adu == 0
-    assert modelV.sigma == pytest.approx(0.0136, abs=0.0005)
-    # Test SkyModel.predict_fixed_only():
+    assert modelV.sigma == pytest.approx(0.0143, abs=0.001)
+    # Test SkyModel._predict_fixed_only():
     df_input = pd.DataFrame({'Serial': [9997, 9998, 9999],
                              'SkyBias': [0.55, 0.9, 0.5454],
                              'Vignette': [0.322, 0, 1],
@@ -237,13 +252,13 @@ def test_class_skymodel():
                                           'Std_SA35-0001-V.fts'],
                              'InstMag': [-7.68043698, -10.7139893, -6.500945076]},
                             index=['9997a', '9998a', '9999a'])
-    expected_star_mags = [12.34, 9.2, 13.333]  # ideal CatMags
-    mag_predictions_fixed_only = modelV.predict_fixed_only(df_input)
+    expected_star_mags = [12.3406, 9.1917, 13.3358]  # ideal CatMags
+    mag_predictions_fixed_only = modelV._predict_fixed_only(df_input)
     random_effect_values = modelV.df_image.loc[df_input['FITSfile'], 'Value']
     # Remember: we SUBTRACT random effects (because original fit was
     #    InstMag ~ CatMag + Random Effects + offsets + fixed effects:
     mag_predictions = mag_predictions_fixed_only.values - random_effect_values.values
-    assert list(mag_predictions) == pytest.approx(expected_star_mags)
+    assert list(mag_predictions) == pytest.approx(expected_star_mags, abs=0.0005)
 
     # Case 2: Model WITH log_adu (CCD nonlinearity) term.
     modelV = process.SkyModel(an_top_directory=TEST_TOP_DIRECTORY,
@@ -276,13 +291,13 @@ def test_class_skymodel():
     assert modelV.transform ==\
         (Instrument(modelV.instrument_name)).filters[modelV.filter]['transform']['V-I']
     assert modelV.extinction == Site(modelV.site_name).extinction[modelV.filter]
-    assert modelV.vignette == pytest.approx(-0.00053, abs=0.00005)
+    assert modelV.vignette == pytest.approx(-0.00027, abs=0.0001)
     assert modelV.x == 0
     assert modelV.y == 0
-    assert modelV.sky_bias == pytest.approx(0.5506, abs=0.0001)
-    assert modelV.log_adu == pytest.approx(-0.0272, abs=0.0001)
-    assert modelV.sigma == pytest.approx(0.0132, abs=0.0005)
-    # Test SkyModel.predict_fixed_only():
+    assert modelV.sky_bias == pytest.approx(0.5456, abs=0.001)
+    assert modelV.log_adu == pytest.approx(-0.0290, abs=0.001)
+    assert modelV.sigma == pytest.approx(0.0136, abs=0.001)
+    # Test SkyModel._predict_fixed_only():
     df_input = pd.DataFrame({'Serial': [9997, 9998, 9999],
                              'SkyBias': [0.55, 0.9, 0.5454],
                              'LogADU': [3.1, 3.5, 3.22],
@@ -293,28 +308,28 @@ def test_class_skymodel():
                                           'Std_SA35-0001-V.fts'],
                              'InstMag': [-7.68043698, -10.7139893, -6.500945076]},
                             index=['9997a', '9998a', '9999a'])
-    expected_star_mags = [12.3753, 9.2873, 13.3713]  # ideal CatMags
-    mag_predictions_fixed_only = modelV.predict_fixed_only(df_input)
+    expected_star_mags = [12.3782, 9.2846, 13.3766]  # ideal CatMags
+    mag_predictions_fixed_only = modelV._predict_fixed_only(df_input)
     random_effect_values = modelV.df_image.loc[df_input['FITSfile'], 'Value']
     # Remember: we SUBTRACT random effects (because original fit was
     #    InstMag ~ CatMag + Random Effects + offsets + fixed effects:
     mag_predictions = mag_predictions_fixed_only.values - random_effect_values.values
-    assert list(mag_predictions) == pytest.approx(expected_star_mags, abs=0.0002)
+    assert list(mag_predictions) == pytest.approx(expected_star_mags, abs=0.001)
 
 
 def test_curate_stare_comps():
     an_top_directory = TEST_TOP_DIRECTORY
     an_rel_directory = '$an_for_test'
 
-    # Nested function
-    def do_apply_stare_comps_lines(directive_lines):
+    # Nested function for testing:  ----------------------------------------------
+    def _do_apply_stare_comps_lines(directive_lines):
         filename = 'stare_comps.txt'
         fullpath = os.path.join(an_top_directory, an_rel_directory, 'Photometry', filename)
 
         # Write new stare_comps.txt with test directive lines:
         os.remove(fullpath)
-        process.write_stare_comps_txt_stub(an_top_directory=TEST_TOP_DIRECTORY,
-                                           an_rel_directory=an_rel_directory)
+        process._write_stare_comps_txt_stub(an_top_directory=TEST_TOP_DIRECTORY,
+                                            an_rel_directory=an_rel_directory)
         with open(fullpath) as f:
             lines = f.readlines()
             directive_lines = [line + '\n' for line in directive_lines]
@@ -322,19 +337,20 @@ def test_curate_stare_comps():
         with open(fullpath, 'w') as f:
             f.writelines(lines)
 
-        # Make output dataframe (apply_omit_txt():
-        df_eligible_obs, _ = process.apply_omit_txt(an_top_directory=TEST_TOP_DIRECTORY,
-                                                    an_rel_directory=an_rel_directory)
-        df_curated_obs, warning_lines = process.curate_stare_comps(
+        # Make output dataframe (_apply_omit_txt():
+        df_eligible_obs, _ = process._apply_omit_txt(an_top_directory=TEST_TOP_DIRECTORY,
+                                                     an_rel_directory=an_rel_directory)
+        df_curated_obs, warning_lines = process._curate_stare_comps(
             an_top_directory=TEST_TOP_DIRECTORY,
             an_rel_directory=an_rel_directory,
             df_in=df_eligible_obs)
         return df_eligible_obs, df_curated_obs, warning_lines
+    # -------------------------------------------------------------------------------
 
     # Case: #COMPS directive:
     #   (These are NOT the comps originally removed in processing this AN;
     #       they are set to make a better test.)
-    df_eligible_obs, df_curated_obs, warning_lines = do_apply_stare_comps_lines(
+    df_eligible_obs, df_curated_obs, warning_lines = _do_apply_stare_comps_lines(
         ['#COMPS  V1023 Her , V , 117,120,123  ;  one FOV, keep 3 comps',
          '#CRAZY_DIRECTIVE  XXX,999     ;  raise warning'
          ])
@@ -361,7 +377,7 @@ def test_solve_for_real_ci():
     transforms = {'I': -0.044, 'V': 0.025}
     ideal_ci = ideal_mags['V'] - ideal_mags['I']
     untransformed_mags = {cif: ideal_mags[cif] + transforms[cif] * ideal_ci for cif in ci_filters}
-    real_ci = process.solve_for_real_ci(untransformed_mags, ci_filters, transforms)
+    real_ci = process._solve_for_real_ci(untransformed_mags, ci_filters, transforms)
     assert real_ci == pytest.approx(ideal_ci, abs=0.000001)
 
 
@@ -375,8 +391,8 @@ def test_extract_ci_points():
                                'UntransformedMag': [12.8, 10.2, 8.3, 8.2]})
     ci_filters = ['V', 'I']
     transforms = {'V': 0.025, 'R': -0.08, 'I': 0.052, 'XX': 1.0}
-    df_result = process.extract_ci_points(df_star_id=df_star_id, ci_filters=ci_filters,
-                                          transforms=transforms)
+    df_result = process._extract_ci_points(df_star_id=df_star_id, ci_filters=ci_filters,
+                                           transforms=transforms)
     assert len(df_result) == 1
     assert df_result.loc[0, 'JD_num'] == \
            (df_star_id.loc[0, 'JD_num'] + df_star_id.loc[2, 'JD_num']) / 2.0
@@ -391,8 +407,8 @@ def test_extract_ci_points():
                                'UntransformedMag': [12.8, 10.2, 8.3, 8.2, 12.6, 8.1, 12.5, 10.11]})
     ci_filters = ['V', 'I']
     transforms = {'V': 0.025, 'R': -0.08, 'I': 0.052, 'XX': 1.0}
-    df_result = process.extract_ci_points(df_star_id=df_star_id, ci_filters=ci_filters,
-                                          transforms=transforms)
+    df_result = process._extract_ci_points(df_star_id=df_star_id, ci_filters=ci_filters,
+                                           transforms=transforms)
     assert len(df_result) == 4
     assert list(df_result['JD_num']) == pytest.approx([0.67, 0.695, 0.705, 0.715], abs=0.00001)
     untransformed_ci = [12.8-8.3, 12.6-8.2, 12.6-8.1, 12.5-8.1]
@@ -452,7 +468,7 @@ def test_impute_target_ci():
     df_predictions_checks_targets.index = df_predictions_checks_targets['Serial']
     ci_filters = ['V', 'I']
     transforms = {'V': 0.025, 'R': -0.08, 'I': 0.052, 'XX': 1.0}
-    df_updated = process.impute_target_ci(df_predictions_checks_targets, ci_filters, transforms)
+    df_updated = process._impute_target_ci(df_predictions_checks_targets, ci_filters, transforms)
     factor = 1 / (1 + transforms['V'] - transforms['I'])  # for solving for real CI from obs CI
 
     # Test case: 1 CI point:
@@ -657,7 +673,7 @@ def test_class_predictionset():
     assert df_cirrus_effect_with_targets.loc['SS Gem-0003-I.fts', 'CompIDsUsed'] == '104,110,113,95'
     assert 'Std...' not in df_cirrus_effect_with_targets['Image']
 
-    # Test result df_transformed from compute_transformed_mags():
+    # Test result df_transformed from _compute_transformed_mags():
     expected_columns = set(['Serial', 'ModelStarID', 'FITSfile', 'StarID', 'Chart',
                             'Xcentroid', 'Ycentroid', 'InstMag', 'InstMagSigma', 'StarType',
                             'CatMag', 'CatMagError', 'Exposure', 'JD_mid', 'Filter',
@@ -669,8 +685,8 @@ def test_class_predictionset():
     assert set(ps.df_transformed.columns) == expected_columns
     assert ps.df_transformed.shape == (532, 36)
     assert list(ps.df_transformed['Serial'].iloc[[0, 10, 500]]) == [441, 332, 1589]
-    assert ps.df_transformed['TransformedMag'].sum() == pytest.approx(6411.828, abs=0.01)
-    assert ps.df_transformed['TotalSigma'].sum() == pytest.approx(10.03122, abs=0.0001)
+    assert ps.df_transformed['TransformedMag'].sum() == pytest.approx(6408.9, abs=1)  # changed
+    assert ps.df_transformed['TotalSigma'].sum() == pytest.approx(10.115, abs=0.01)
 
 
 def test_stare_comps():
@@ -782,6 +798,34 @@ def test_transform_model():
     assert tm.transform_value == pytest.approx(+0.077440, abs=0.0001)
 
 
+def test_predictionset_aavso_report():
+    an_top_directory = TEST_TOP_DIRECTORY
+    an_rel_directory = '$an_for_test'
+
+    # Ensure omit.txt and stare_comps.txt are set up before we start (no backups)
+    #    with directives used in original R processing of 20170504:
+    _overwrite_omit_txt(an_top_directory=an_top_directory, an_rel_directory=an_rel_directory)
+    _overwrite_stare_comps_txt(an_top_directory=an_top_directory, an_rel_directory=an_rel_directory)
+
+    # Construct skymodel objects:
+    skymodel_list = []
+    for test_filter in ['V', 'R', 'I']:
+        skymodel_this_filter = process.SkyModel(an_top_directory=an_top_directory,
+                                                an_rel_directory=an_rel_directory,
+                                                filter=test_filter,
+                                                fit_extinction=False, do_plots=False)
+        skymodel_list.append(skymodel_this_filter)
+
+    ps = process.PredictionSet(an_top_directory=an_top_directory,
+                               an_rel_directory='$an_for_test',
+                               instrument_name='Borea',
+                               site_name='DSW',
+                               max_inst_mag_sigma=0.05,
+                               skymodel_list=skymodel_list)
+    df_report = ps.aavso_report(write_file=True, return_df=True)
+
+    assert df_report.shape == (291, 17)
+
 
 # ---------------  INTERNAL TEST-HELPER FUNCTIONS ----------------------------------------------
 
@@ -822,7 +866,7 @@ def _overwrite_stare_comps_txt(an_top_directory, an_rel_directory, directive_lin
     #        comps removed (kept them all), but that's OK since a restrictive set was tested
     #        in test_stare_comps() above.)
     header = [';----- This is stare_comps.txt for AN directory ' + an_rel_directory,
-              ';----- Select comp stars (by FOV, filter, & StarID) from input to predict_fixed_only().',
+              ';----- Select comp stars (by FOV, filter, & StarID) from input to _predict_fixed_only().',
               ';----- Example directive line:',
               ';',
               ';#COMPS  Obj, V, 132, 133 144    ; to KEEP from FOV \'Obj\': '
