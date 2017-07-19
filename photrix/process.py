@@ -1,22 +1,27 @@
 import os
-from math import floor, sqrt
+from math import floor, sqrt, log10
 from datetime import datetime, timezone
+import shutil
 
 import numpy as np
 import pandas as pd
 from scipy.interpolate import UnivariateSpline
 import statsmodels.formula.api as smf
 
+from .image import FITS, Image
 from .user import Instrument, Site
-from .util import MixedModelFit, weighted_mean
+from .util import MixedModelFit, weighted_mean, jd_from_datetime_utc
 from .fov import Fov
 
 __author__ = "Eric Dose :: New Mexico Mira Project, Albuquerque"
 
-AN_TOP_DIRECTORY = 'J:/Astro/Images/C14'
-MIN_FWHM = 1.0
 THIS_SOFTWARE_VERSION = '2.0.0'  # as of 20170716
+AN_TOP_DIRECTORY = 'J:/Astro/Images/C14'
+FITS_REGEX_PATTERN = '^(.+)\.(f[A-Za-z]{2,3})$'
+MIN_FWHM = 1.0
 AAVSO_REPORT_DELIMITER = ','
+
+START_PROCESSING_HERE___________ = ''
 
 #######
 #
@@ -45,30 +50,346 @@ AAVSO_REPORT_DELIMITER = ','
 #    aavso_report(an_rel_directory='20170509', software_version='2.0.5')
 #    --> [upload to AAVSO]
 #    --> [LCG review; edit FOV files if needed]
+#    --> [check guiding exp times for possible FOV #CENTER (RaDec) adjustment]
 #
+#######
+# Regex pattern to match Ur FITS filenames (from ACP):
+#     r'^(.{3,}?)-S\d{3}-R\d{3}-C\d{3}-([a-zA-Z]{1,2}?)(_dupe-\d{1,4})?.f\w{1,2}'
+# Regex pattern to match photrix FITS filenames
+#     r'(.{3,}?)-\d{4}-([a-zA-Z]{1,2}?).f\w{1,2}'
 #######
 
 
-def precheck(an_rel_directory=None, instrument_name='Borea'):
+def start(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
     """
-    First check on new FITS files, at beginning of processing. Prints exceptions and summary stats.
+    First step in photrix processing pipeline.
+    Always starts with raw directory exactly as downloaded from telescope PC.
+    :param an_top_directory:
+    :param an_rel_directory:
+    :return: None
+    """
+    # Copy original files to \Ur as backup (immutable):
+    target_subdir = os.path.join(an_top_directory, an_rel_directory, 'Ur')
+    if not os.path.exists(target_subdir) and not os.path.isdir(target_subdir):
+        fits_subdir = os.path.join(an_top_directory, an_rel_directory)
+        shutil.copytree(fits_subdir, target_subdir)
+    else:
+        print('>>>>> Could not create \'' + target_subdir + '\' as backup. (Already exists?)')
+
+    # Move FITS to \Uncalibrated (not a full backup: some of these files may get Excluded):
+    target_subdir = os.path.join(an_top_directory, an_rel_directory, 'Uncalibrated')
+    if not os.path.exists(target_subdir) and not os.path.isdir(target_subdir):
+        fits_subdir = os.path.join(an_top_directory, an_rel_directory)
+        shutil.move(fits_subdir, target_subdir)
+    else:
+        print('>>>>> Could not create \'' + target_subdir + '\'. (Already exists?)')
+
+    # Make remaining needed subdirectories:
+    needed_subdirectories = ['Calibrated', 'Exclude', 'Photometry', 'FOV']
+    for subdir_name in needed_subdirectories:
+        new_subdir_path = os.path.join(an_top_directory, an_rel_directory, subdir_name)
+        if not os.path.exists(new_subdir_path) and not os.path.isdir(new_subdir_path):
+            os.mkdir(new_subdir_path)
+        else:
+            print('>>>>> Could not create \'' + new_subdir_path + '\'. (Already exists?)')
+
+    # Arrange any calibration (incl. autoflat) files, write advisory if present:
+    autoflat_path = os.path.join(an_top_directory, an_rel_directory, 'AutoFlat')
+    if os.path.exists(autoflat_path) and os.path.isdir(autoflat_path):
+        # Make calibration subdirectory if it doesn't already exist:
+        calibration_path = os.path.join(an_top_directory, an_rel_directory, 'Calibration')
+        if not os.path.exists(calibration_path) and not os.path.isdir(calibration_path):
+            os.mkdir(calibration_path)
+        else:
+            print('>>>>> Could not create \'' + calibration_path + '\'. (Already exists?)')
+        # Move all autoflat FITS files to /Calibration.
+        if os.path.exists(calibration_path) and os.path.isdir(calibration_path):
+            for autoflat_entry in os.scandir(autoflat_path):
+                if autoflat_entry.is_file():
+                    shutil.move(autoflat_entry.path, calibration_path)
+        os.rmdir(autoflat_path)
+
+    # Rename FITS files:
+    _rename_to_photrix(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None)
+
+    # Write instructions for next steps (Set Calibration if needed; calibrate all FITS):
+    print('First processing steps are completed.')
+    print('Now...')
+    print('    If new calibration is needed in MaxIm:')
+    print('        1. Make new, separate directory, move all calibration FITS into it.')
+    print('        2. MaxIm: Set Calibration, replacing old, and make Masters.')
+    print('    MaxIm: File > Batch Save & Convert, from /Uncalibrated to /Calibrated.')
+    print('    ...then run process.ready().')
+
+
+def ready(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
+    """
+    Verify FITS files. Collect and print all exceptions and summary stats.
+    :param an_top_directory: [string]
     :param an_rel_directory: [string]
-    :param instrument_name: [string]
     :return: [None]
     """
-    if an_rel_directory is None:
-        print('Fie! you must provide an_rel_directory.')
-        return
-    # Get list of all files in directory, and list of all FITS files. Compare & report non-FITS.
-    # For each FITS file: (1) Verify object name and FITS name prefix match, (2) verify platesolved,
-    #    (3) verify platesolved focal length close to that specified in Instrument object,
-    #    (4) verify FOV file present.
-    # Write out errors & warnings. Write out summary stats. Log.
+    # Make an empty list for some warning types:
+    subdirectory_list = []  # there should be no subdirectories
+    wrong_ext_list = []  # all extensions should be '.fts'
+    non_fits_list = []  # there should be no non-FITS files (e.g., text or plate-solve files)
+    object_non_match_list = []
+    not_plate_solved_list = []
+    not_calibrated_list = []
+    fov_file_absent_list = []
 
-    # You'll want this regex pattern to match Ur FITS filenames:
-    #     r'^(.{3,}?)-S\d{3}-R\d{3}-C\d{3}-([a-zA-Z]{1,2}?)(_dupe-\d{1,4})?.f\w{1,2}'
-    # And this regex pattern to match photrix FITS filenames
-    #     r'(.{3,}?)-\d{4}-([a-zA-Z]{1,2}?).f\w{1,2}'
+    # Make DataFrame of all files in directory, add some per-file info, sort:
+    filenames, isdir = [], []
+    fits_path = os.path.join(an_top_directory, an_rel_directory, 'Calibrated')
+    for entry in os.scandir(fits_path):
+        filenames.append(entry.name)
+        isdir.append(entry.is_dir)
+    df = pd.DataFrame({'Filename': filenames, 'IsDir': isdir, 'FocalLength': np.nan},
+                      index=filenames).sort_values(by=['Filename'])
+
+    # Check all files for readiness to further process:
+    for name in df.index:
+        if df.loc[name, 'IsDir']:
+            subdirectory_list.append(name)
+            continue
+        if not name.endswith('fts'):
+            wrong_ext_list.append(name)
+            continue
+        this_fits = FITS(an_top_directory, an_rel_directory, name)
+        if not this_fits.is_valid:
+            non_fits_list.append(name)
+            continue
+        if not name.startswith(this_fits.object):
+            object_non_match_list.append(name)
+            continue
+        if not this_fits.is_plate_solved:
+            not_plate_solved_list.append(name)
+        if not this_fits.is_calibrated:
+            not_calibrated_list.append(name)
+        this_fov = Fov(this_fits.object)
+        if this_fov.fov_name != this_fits.object:
+            fov_file_absent_list.append((name, this_fits.object))
+        df.loc[name, 'FocalLength'] = this_fits.focal_length
+
+    # Do focal length missing and outlier checks:
+    focal_length_missing_list = [name for name in df.index
+                                 if np.isnan(df.loc[name, 'FocalLength'])]
+    mean_focal_length = df['FocalLength'].mean(skipna=True)
+    df['PctDeviation'] = 100.0 * abs(df['FocalLength'] - mean_focal_length) / mean_focal_length
+    focal_length_outlier_list = [name for name in df.sort_index
+                                 if (not np.isnan(df.loc[name, 'FocalLength'])) &
+                                    (df.loc[name, 'PctDeviation'] <= 3.0)]
+
+    # Write warnings for user:
+    n_warnings = sum([len(this_list)
+                      for this_list in
+                      [subdirectory_list,
+                       wrong_ext_list,
+                       non_fits_list,
+                       object_non_match_list,
+                       not_plate_solved_list,
+                       not_calibrated_list,
+                       fov_file_absent_list,
+                       focal_length_missing_list,
+                       focal_length_outlier_list]])
+    if n_warnings == 0:
+        print('ALL OK. No warnings.')
+    else:
+        print('process.ready() has found ' + str(n_warnings) + ' warnings in total.')
+
+    if len(subdirectory_list) >= 1:
+        print(str(len(subdirectory_list)) + ' SUBDIRECTORIES found--please remove:')
+        for name in subdirectory_list:
+            print('    subdirectory \'' + name + '\'')
+
+    if len(wrong_ext_list) >= 1:
+        print(str(len(wrong_ext_list)) + ' WRONG FILE EXTENSIONS found--should have ext of .fts:')
+        for name in wrong_ext_list:
+            print('    file name \'' + name + '\'')
+
+    if len(non_fits_list) >= 1:
+        print(str(len(non_fits_list)) + ' INVALID FITS FILES found:')
+        for name in non_fits_list:
+            print('    file name \'' + name + '\'')
+
+    if len(object_non_match_list) >= 1:
+        print(str(len(object_non_match_list)) + ' OBJECTS MISMATCHING FILENAMES:')
+        for name in object_non_match_list:
+            print('    file name \'' + name + '\'')
+
+    if len(not_plate_solved_list) >= 1:
+        print(str(len(not_plate_solved_list)) + ' fits MISSING PLATE SOLUTIONS:')
+        for name in not_plate_solved_list:
+            print('    file name \'' + name + '\'')
+
+    if len(not_calibrated_list) >= 1:
+        print(str(len(not_calibrated_list)) + ' fits NOT CALIBRATED:')
+        for name in not_calibrated_list:
+            print('    file name \'' + name + '\'')
+
+    if len(fov_file_absent_list) >= 1:
+        print(str(len(fov_file_absent_list)) + ' fits MISSING FOV:')
+        for name in fov_file_absent_list:
+            print('    file name \'' + name + '\'')
+
+    if len(focal_length_missing_list) >= 1:
+        print(str(len(focal_length_missing_list)) + ' with MISSING FOCAL LENGTHS:')
+        for name in focal_length_missing_list:
+            print('    file name \'' + name + '\'')
+
+    if len(focal_length_outlier_list) >= 1:
+        print(str(len(focal_length_outlier_list)) + ' with DUBIOUS FOCAL LENGTHS:')
+        for name in focal_length_missing_list:
+            print('    file name \'' + name + '\'   FL=' +
+                  str(int(round(df.loc[name, 'FocalLength']))) +
+                  ' vs mean=' + str(int(round(mean_focal_length))))
+
+    # Write instructions for next step (i.e., MaxIm: visually examine all images):
+    print('\nDiagnostics are completed.')
+    print('\nNow...')
+    if n_warnings >= 1:
+        print('    Correct the errors listed above.')
+        print('    Rerun .ready() until no errors remain.')
+        print('Then...')
+    print('    1. MaxIm: load all FITS in /Calibrated.')
+    print('    2. MaxIm: View > Animate and inspect all images. Move rejects to /Excluded.')
+    print('    ...then run process.make_df_master().')
+
+
+def make_df_master(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
+    """
+    Make the master DataFrame of all required information for downstream photometric processing.
+    :param an_top_directory:
+    :param an_rel_directory:
+    :return: df_master [large pandas DataFrame, one row per observation]
+    """
+    # Build cross-reference DataFrame fits_fov_list:
+    fits_fov_list = []
+    fov_dict = {}
+    an_directory = os.path.join(an_top_directory, an_rel_directory)
+    fits_directory = os.path.join(an_directory, 'Calibrated')
+    for entry in os.scandir(fits_directory):
+        this_fits = FITS(an_top_directory, os.path.join(an_rel_directory, 'Calibrated'), entry.name)
+        fov_name = this_fits.object
+        fits_fov_list.append((entry.name, fov_name))  # list of 2-tuples
+        if fov_name not in fov_dict.keys():
+            fov = Fov(fov_name)
+            fov_dict[fov_name] = fov  # caching Fov objects
+    fits_list, fov_list = zip(*fits_fov_list)  # unzip 2-tuples to 2 parallel lists
+    df_fits_fov = pd.DataFrame({'FITSname': fits_list, 'FOVname': fov_list}, index=fits_list)
+
+    # Build display DataFrame one row per FOV file:
+    df_ask_user = df_fits_fov.groupby(['FOVname']).count().sort_index().copy()
+    df_ask_user.rename(columns={'FITSname': 'N_FITS'}, inplace=True)
+    df_ask_user['FOV_file_exists'] = False  # default
+    df_ask_user['FOV_file_exists_text'] = '*NA*'  # default
+    df_ask_user['N_CheckStars'] = 0  # default
+    df_ask_user['CheckMsg'] = ''  # default
+    for fov_name in df_ask_user.index:
+        this_fov = fov_dict[fov_name]  # these were cached above.
+        df_ask_user.loc[fov_name, 'FOV_file_exists'] = this_fov.is_valid
+        df_ask_user.loc[fov_name, 'N_CheckStars'] = sum([aa.star_type.lower() == 'check'
+                                                         for aa in this_fov.aavso_stars])
+    df_ask_user['FOV_file_exists_text'] = ['OK' if ex else 'MISSING'
+                                           for ex in df_ask_user['FOV_file_exists']]
+    df_ask_user['CheckMsg'] = ['OK' if n == 1 else 'WARNING: Target FOVs must have one Check Star.'
+                               for n in df_ask_user['N_CheckStars']]
+
+    # List FOVs and FITS file counts & FOV status, ask user to continue:
+    all_fovs_exist = all(df_ask_user['FOV_file_exists'])
+    df_ask_user.drop(['FOV_file_exists', 'N_CheckStars'], axis=1)  # drop columns
+    df_ask_user.rename(columns={'FOV_file_exists_': 'FOV_exists', 'CheckMsg': 'CheckStar'},
+                       inplace=True)
+    print(df_ask_user)
+    if not all_fovs_exist:
+        print('>>>>> STOPPING: at least one FOV file is missing.')
+        return None
+
+    answer = input('Proceed? (y/n')
+    if answer.strip().lower()[0] != 'y':
+        print('>>>>> STOPPING at user request.')
+        return None
+
+    # For each FOV,
+    #    1. read FOV and extract relevant info,
+    #    2. for each FITS file and each star, apply aperture and measure star,
+    #    3. add each FITS file's star data to df_master.
+    fov_names = df_fits_fov['FOVname'].drop_duplicates().sort_values()
+    df_master_list = []
+    for fov_name in fov_names:
+        # Prepare data for this FOV:
+        print('FOV >', fov_name)
+        fov = fov_dict[fov_name]
+        star_data = []
+        for star in fov.aavso_stars:
+                star_data.append((star.star_id, star.ra, star.dec, star.star_type))
+        star_id_list, ra_list, dec_list, star_type_list = zip(*star_data)
+        df_star_data_numbered = pd.DataFrame({'Number': range(len(star_data)),
+                                              'StarID': star_id_list,
+                                              'DegRA': ra_list, 'DegDec': dec_list,
+                                              'StarType': star_type_list})
+        df_star_data_numbered.index = range(len(df_star_data_numbered))
+        punch_id_list, d_north_list, d_east_list = zip(*fov.punches)
+        df_punch = pd.DataFrame({'StarID': punch_id_list,
+                                 'D_North': d_north_list, 'D_East': d_east_list})
+        fits_names = df_fits_fov.loc[df_fits_fov['FOVname'] == fov_name, 'FITSname']
+        n_rows = 0
+        for fits_name in fits_names:
+            image = Image(an_top_directory, os.path.join(an_rel_directory, 'Calibrated'),
+                          fits_name)
+            image.make_apertures(df_in=df_star_data_numbered, max_refinement_cycles=2)
+            image.apply_punches(df_punch=df_punch)
+            df_apertures = image.evaluate_apertures()
+            df_apertures = df_apertures.loc[~ np.isnan(df_apertures['RawADUMag']), :]
+            df_apertures = df_apertures.loc[df_apertures['apertureOK'], :]
+            df_apertures.drop(['apertureOK'], axis=1)
+
+            # Combine different data sets to make one DataFrame for this image, append to list:
+            df_fits_header = _get_fits_header_info(image.fits)
+            df_master_this_fits = _make_df_master_this_fits(df_apertures, df_star_data_numbered,
+                                                            df_fits_header, fov)
+            df_master_list.append(df_master_this_fits)
+            n_rows += len(df_master_this_fits)
+            if len(df_master_this_fits) >= 1:
+                print(fits_name, '=', len(df_master_this_fits), 'rows',
+                      '--> df_master_now_has', n_rows, 'rows.')
+            else:
+                print(fits_name, '=', len(df_master_this_fits), 'rows',
+                      '--> NO ROWS from this file ... df_master_now_has', n_rows, 'rows.')
+    df_master = pd.DataFrame(pd.concat(df_master_list, ignore_index=True))
+    df_master['Serial'] = range(1, 1 + len(df_master))
+    df_master.index = df_master['Serial']
+    new_column_order = ['Serial'] + [c for c in df_master.columns if c != 'Serial']
+    df_master.reindex(columns=new_column_order)  # make Serial the first columns
+
+    # For comp stars w/ CatMagError==NA, overwrite w/ largest CatMagError for same FOV and filter:
+    df_groupby = df_master[df_master['StarType'] == 'comp'].groupby(['FOV', 'Filter'])
+    for group_name, df_group in df_groupby:
+        if any(np.isnan(df_group['CatMagError'])):
+            max_catmagerror = df_group['CatMagError'].max()
+            serials_to_update = df_group.loc[np.isnan(df_group['CatMagError']), 'Serial']
+            df_master.loc[serials_to_update, 'CatMagError'] = max_catmagerror
+
+    # Construct Vignette, X1024, and Y1024 variables (df_master columns):
+
+
+
+
+
+    # Construct SkyBias and LogADU variables (df_master columns):
+
+    # Add column for old (Ur) filenames:
+
+    # Combine images' individual DataFrames into df_master:
+
+    # Sort by JD_mid then Number, add Serial number column, move it to left end, make index:
+
+    # Copy FOV files used into folders inside AN folder as part of processing documentation:
+
+    # Make omit.txt stub if omit.txt doesn't already exist:
+
+
+
 
 
 class SkyModel:
@@ -1228,6 +1549,7 @@ class PredictionSet:
                   ': done.')
         return df_report
 
+END_PROCESSING_HERE____________ = ''
 
 class TransformModel:
     def __init__(self, an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None,
@@ -1459,6 +1781,80 @@ def get_df_master(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
     df_master = pd.read_csv(fullpath, sep=';')
     df_master.index = df_master['Serial']
     return df_master
+
+
+def _get_fits_header_info(fits_object):
+    return pd.DataFrame({'Object': fits_object.object,
+                         'JD_start': jd_from_datetime_utc(fits_object.utc_start),
+                         'UTC_start': fits_object.utc_start,
+                         'Exposure': fits_object.exposure,
+                         'JD_mid': jd_from_datetime_utc(fits_object.utc_mid),
+                         'Filter': fits_object.filter,
+                         'Airmass': fits_object.airmass})  # one row only
+
+
+def _make_df_master_this_fits(df_apertures, df_star_data_numbered, df_fits_header, fov):
+    model_star_id = '_'.join([df_star_data_numbered['FOVname'], df_star_data_numbered['StarID']])
+    df = pd.merge(df_apertures, df_star_data_numbered, how='left',
+                  left_on='Number', right_on='StarID')
+    for col_name in df_fits_header:
+        df.loc[:, col_name] = df_fits_header[col_name].iloc[0]  # add col & propagate, as R cbind()
+    df['FOV'] = fov.fov_name
+    df['Chart'] = fov.chart
+    df['CI'] = df['MagV'] - df['MagI']
+    df['CatMag'] = np.nan
+    df['CatMagError'] = np.nan
+    df['InstMag'] = df['RawADUMag'] + 2.5 * log10(df['Exposure'])
+    df = df.drop(['Object', 'RawADUMag'], axis=1)
+
+
+
+
+
+    mag_cols_to_drop = [col for col in df.columns
+                        if col in ['MagU', 'MagB', 'MagV', 'MagR', 'MagI']]
+    err_cols_to_drop = [col for col in df.columns
+                        if col in ['ErrU', 'ErrB', 'ErrV', 'ErrR', 'ErrI']]
+    df = df.drop(mag_cols_to_drop + err_cols_to_drop, axis=1)
+    return df
+
+
+def _rename_to_photrix(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
+    # Construct DataFrame of files to rename:
+    fits_path = os.path.join(an_top_directory, an_rel_directory, 'Uncalibrated')
+    ur_names, object_list, jd_mid_list, filter_list, photrix_names = [], [], [], [], []
+    for entry in os.scandir(fits_path):
+        if entry.is_file():
+            ur_names.append(entry.name)
+            this_fits = FITS(an_top_directory, an_rel_directory, entry.name)
+            object_list.append(this_fits.object)
+            jd_mid_list.append(jd_from_datetime_utc(this_fits.utc_mid))
+    df = pd.DataFrame({'UrName': ur_names, 'Object': object_list,
+                       'JD_mid': jd_mid_list, 'Filter': filter_list},
+                      index=ur_names).sort_values(by=['Object', 'JD_mid'])
+
+    # Construct new photrix names and add them to DataFrame:
+    serial_number = 0
+    for i in range(len(df)):
+        this_object = df['Object'].iloc[i]
+        this_filter = df['Filter'].iloc[i]
+        if i >= 1:
+            if this_object != df['Object'].iloc[i-1]:
+                serial_number = 0
+        photrix_name = '-'.join([this_object, '{:04d}'.format(serial_number), this_filter]) + '.fts'
+        photrix_names.append(photrix_name)
+    df['PhotrixName'] = photrix_names
+
+    # Rename all the FITS files:
+    for old_name, new_name in zip(df['UrName'], df['PhotrixName']):
+        old_path = os.path.join(an_top_directory, an_rel_directory, 'Uncalibrated', old_name)
+        new_path = os.path.join(an_top_directory, an_rel_directory, 'Uncalibrated', new_name)
+        os.rename(old_path, new_path)
+
+    # Write renaming table to Photometry subdirectory as csv file:
+    renaming_fullpath = os.path.join(an_top_directory, an_rel_directory,
+                                     'Photometry', 'File-renaming.txt')
+    df.to_csv(renaming_fullpath, sep=' ; ')
 
 
 def _apply_omit_txt(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):

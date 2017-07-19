@@ -27,17 +27,28 @@ class Fov:
     """
     def __init__(self, fov_name, fov_directory=FOV_DIRECTORY):
         fov_fullpath = os.path.join(fov_directory, fov_name + ".txt")
-        with open(fov_fullpath) as fov_file:
-            lines = fov_file.readlines()
-        lines = [line.split(";")[0] for line in lines]  # remove all comments
-        lines = [line.strip() for line in lines]
+        if os.path.exists(fov_fullpath) and os.path.isfile(fov_fullpath):
+            with open(fov_fullpath) as fov_file:
+                lines = fov_file.readlines()
+            self.is_valid = True  # conditional on parsing in rest of __init__()
+        else:
+            print('>>>>> FOV file \'' + fov_fullpath + '\' not found. FOV object invalid.')
+            self.is_valid = False
+            return
+        lines = [line.split(";")[0] for line in lines]  # remove all comments.
+        lines = [line.strip() for line in lines]  # remove leading and trailing whitespace.
 
         # ---------- Header section (all directives are required).
         self.fov_name = Fov._directive_value(lines, "#FOV_NAME")
-        self.format_version = Fov._directive_value(lines, "#FORMAT_VERSION")
+        if self.fov_name != fov_name:
+            print(fov_name + ': Fov name doesn\'t match file name. Fov object invalid.')
+            self.is_valid = False
+            return
+        self.format_version = Fov._directive_value(lines, '#FORMAT_VERSION')
         if self.format_version != CURRENT_SCHEMA_VERSION:
-            print(fov_name + ': Fov Version Error')
-            raise FovVersionError
+            print(fov_name + ': Fov Version Error. Fov object invalid.')
+            self.is_valid = False
+            return
         ra_str, dec_str = Fov._directive_words(lines, "#CENTER")[:2]
         self.ra = ra_as_degrees(ra_str)
         self.dec = dec_as_degrees(dec_str)
@@ -83,8 +94,9 @@ class Fov:
         obs_style = obs_style_words[0]
         obs_values = obs_style_words[1:]
         if obs_style not in VALID_FOV_OBSERVING_STYLES:
-            raise ValueError("In '" + self.fov_name + "', '" +
-                             obs_style + "' is not a valid Observing Style.")
+            print('FOV \'' + self.fov_name + ': obs_style +' + obs_style +
+                  '\' is not a valid Observing Style. Fov object not valid.')
+            self.is_valid = False
         self.observing_style = obs_style
         self.alert = None  # default
         self.observing_list = []
@@ -156,6 +168,7 @@ class Fov:
             if not any(star_is_check):
                 print(">>>>> WARNING: FOV file ", self.fov_name,
                       " seems not to be a Standard FOV, but has NO CHECK STAR.")
+    # TODO: Add final diagnostics to set final fov.is_valid.
 
     @staticmethod
     def _directive_value(lines, directive_string, default_value=None):

@@ -18,7 +18,7 @@ from .web import get_aavso_webobs_raw_table
 __author__ = "Eric Dose :: New Mexico Mira Project, Albuquerque"
 
 # USAGE:
-# pl.make_an_roster('20170525', 'c:/Astro/ACP/AN20170525', user_update_tolerance_days=1, exp_time_factor=0.8)
+# pl.make_an_roster('20170525', 'c:/Astro/ACP/AN20170525', user_update_tolerance_days=0.1, exp_time_factor=0.8)
 # pl.make_an_plan('c:/Astro/ACP/AN20170525/planning.xlsx', exp_time_factor=1)
 
 
@@ -1028,7 +1028,7 @@ def make_raw_plan_list(parsed_list, an):
     Plan = namedtuple('Plan', ['plan_id', 'action_list'])
     Action = namedtuple('Action', ['action_type', 'parsed_action', 'an_priority',
                                    'raw_duration', 'n_afinterval_autofocus',
-                                   'status', 'start_utc', 'altitude_deg',
+                                   'status', 'utc_start', 'altitude_deg',
                                    'summary_lines', 'acp_plan_lines'])
     raw_plan_list = []  # will be the master container (a list of Plan namedtuples)
     for parsed_plan in parsed_list:
@@ -1259,7 +1259,7 @@ def add_timetable(plan_list, an, an_start_hhmm):
     :param plan_list: input list of Plan namedtuples
     :param an:
     :param an_start_hhmm: HHMM string denoting desired UTC start time, or None for dusk twilight.
-    :return: list of Plan namedtuples with 'status', 'start_utc', and 'altitude_deg' filled in.
+    :return: list of Plan namedtuples with 'status', 'utc_start', and 'altitude_deg' filled in.
     """
     # TODO: Correct starting time for first plan, especially if starting before dark (e.g., #CHILL).
     # Calculate timeline and action status, add to each action in each plan:
