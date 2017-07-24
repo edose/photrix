@@ -11,7 +11,7 @@ import statsmodels.formula.api as smf
 from .image import FITS, Image
 from .user import Instrument, Site
 from .util import MixedModelFit, weighted_mean, jd_from_datetime_utc
-from .fov import Fov
+from .fov import Fov, FOV_DIRECTORY
 
 __author__ = "Eric Dose :: New Mexico Mira Project, Albuquerque"
 
@@ -372,10 +372,6 @@ def make_df_master(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
 
     # Construct Vignette, X1024, and Y1024 variables (df_master columns):
 
-
-
-
-
     # Construct SkyBias and LogADU variables (df_master columns):
 
     # Add column for old (Ur) filenames:
@@ -384,10 +380,9 @@ def make_df_master(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
 
     # Sort by JD_mid then Number, add Serial number column, move it to left end, make index:
 
-    # Copy FOV files used into folders inside AN folder as part of processing documentation:
+    _archive_fov_files(an_top_directory, an_rel_directory, fov_names)
 
-    # Make omit.txt stub if omit.txt doesn't already exist:
-
+    _write_omit_txt_stub(an_top_directory, an_rel_directory)
 
 
 
@@ -1807,10 +1802,12 @@ def _make_df_master_this_fits(df_apertures, df_star_data_numbered, df_fits_heade
     df['InstMag'] = df['RawADUMag'] + 2.5 * log10(df['Exposure'])
     df = df.drop(['Object', 'RawADUMag'], axis=1)
 
+    # Populate CatMag and CatMagError columns for this FITS:
+    filter_name = df_fits_header['Filter'].iloc[0]
+    df['CatMag'] = df['Mag' + filter_name]
+    df['ErrMag'] = df['Err' + filter_name]
 
-
-
-
+    # Delete mag & err cols and return dataframe:
     mag_cols_to_drop = [col for col in df.columns
                         if col in ['MagU', 'MagB', 'MagV', 'MagR', 'MagI']]
     err_cols_to_drop = [col for col in df.columns
@@ -1855,6 +1852,15 @@ def _rename_to_photrix(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None)
     renaming_fullpath = os.path.join(an_top_directory, an_rel_directory,
                                      'Photometry', 'File-renaming.txt')
     df.to_csv(renaming_fullpath, sep=' ; ')
+
+
+def _archive_fov_files(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None, fov_names=None):
+    from_dir = FOV_DIRECTORY
+    to_dir = os.path.join(an_top_directory, an_rel_directory, 'FOV')
+    for fov_name in fov_names:
+        from_fullpath = os.path.join(from_dir, fov_name + '.txt')
+        to_fullpath = os.path.join(to_dir, fov_name + '.txt')
+        shutil.copy2(from_fullpath, to_fullpath)
 
 
 def _apply_omit_txt(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):

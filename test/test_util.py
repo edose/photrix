@@ -15,11 +15,12 @@ def test_ra_as_degrees():
     assert util.ra_as_degrees("-0.1") is None
     assert util.ra_as_degrees("360.1") is None
 
-    assert util.ra_as_degrees("12:00") == 180.0
-    assert util.ra_as_degrees("12:00:00") == 180.0
-    assert util.ra_as_degrees("0:00:00") == 0.0
-    assert util.ra_as_degrees("11:16:30") == 169.125
+    assert util.ra_as_degrees("12:00") == util.ra_as_degrees("12 00") == 180.0
+    assert util.ra_as_degrees("12:00:00") == util.ra_as_degrees("12 00 00") == 180.0
+    assert util.ra_as_degrees("0:00:00") == util.ra_as_degrees("0 00 00") == 0.0
+    assert util.ra_as_degrees("11:16:30") == util.ra_as_degrees("11 16 30") == 169.125
     assert util.ra_as_degrees("24:00:01") is None
+    assert util.ra_as_degrees("24 00 01") is None
 
 
 def test_hex_degrees_as_degrees():
@@ -32,14 +33,18 @@ def test_hex_degrees_as_degrees():
     assert util.hex_degrees_as_degrees("90.125") == 90.125
     assert util.hex_degrees_as_degrees("-90.125") == -90.125
 
-    assert util.hex_degrees_as_degrees("88:45") == 88.75
-    assert util.hex_degrees_as_degrees("-88:45") == -88.75
-    assert util.hex_degrees_as_degrees("12:34:30") == 12.575
-    assert util.hex_degrees_as_degrees("-12:34:30") == -12.575
-    assert util.hex_degrees_as_degrees("91:34:30") == 91.575
-    assert util.hex_degrees_as_degrees("-91:34:30") == -91.575
-    assert util.hex_degrees_as_degrees("91:45") == 91.75
-    assert util.hex_degrees_as_degrees("-91:45") == -91.75
+    assert util.hex_degrees_as_degrees("88:45") == util.hex_degrees_as_degrees("88 45") == 88.75
+    assert util.hex_degrees_as_degrees("-88:45") == util.hex_degrees_as_degrees("-88 45") == -88.75
+    assert util.hex_degrees_as_degrees("12:34:30") == \
+           util.hex_degrees_as_degrees("12 34 30") == 12.575
+    assert util.hex_degrees_as_degrees("-12:34:30") == \
+           util.hex_degrees_as_degrees("-12 34 30") == -12.575
+    assert util.hex_degrees_as_degrees("91:34:30") == \
+           util.hex_degrees_as_degrees("91 34 30") == 91.575
+    assert util.hex_degrees_as_degrees("-91:34:30") == \
+           util.hex_degrees_as_degrees("-91 34 30") == -91.575
+    assert util.hex_degrees_as_degrees("91:45") == util.hex_degrees_as_degrees("91 45") == 91.75
+    assert util.hex_degrees_as_degrees("-91:45") == util.hex_degrees_as_degrees("-91 45") == -91.75
 
 
 def test_dec_as_degrees():
@@ -52,14 +57,18 @@ def test_dec_as_degrees():
     assert util.dec_as_degrees("90.1") is None
     assert util.dec_as_degrees("-90.1") is None
 
-    assert util.dec_as_degrees("88:45") == 88.75
-    assert util.dec_as_degrees("-88:45") == -88.75
-    assert util.dec_as_degrees("12:34:30") == 12.575
-    assert util.dec_as_degrees("-12:34:30") == -12.575
+    assert util.dec_as_degrees("88:45") == util.dec_as_degrees("88 45") == 88.75
+    assert util.dec_as_degrees("-88:45") == util.dec_as_degrees("-88 45") == -88.75
+    assert util.dec_as_degrees("12:34:30") == util.dec_as_degrees("12 34 30") == 12.575
+    assert util.dec_as_degrees("-12:34:30") == util.dec_as_degrees("-12 34 30") == -12.575
     assert util.dec_as_degrees("91:34:30") is None
+    assert util.dec_as_degrees("91 34 30") is None
     assert util.dec_as_degrees("-91:34:30") is None
+    assert util.dec_as_degrees("-91 34 30") is None
     assert util.dec_as_degrees("91:45") is None
+    assert util.dec_as_degrees("91 45") is None
     assert util.dec_as_degrees("-91:45") is None
+    assert util.dec_as_degrees("-91 45") is None
 
 
 def test_ra_as_hours():

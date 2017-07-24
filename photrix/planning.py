@@ -53,10 +53,10 @@ AFINTERVAL_DURATION = 0  # seconds; beyond AUTOFOCUS_DURATION that this invokes
 BURN_DURATION = 11*60  # seconds
 CHAIN_DURATION = 3  # seconds; a guess
 SHUTDOWN_DURATION = 480  # seconds; a guess
-NEW_TARGET_DURATION = 105  # seconds; slew + guider start
+NEW_TARGET_DURATION = 100  # seconds; slew + guider start
 NEW_FILTER_DURATION = 10  # seconds; filter change and focuser change
-NEW_EXPOSURE_DURATION = 25  # seconds; guider check, image download, plate solving (excl exposure)
-AUTOFOCUS_DURATION = 175  # seconds, includes slew & filter wheel changes
+NEW_EXPOSURE_DURATION = 22  # seconds; guider check, image download, plate solving (excl exposure)
+AUTOFOCUS_DURATION = 170  # seconds, includes slew & filter wheel changes
 
 
 def make_df_fov(fov_directory=FOV_DIRECTORY, fov_names_selected=None):
@@ -1028,7 +1028,7 @@ def make_raw_plan_list(parsed_list, an):
     Plan = namedtuple('Plan', ['plan_id', 'action_list'])
     Action = namedtuple('Action', ['action_type', 'parsed_action', 'an_priority',
                                    'raw_duration', 'n_afinterval_autofocus',
-                                   'status', 'utc_start', 'altitude_deg',
+                                   'status', 'start_utc', 'altitude_deg',
                                    'summary_lines', 'acp_plan_lines'])
     raw_plan_list = []  # will be the master container (a list of Plan namedtuples)
     for parsed_plan in parsed_list:
@@ -1259,7 +1259,7 @@ def add_timetable(plan_list, an, an_start_hhmm):
     :param plan_list: input list of Plan namedtuples
     :param an:
     :param an_start_hhmm: HHMM string denoting desired UTC start time, or None for dusk twilight.
-    :return: list of Plan namedtuples with 'status', 'utc_start', and 'altitude_deg' filled in.
+    :return: list of Plan namedtuples with 'status', 'start_utc', and 'altitude_deg' filled in.
     """
     # TODO: Correct starting time for first plan, especially if starting before dark (e.g., #CHILL).
     # Calculate timeline and action status, add to each action in each plan:

@@ -149,11 +149,27 @@ class RaDec:
         return "RaDec('" + ra_hex + "', '" + dec_hex + "')"
 
 
-def ra_as_degrees(ra_string):
-    """ Input: string in either full hex ("12:34:56.7777") or degrees ("234.55")
-        Returns: float of Right Ascension in degrees between 0 and 360.
+def parse_hex(hex_string):
     """
-    ra_list = ra_string.split(":")
+    Helper function for RA and Dec parsing, takes hex string, returns list of floats.
+    :param hex_string: string in either full hex ("12:34:56.7777" or "12 34 56.7777"),
+               or degrees ("234.55")
+    :return: list of <=3 floats, could represent hours:min:sec or deg:arcmin:arcsec.
+    """
+    colon_list = hex_string.split(':')
+    space_list = hex_string.split(' ')
+    if len(colon_list) >= len(space_list):
+        return [x.strip() for x in colon_list]
+    return space_list
+
+
+def ra_as_degrees(ra_string):
+    """
+    :param ra_string: string in either full hex ("12:34:56.7777" or "12 34 56.7777"),
+               or degrees ("234.55")
+    :return float of Right Ascension in degrees between 0 and 360.
+    """
+    ra_list = parse_hex(ra_string)
     if len(ra_list) == 1:
         ra_degrees = float(ra_list[0])  # input assumed to be in degrees.
     elif len(ra_list) == 2:
@@ -167,11 +183,14 @@ def ra_as_degrees(ra_string):
 
 
 def hex_degrees_as_degrees(hex_degrees_string):
-    """ Input: string in either full hex ("-12:34:56.7777") or degrees ("-24.55")
-        Returns: float of degrees (not limited)
     """
-    dec_list = hex_degrees_string.split(":")
-    dec_list = [dec.strip() for dec in dec_list]
+    :param hex_degrees_string: string in either full hex ("-12:34:56.7777", or "-12 34 56.7777"),
+        or degrees ("-24.55")
+    :return float of degrees (not limited)
+    """
+    # dec_list = hex_degrees_string.split(":")
+    dec_list = parse_hex(hex_degrees_string)
+    # dec_list = [dec.strip() for dec in dec_list]
     if dec_list[0].startswith("-"):
         sign = -1
     else:
