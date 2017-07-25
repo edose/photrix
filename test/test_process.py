@@ -12,7 +12,6 @@ from photrix.util import MixedModelFit
 PHOTRIX_ROOT_DIRECTORY = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TEST_TOP_DIRECTORY = os.path.join(PHOTRIX_ROOT_DIRECTORY, "test")
 
-
 def test__get_line_parms():
     assert process._get_line_parms('#SERIAL  12, 34 44 , 42  ;  this is a comment',
                                    '#SERIAL', True, 1, None) == (['12', '34', '44', '42'], None)

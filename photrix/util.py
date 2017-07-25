@@ -154,10 +154,10 @@ def parse_hex(hex_string):
     Helper function for RA and Dec parsing, takes hex string, returns list of floats.
     :param hex_string: string in either full hex ("12:34:56.7777" or "12 34 56.7777"),
                or degrees ("234.55")
-    :return: list of <=3 floats, could represent hours:min:sec or deg:arcmin:arcsec.
+    :return: list of strings representing floats (hours:min:sec or deg:arcmin:arcsec).
     """
     colon_list = hex_string.split(':')
-    space_list = hex_string.split(' ')
+    space_list = hex_string.split()  # multiple spaces act as one delimiter
     if len(colon_list) >= len(space_list):
         return [x.strip() for x in colon_list]
     return space_list

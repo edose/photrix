@@ -77,12 +77,16 @@ class Image:
         """
         # Apply punches if any; then for any apertures affected:
         self.df_punches = self.df_punches.append(df_punches)  # simple append, duplicates OK.
-        ap_names_affected = set(df_punches.StarID)
+        ap_names_affected = set(df_punches['StarID'])
 
         # Update centroid and evaluations:
         for ap_name in ap_names_affected:
-            ap_previous = self.apertures[ap_name]
-            self.add_aperture(ap_name, ap_previous.xcenter, ap_previous.ycenter)  # simply replace.
+            if ap_name in self.apertures:
+                ap_previous = self.apertures[ap_name]
+                self.add_aperture(ap_name, ap_previous.xcenter, ap_previous.ycenter)  # replace it.
+            else:
+                print('>>>>> Warning: df_punch StarID \'' + ap_name +
+                      '\' is not a valid aperture name in ' + self.fits.filename + '.')
 
     def results_from_aperture(self, star_id):
         """
@@ -240,14 +244,7 @@ class Aperture:
                 self.ycenter = self.y_centroid  # "
             self.x_centroid = np.sum(net_flux_grid * self.xgrid) / normalizor
             self.y_centroid = np.sum(net_flux_grid * self.ygrid) / normalizor
-            dx = self.xgrid - self.x_centroid
-            dy = self.ygrid - self.y_centroid
-            dist2 = dx ** 2 + dy ** 2
-            net_flux_xy = (self.disc_mask * (self.subimage - self.annulus_flux))
-            mean_dist2 = np.sum(net_flux_xy * dist2) / np.sum(net_flux_xy)
-            sigma = sqrt(mean_dist2 / 2.0)
-            # this math is verified 20170723, but yields larger FWHM than does MaxIm.
-            self.fwhm = FWHM_PER_SIGMA * sigma
+            self.fwhm = self._eval_fwhm()
         else:
             # Values for aperture with no flux (no detected object) inside:
             self.net_flux = 0.0
@@ -316,6 +313,23 @@ class Aperture:
                 slice_list.append(slice_mean)
         return slice_list
 
+    def _eval_fwhm(self):
+        # TODO: Probably need a better FWHM algorithm.
+        """
+        Returns estimate of Full Width at Half-Maximum from mean dist2 (=2*sigma^2) of net flux.
+        This algorithm may be replaced later:
+            overestimates FWHM compared to MaxIm, PinPoint, and sometimes to even visual inspection.
+        :return: estimate of FWHM in pixels.
+        """
+        dx = self.xgrid - self.x_centroid
+        dy = self.ygrid - self.y_centroid
+        dist2 = dx ** 2 + dy ** 2
+        net_flux_xy = (self.disc_mask * (self.subimage - self.annulus_flux))
+        mean_dist2 = np.sum(net_flux_xy * dist2) / np.sum(net_flux_xy)
+        sigma = sqrt(mean_dist2 / 2.0)
+        # this math is verified 20170723, but yields larger FWHM than does MaxIm.
+        return FWHM_PER_SIGMA * sigma
+
 
 class FITS:
     """
@@ -349,12 +363,17 @@ class FITS:
             return
 
         self.fullpath = actual_fits_fullpath
-        hdulist = astropy.io.fits.open(self.fullpath)
+        try:
+            hdulist = astropy.io.fits.open(self.fullpath)
+        except IOError:
+            self.is_valid = False
+            return
+
         self.header = hdulist[0].header
         # FITS convention = (vert/Y, horiz/X), pixel (1,1) at bottom left -- NOT USED by photrix.
-        # MaxIm/Astrometrica convention = (horiz/X, vert/Y) pixel (0,0 at top right). USE THIS.
+        # MaxIm/Astrometrica convention = (horiz/X, vert/Y) pixel (0,0 at top left). USE THIS.
         # NB: self.image_fits, self.image_xy, and self.image are different views of the SAME array.
-        #     Changing one *will* change the other.
+        #     They are meant to be read-only--changing any one of them *will* change the others.
         self.image_fits = hdulist[0].data.astype(np.float64)
         self.image_xy = np.transpose(self.image_fits)  # x and y axes as expected (not like FITS).
         self.image = self.image_xy  # alias
@@ -362,6 +381,7 @@ class FITS:
 
         self.top_directory = top_directory
         self.rel_directory = rel_directory
+        self.filename = filename
         self.all_header_keys = self.header.keys()
         self.object = self.header_value('OBJECT')
         self.is_calibrated = self._is_calibrated()
@@ -380,9 +400,10 @@ class FITS:
         self.ra = ra_as_degrees(self.header_value(['RA', 'OBJCTRA']))
         self.dec = dec_as_degrees(self.header_value(['DEC', 'OBJCTDEC']))
 
-        self.is_valid = all(x is not None
-                            for x in [self.object, self.exposure, self.filter,
-                                      self.airmass, self.utc_start, self.focal_length])
+        self.is_valid = True  # if it got through all that initialization.
+        # self.is_valid = all(x is not None
+        #                     for x in [self.object, self.exposure, self.filter,
+        #                               self.airmass, self.utc_start, self.focal_length])
 
     def header_value(self, key):
         """
@@ -402,10 +423,11 @@ class FITS:
 
     def xy_from_radec(self, radec):
         """
-        Computes pixel x and y for a given RA and Dec sky coordinate. May be outside image's
-            actual boundaries. Assumes flat image (no distortion, i.e., pure Tan projection).
+        Computes zero-based pixel x and y for a given RA and Dec sky coordinate.
+            May be outside image's actual boundaries.
+            Assumes flat image (no distortion, i.e., pure Tan projection).
         :param radec: sky coordinates [RaDec class object]
-        :return: x and y pixel position [2-tuple of floats]
+        :return: x and y pixel position, zero-based, in this FITS image [2-tuple of floats]
         """
         cd11 = self.plate_solution['CD1_1']
         cd12 = self.plate_solution['CD1_2']
@@ -413,8 +435,8 @@ class FITS:
         cd22 = self.plate_solution['CD2_2']
         crval1 = self.plate_solution['CRVAL1']
         crval2 = self.plate_solution['CRVAL2']
-        crpix1 = self.plate_solution['CRPIX1']
-        crpix2 = self.plate_solution['CRPIX2']
+        crpix1 = self.plate_solution['CRPIX1']  # 1 at edge (FITS convention)
+        crpix2 = self.plate_solution['CRPIX2']  # "
 
         d_ra = radec.ra - crval1
         d_dec = radec.dec - crval2
@@ -425,34 +447,36 @@ class FITS:
         dy = (deg_ew - cd11 * dx) / cd12
         x = crpix1 + dx
         y = crpix2 + dy
-        return x, y
+        return x - 1, y - 1  # FITS image origin=(1,1), but our (MaxIm/python) convention=(0,0)
 
-    def radec_from_xy(self, x, y):
-        """
-        Computes RA and Dec for a give x and y pixel count. Assumes flat image (no distortion,
-            i.e., pure Tan projection).
-        :param x: pixel position in x [float]
-        :param y: pixel position in y [float]
-        :return: RA and Dec [RaDec object]
-        """
-        cd11 = self.plate_solution['CD1_1']
-        cd12 = self.plate_solution['CD1_2']
-        cd21 = self.plate_solution['CD2_1']
-        cd22 = self.plate_solution['CD2_2']
-        crval1 = self.plate_solution['CRVAL1']
-        crval2 = self.plate_solution['CRVAL2']
-        crpix1 = self.plate_solution['CRPIX1']
-        crpix2 = self.plate_solution['CRPIX2']
-        # Do the calculation (inverse of self.xy_from_radec(self, radec)):
-        return RaDec(0, 0)
+    # def radec_from_xy(self, x, y):
+    #     """
+    #     Computes RA and Dec for a give x and y pixel count. Assumes flat image (no distortion,
+    #         i.e., pure Tan projection).
+    #     :param x: pixel position in x [float]
+    #     :param y: pixel position in y [float]
+    #     :return: RA and Dec [RaDec object]
+    #     """
+    #     cd11 = self.plate_solution['CD1_1']
+    #     cd12 = self.plate_solution['CD1_2']
+    #     cd21 = self.plate_solution['CD2_1']
+    #     cd22 = self.plate_solution['CD2_2']
+    #     crval1 = self.plate_solution['CRVAL1']
+    #     crval2 = self.plate_solution['CRVAL2']
+    #     crpix1 = self.plate_solution['CRPIX1']
+    #     crpix2 = self.plate_solution['CRPIX2']
+    #     # Do the calculation (inverse of self.xy_from_radec(self, radec)):
+    #     return RaDec(0, 0)
 
     def _is_calibrated(self):
         calib_fn_list = [self._is_calibrated_by_maxim_5_6()]  # may add more fns when available.
         return any([is_c for is_c in calib_fn_list])
 
     def _is_calibrated_by_maxim_5_6(self):
-        if self.header_value('CALSTAT').strip().upper() == 'BDF':  # calib. by MaxIm DL v. 5 or 6
-            return True
+        hval = self.header_value('CALSTAT')
+        if hval is not None:
+            if hval.strip().upper() == 'BDF':  # calib. by MaxIm DL v. 5 or 6
+                return True
         return False
 
     def _get_focal_length(self):
