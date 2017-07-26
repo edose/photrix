@@ -110,7 +110,8 @@ def test_class_image():
     assert results['fwhm'] == pytest.approx(6.42, abs=0.02)
     assert set(results.index) == set(['r_disc', 'r_inner', 'r_outer', 'n_disc_pixels',
                                       'n_annulus_pixels', 'net_flux', 'net_flux_sigma',
-                                      'x_centroid', 'y_centroid', 'fwhm'])
+                                      'x_centroid', 'y_centroid', 'fwhm',
+                                      'x1024', 'y1024', 'vignette'])
 
     # Aperture case: near image center, two punches:
     im.add_aperture('dummy_2', 1535, 979)
@@ -137,6 +138,9 @@ def test_class_image():
     results = im.results_from_aperture('dummy_3')
     assert results['y_centroid'] == this_ap.y_centroid
     assert results['fwhm'] == pytest.approx(7.05, abs=0.05)
+    result_3 = im.results_from_aperture('dummy_3')
+    ap_3 = im.apertures['dummy_3']
+    assert result_3['x_centroid'] == ap_3.x_centroid
 
 
 def test_fits__xy_from_radec():

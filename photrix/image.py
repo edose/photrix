@@ -104,7 +104,10 @@ class Image:
                           'net_flux_sigma': ap.net_flux_sigma,
                           'x_centroid': ap.x_centroid,
                           'y_centroid': ap.y_centroid,
-                          'fwhm': ap.fwhm})
+                          'fwhm': ap.fwhm,
+                          'x1024': ap.x1024,
+                          'y1024': ap.y1024,
+                          'vignette': ap.vignette})
 
     def _recenter_aperture(self, ap_name, max_cycles=2, pixels_convergence=0.05):
         """
