@@ -110,6 +110,7 @@ def test_class_image():
     assert results['fwhm'] == pytest.approx(6.42, abs=0.02)
     assert set(results.index) == set(['r_disc', 'r_inner', 'r_outer', 'n_disc_pixels',
                                       'n_annulus_pixels', 'net_flux', 'net_flux_sigma',
+                                      'annulus_flux', 'annulus_flux_sigma',
                                       'x_centroid', 'y_centroid', 'fwhm',
                                       'x1024', 'y1024', 'vignette'])
 

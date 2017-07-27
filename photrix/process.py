@@ -10,7 +10,7 @@ import statsmodels.formula.api as smf
 
 from .image import FITS, Image, R_DISC
 from .user import Instrument, Site
-from .util import MixedModelFit, weighted_mean, jd_from_datetime_utc
+from .util import MixedModelFit, weighted_mean, jd_from_datetime_utc, RaDec
 from .fov import Fov, FOV_DIRECTORY
 
 __author__ = "Eric Dose :: New Mexico Mira Project, Albuquerque"
@@ -269,6 +269,11 @@ def assess(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
     else:
         print('All Focal Lengths seem OK.')
 
+    # Set all FITS file extensions to '.fts' (MaxIm calibration sets it to '.fit' for some reason):
+    _set_fits_extensions(an_top_directory=an_top_directory, fits_subdir=fits_subdir,
+                         fits_filenames=df['Filename'])
+    print('All FITS extensions are now \'.fts\'.')
+
     # Summarize and write instructions for next steps:
     n_warnings = len(not_calibrated) + len(not_platesolved) + len(object_nonmatch) +\
         len(fov_file_not_ready) + len(odd_fwhm_list) + len(odd_fl_list)
@@ -321,46 +326,63 @@ def make_df_master(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
                                for n in df_ask_user['N_CheckStars']]
 
     # List FOVs and FITS file counts & FOV status, ask user to continue:
-    all_fovs_exist = all(df_ask_user['FOV_file_exists'])
-    df_ask_user.drop(['FOV_file_exists', 'N_CheckStars'], axis=1)  # drop columns
-    df_ask_user.rename(columns={'FOV_file_exists_': 'FOV_exists', 'CheckMsg': 'CheckStar'},
+    # df_ask_user.drop(['FOV_file_exists', 'N_CheckStars'], axis=1, inplace=True)  # drop columns
+    df_ask_user.rename(columns={'FOV_file_exists': 'FOV_exists', 'CheckMsg': 'CheckStar'},
                        inplace=True)
-    print(df_ask_user)
+    df_ask_user['FOV'] = df_ask_user.index
+    len_fov = max(len(s) for s in df_ask_user.index) + 1
+    print('\n' + '  FOV'.ljust(len_fov), 'N FITS', 'FOV exists', 'Check Star')
+    for ind in df_ask_user.index:
+        print(df_ask_user.loc[ind, 'FOV'].ljust(len_fov),
+              str(df_ask_user.loc[ind, 'N_FITS']).rjust(len('N FITS')),
+              '    ' + df_ask_user.loc[ind, 'FOV_file_exists_text'].ljust(6),
+              df_ask_user.loc[ind, 'CheckStar'])
+
+    all_fovs_exist = all(df_ask_user['FOV_exists'])
     if not all_fovs_exist:
         print(' >>>>> STOPPING: at least one FOV file is missing.')
         return None
 
-    answer = input('Proceed? (y/n')
+    answer = input('.....Proceed? (y/n): ')
     if answer.strip().lower()[0] != 'y':
         print(' >>>>> STOPPING at user request.')
         return None
 
     fov_names = df_fits_fov['FOVname'].drop_duplicates().sort_values()
     df_master_list = []
+    n_rows = 0
     for fov_name in fov_names:
         # Prepare data for this FOV:
         print('FOV >', fov_name)
         fov = fov_dict[fov_name]
         star_data = []
         for star in fov.aavso_stars:
-                star_data.append((star.star_id, star.ra, star.dec, star.star_type))
-        star_id_list, ra_list, dec_list, star_type_list = zip(*star_data)
+                star_data.append((star.star_id, star.ra, star.dec, star.star_type, star.mags))
+        star_id_list, ra_list, dec_list, star_type_list, mags_list = zip(*star_data)
         df_star_data_numbered = pd.DataFrame({'Number': range(len(star_data)),
                                               'StarID': star_id_list,
                                               'DegRA': ra_list, 'DegDec': dec_list,
-                                              'StarType': star_type_list})
+                                              'StarType': star_type_list,
+                                              'Mags': mags_list})
         df_star_data_numbered.index = range(len(df_star_data_numbered))
-        punch_id_list, d_north_list, d_east_list = zip(*fov.punches)
-        df_punch = pd.DataFrame({'StarID': punch_id_list,
-                                 'D_North': d_north_list, 'D_East': d_east_list})
+        if len(fov.punches) >= 1:
+            punch_id_list, d_north_list, d_east_list = zip(*fov.punches)
+            df_punches = pd.DataFrame({'StarID': punch_id_list,
+                                       'dNorth': d_north_list, 'dEast': d_east_list})
+        else:
+            df_punches = pd.DataFrame()
+
         fits_names = df_fits_fov.loc[df_fits_fov['FOVname'] == fov_name, 'FITSname']
-        n_rows = 0
         for fits_name in fits_names:
-            # Start by constructing Image object for this FITS file:
+            # Construct Image object for this FITS file:
             image = Image.from_fits_path(an_top_directory,
                                          os.path.join(an_rel_directory, 'Calibrated'), fits_name)
-            image.make_apertures(df_in=df_star_data_numbered, max_refinement_cycles=2)
-            image.apply_punches(df_punch=df_punch)
+            for star_id, ra, dec in zip(df_star_data_numbered['StarID'],
+                                        df_star_data_numbered['DegRA'],
+                                        df_star_data_numbered['DegDec']):
+                x0, y0 = image.fits.xy_from_radec(RaDec(ra, dec))
+                image.add_aperture(star_id, x0, y0)
+            image.add_punches(df_punches=df_punches)
 
             # Build df_apertures:
             ap_list = []
@@ -369,30 +391,51 @@ def make_df_master(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
                 ap_list.append(dict(image.results_from_aperture(ap_name)))
             df_apertures = pd.DataFrame(ap_list, index=ap_names)  # constructor: list of dicts
             df_apertures['StarID'] = df_apertures.index
-            df_apertures.sort_index(inplace=True)
             df_apertures.rename(columns={'r_disc': 'DiscRadius',
                                          'r_inner': 'SkyRadiusInner',
                                          'r_outer': 'SkyRadiusOuter',
                                          'x_centroid': 'Xcentroid',
                                          'y_centroid': 'Ycentroid',
+                                         'annulus_flux': 'SkyADU',
+                                         'annulus_flux_sigma': 'SkySigma',
                                          'fwhm': 'FWHM',
                                          'x1024': 'X1024',
                                          'y1024': 'Y1024',
                                          'vignette': 'Vignette'},
                                 inplace=True)
-            df_apertures['InstMag'] = -2.5 * log10(df_apertures['net_flux']) + \
-                                      2.5 * log10(image.fits.exposure)
+            df_apertures = df_apertures.loc[df_apertures['net_flux'] > 0.0, :]
+            df_apertures['InstMag'] = -2.5 * np.log10(df_apertures['net_flux']) + \
+                2.5 * log10(image.fits.exposure)
             df_apertures['InstMagSigma'] = (2.5 / log(10)) * \
                                            (df_apertures['net_flux_sigma'] /
-                                            df_apertures['net_flux'])
+                                            df_apertures['net_flux'])  # math verified 20170726.
+            df_apertures['ModelStarID'] = image.fits.object + '_' + df_apertures['StarID']
             df_apertures.drop(['n_disc_pixels', 'n_annulus_pixels', 'net_flux', 'net_flux_sigma'],
                               axis=1, inplace=True)  # delete columns
 
             # Add FOV star data to each aperture row:
-            df = pd.merge(df_apertures, df_star_data_numbered, how='left',
-                          left_on='Number', right_on='StarID')
+            df = pd.merge(df_apertures, df_star_data_numbered, how='left', on='StarID')
+            df.sort_values(by='Number', inplace=True)  # stars in FOV order (not strictly needed).
+            df.index = df['StarID']
+
+            # Add catalog mag, CatMagError, and color index from FOV stars and Image's filter:
+            df['CatMag'] = np.nan
+            df['CatMagError'] = np.nan
+            df['CI'] = np.nan
+            for star_id in df['StarID']:
+                mags = df.loc[star_id, 'Mags']
+                # We extract from mags (dict) with .get() in case this filter is missing.
+                mag_and_error = mags.get(image.fits.filter, (np.nan, np.nan))
+                df.loc[star_id, 'CatMag'] = mag_and_error[0]
+                df.loc[star_id, 'CatMagError'] = mag_and_error[1]
+                # TODO: Make choice of color index passbands more flexible (distant future?).
+                ci_mag_1 = mags.get('V', (np.nan, np.nan))[0]
+                ci_mag_2 = mags.get('I', (np.nan, np.nan))[0]
+                df.loc[star_id, 'CI'] = ci_mag_1 - ci_mag_2
+            df.drop('Mags', axis=1, inplace=True)
 
             # Add FITS data to all rows:
+            df['FITSfile'] = image.fits.filename
             df['Object'] = image.fits.object
             df['JD_start'] = jd_from_datetime_utc(image.fits.utc_start)
             df['UTC_start'] = image.fits.utc_start
@@ -403,21 +446,8 @@ def make_df_master(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
 
             # Add FOV data to all rows:
             df['FOV'] = fov.fov_name
+            df['FOV_date'] = fov.fov_date
             df['Chart'] = fov.chart
-            df['CatMagError'] = np.nan
-            df['CI'] = df['MagV'] - df['MagI']  # TODO: generalize this definition of color index
-            df['CatMag'] = np.nan
-
-            # Populate CatMag and CatMagError columns for this FITS:
-            df['CatMag'] = df['Mag' + image.fits.filter]
-            df['ErrMag'] = df['Err' + image.fits.filter]
-
-            # Delete mag & err cols and return dataframe:
-            mag_cols_to_drop = [col for col in df.columns
-                                if col in ['MagU', 'MagB', 'MagV', 'MagR', 'MagI']]
-            err_cols_to_drop = [col for col in df.columns
-                                if col in ['ErrU', 'ErrB', 'ErrV', 'ErrR', 'ErrI']]
-            df.drop(mag_cols_to_drop + err_cols_to_drop, axis=1, inplace=True)
 
             # Append this image's dataframe to list, write image line to console:
             df_master_list.append(df)
@@ -432,6 +462,7 @@ def make_df_master(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
     # Make df_master by appending all individual-image dataframes:
     df_master = pd.DataFrame(pd.concat(df_master_list, ignore_index=True))
     df_master.sort_values(by=['Object', 'JD_mid', 'Number'])  # keeps image stars in FOV order.
+    df_master.drop('Number', axis=1, inplace=True)
     df_master.insert(0, 'Serial', range(1, 1 + len(df_master)))  # inserts in place
     df_master.index = df_master['Serial']
 
@@ -1847,32 +1878,42 @@ def get_df_master(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
     return df_master
 
 
-def _make_df_master_one_fits(df_apertures, df_star_data_numbered, df_fits_header, fov):
-    model_star_id = '_'.join([df_star_data_numbered['FOVname'], df_star_data_numbered['StarID']])
-    df = pd.merge(df_apertures, df_star_data_numbered, how='left',
-                  left_on='Number', right_on='StarID')
-    for col_name in df_fits_header:
-        df.loc[:, col_name] = df_fits_header[col_name].iloc[0]  # add col & propagate, as R cbind()
-    df['FOV'] = fov.fov_name
-    df['Chart'] = fov.chart
-    df['CI'] = df['MagV'] - df['MagI']
-    df['CatMag'] = np.nan
-    df['CatMagError'] = np.nan
-    df['InstMag'] = df['RawADUMag'] + 2.5 * log10(df['Exposure'])
-    df = df.drop(['Object', 'RawADUMag'], axis=1)
-
-    # Populate CatMag and CatMagError columns for this FITS:
-    filter_name = df_fits_header['Filter'].iloc[0]
-    df['CatMag'] = df['Mag' + filter_name]
-    df['ErrMag'] = df['Err' + filter_name]
-
-    # Delete mag & err cols and return dataframe:
-    mag_cols_to_drop = [col for col in df.columns
-                        if col in ['MagU', 'MagB', 'MagV', 'MagR', 'MagI']]
-    err_cols_to_drop = [col for col in df.columns
-                        if col in ['ErrU', 'ErrB', 'ErrV', 'ErrR', 'ErrI']]
-    df = df.drop(mag_cols_to_drop + err_cols_to_drop, axis=1)
-    return df
+def stare_comps(df_transformed, fov=None, star_id=None, this_filter=None):
+    df = df_transformed.copy()
+    df = df[df['FOV'] == fov]
+    df = df[df['StarID'] == star_id]
+    df = df[df['Filter'] == this_filter]
+    joined_comp_stars = ','.join(df['CompIDsUsed'])
+    comp_stars_available = pd.Series(joined_comp_stars.split(',')).drop_duplicates()
+    df_comps = pd.DataFrame({'CompID': comp_stars_available, 'IsIncluded': False})
+    result_lines = ["EDIT file 'pre-predict' with one of the following lines:"]
+    if len(df) <= 1:
+        return result_lines + \
+               ['   >>> One or zero qualifying images in dataframe.']
+    for num_to_test in range(1, 1 + len(df_comps)):
+        base = list((df_comps[df_comps['IsIncluded']])['CompID'])
+        test = list((df_comps[~ df_comps['IsIncluded']])['CompID'])
+        max_images_qualifying = 0
+        best_test = test[0]  # to give a default so comparisons don't fail
+        for this_test in test:
+            num_images_qualifying = 0
+            test_comps = base.copy()
+            test_comps.append(this_test)
+            for i_row in range(len(df)):
+                this_set = (df.iloc[i_row])['CompIDsUsed'].split(',')
+                if this_test in this_set:
+                    num_images_qualifying += 1
+            if num_images_qualifying > max_images_qualifying:
+                # TODO: break ties by choosing lower catmagerror (or initially sorting on them)?
+                best_test = this_test
+                max_images_qualifying = num_images_qualifying
+        df_comps.loc[(df_comps['CompID'] == best_test), 'IsIncluded'] = True
+        this_line = '   ' + str(sum(df_comps['IsIncluded'])) + ' comps -> ' + \
+                    str(max_images_qualifying) + ' images qualify  -->   #COMPS ' + fov + \
+                    ', ' + this_filter + ', ' + \
+                    ', '.join(df_comps.loc[df_comps['IsIncluded'], 'CompID'])
+        result_lines.append(this_line)
+    return result_lines
 
 
 def _rename_to_photrix(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
@@ -1915,6 +1956,18 @@ def _rename_to_photrix(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None)
     renaming_fullpath = os.path.join(an_top_directory, an_rel_directory,
                                      'Photometry', 'File-renaming.txt')
     df.to_csv(renaming_fullpath, sep=';')
+
+
+def _set_fits_extensions(an_top_directory, fits_subdir, fits_filenames=None):
+    from photrix.image import FITS_EXTENSIONS
+    target_ext = '.fts'
+    for filename in fits_filenames:
+        f, ext = os.path.splitext(filename)
+        if (ext.replace('.', '') in FITS_EXTENSIONS) and (ext != target_ext):
+            old_fullpath = os.path.join(an_top_directory, fits_subdir, filename)
+            new_fullpath = os.path.join(an_top_directory, fits_subdir, f + target_ext)
+            if not os.path.exists(new_fullpath):
+                os.rename(old_fullpath, new_fullpath)
 
 
 def _archive_fov_files(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None, fov_names=None):
@@ -2318,39 +2371,4 @@ def _write_aavso_report_map_stub(an_top_directory, an_rel_directory):
     return lines_written
 
 
-def stare_comps(df_transformed, fov=None, star_id=None, this_filter=None):
-    df = df_transformed.copy()
-    df = df[df['FOV'] == fov]
-    df = df[df['StarID'] == star_id]
-    df = df[df['Filter'] == this_filter]
-    joined_comp_stars = ','.join(df['CompIDsUsed'])
-    comp_stars_available = pd.Series(joined_comp_stars.split(',')).drop_duplicates()
-    df_comps = pd.DataFrame({'CompID': comp_stars_available, 'IsIncluded': False})
-    result_lines = ["EDIT file 'pre-predict' with one of the following lines:"]
-    if len(df) <= 1:
-        return result_lines + \
-               ['   >>> One or zero qualifying images in dataframe.']
-    for num_to_test in range(1, 1 + len(df_comps)):
-        base = list((df_comps[df_comps['IsIncluded']])['CompID'])
-        test = list((df_comps[~ df_comps['IsIncluded']])['CompID'])
-        max_images_qualifying = 0
-        best_test = test[0]  # to give a default so comparisons don't fail
-        for this_test in test:
-            num_images_qualifying = 0
-            test_comps = base.copy()
-            test_comps.append(this_test)
-            for i_row in range(len(df)):
-                this_set = (df.iloc[i_row])['CompIDsUsed'].split(',')
-                if this_test in this_set:
-                    num_images_qualifying += 1
-            if num_images_qualifying > max_images_qualifying:
-                # TODO: break ties by choosing lower catmagerror (or initially sorting on them)?
-                best_test = this_test
-                max_images_qualifying = num_images_qualifying
-        df_comps.loc[(df_comps['CompID'] == best_test), 'IsIncluded'] = True
-        this_line = '   ' + str(sum(df_comps['IsIncluded'])) + ' comps -> ' + \
-                    str(max_images_qualifying) + ' images qualify  -->   #COMPS ' + fov + \
-                    ', ' + this_filter + ', ' + \
-                    ', '.join(df_comps.loc[df_comps['IsIncluded'], 'CompID'])
-        result_lines.append(this_line)
-    return result_lines
+

@@ -17,6 +17,7 @@ FITS_REGEX_PATTERN = '^(.+)\.(f[A-Za-z]{2,3})$'
 FITS_EXTENSIONS = ['fts', 'fit', 'fits']  # allowed filename extensions
 ISO_8601_FORMAT = '%Y-%m-%dT%H:%M:%S'
 FWHM_PER_SIGMA = 2.0 * sqrt(2.0 * log(2))
+SUBIMAGE_MARGIN = 1.5  # subimage pixels around outer annulus, for safety
 
 R_DISC = 10  # for aperture photometry, likely to be adaptive (per image) later.
 R_INNER = 15  # "
@@ -71,15 +72,18 @@ class Image:
 
     def add_punches(self, df_punches):
         """
-        Add punches to this Image's dataframe of punches, then update all affected apertures.
+        Add all punches to this Image's dataframe of punches, then update all affected apertures.
         :param df_punches: new punches, columns=[StarID, dNorth, dEast] [pandas DataFrame]
-        :return:
+        :return: [None]
         """
         # Apply punches if any; then for any apertures affected:
         self.df_punches = self.df_punches.append(df_punches)  # simple append, duplicates OK.
-        ap_names_affected = set(df_punches['StarID'])
+        if len(self.df_punches) >= 1:
+            ap_names_affected = set(df_punches['StarID'])
+        else:
+            ap_names_affected = []
 
-        # Update centroid and evaluations:
+        # Replace all affected apertures (incl. updating centroid and results):
         for ap_name in ap_names_affected:
             if ap_name in self.apertures:
                 ap_previous = self.apertures[ap_name]
@@ -100,6 +104,8 @@ class Image:
                           'r_outer': ap.r_outer,
                           'n_disc_pixels': ap.n_disc_pixels,
                           'n_annulus_pixels': ap.n_annulus_pixels,
+                          'annulus_flux': ap.annulus_flux,
+                          'annulus_flux_sigma': ap.annulus_flux_sigma,
                           'net_flux': ap.net_flux,
                           'net_flux_sigma': ap.net_flux_sigma,
                           'x_centroid': ap.x_centroid,
@@ -159,43 +165,53 @@ class Aperture:
         self.r_inner = R_INNER
         self.r_outer = R_OUTER
 
-        # Aperture evaluation fields:
-        self.n_disc_pixels, self.n_annulus_pixels = None, None
-        self.annulus_flux, self.annulus_flux_sigma = None, None
-        self.net_flux, self.net_flux_sigma, self.sn = None, None, None
-        self.x_centroid, self.y_centroid = None, None
-        self.fwhm = None
+        # Aperture evaluation fields, with default (no-flux) values:
+        self.n_disc_pixels, self.n_annulus_pixels = 0, 0
+        self.net_flux = 0.0
+        self.net_flux_sigma = 0.0
+        self.annulus_flux = 0.0
+        self.annulus_flux_sigma = 0.0
+        self.sn = 0.0
+        self.x_centroid = self.xcenter
+        self.y_centroid = self.ycenter
+        self.fwhm = 0.0
 
-        # Construct subimage around this aperture:
+        # Compute needed boundaries of subimage around this aperture:
         image_xsize, image_ysize = self.image.shape
-        subimage_margin = 1.5  # pixels in subimage outside that strictly needed; for safety.
-        test_radius = self.r_outer + subimage_margin
-        self.xlow = max(0.0, floor(self.xcenter - test_radius))  # lowest x index
-        self.xhigh = min(image_xsize - 1.0, ceil(self.xcenter + test_radius))  # highest x index
-        self.ylow = max(0.0, floor(self.ycenter - test_radius))
-        self.yhigh = min(image_ysize - 1.0, ceil(self.ycenter + test_radius))
-        self.subimage = self.image[self.xlow:self.xhigh + 1, self.ylow:self.yhigh + 1].copy()
+        test_radius = self.r_outer + SUBIMAGE_MARGIN
+        xlow = int(floor(self.xcenter - test_radius))
+        xhigh = int(ceil(self.xcenter + test_radius))
+        ylow = int(floor(self.ycenter - test_radius))
+        yhigh = int(ceil(self.ycenter + test_radius))
 
-        # Construct mask arrays to represent disc and annulus (both same shape as subimage):
-        nx = self.xhigh - self.xlow + 1  # number of columns in subimage.
-        ny = self.yhigh - self.ylow + 1  # number of rows in subimage.
-        # Construct 2 2-d arrays holding for each pixel its distance from left(x) or upper(y) edge.
-        self.ygrid, self.xgrid = np.meshgrid(self.ylow + np.arange(ny), self.xlow + np.arange(nx))
-        dx = self.xgrid - self.xcenter
-        dy = self.ygrid - self.ycenter
-        dist2 = dx**2 + dy**2
-        self.disc_mask = np.clip(np.sign(self.r_disc**2 - dist2), 0.0, 1.0)
-        inside_outer_edge = np.clip(np.sign(self.r_outer**2 - dist2), 0.0, 1.0)
-        outside_inner_edge = np.clip(np.sign(dist2 - self.r_inner**2), 0.0, 1.0)
-        self.annulus_mask = inside_outer_edge * outside_inner_edge
+        # Compute whether needed subimage will fall entirely within image, or not:
+        subimage_within_image = (xlow >= 0) & (xhigh <= image_xsize - 1) & \
+                                (ylow >= 0) & (yhigh <= image_ysize - 1)
 
-        # Apply punches:
-        if df_punches is not None:
-            if len(df_punches) >= 1:
-                self._apply_punches(image_obj.plate_solution)  # only punches for this aperture.
+        # Compute values only if subimage entirely contained in current image:
+        if subimage_within_image:
+            self.subimage = self.image[xlow:xhigh + 1, ylow:yhigh + 1].copy()
 
-        # Evaluate and store several new fields:
-        self.evaluate()
+            # Construct mask arrays to represent disc and annulus (both same shape as subimage):
+            nx = xhigh - xlow + 1  # number of columns in subimage.
+            ny = yhigh - ylow + 1  # number of rows in subimage.
+            self.ygrid, self.xgrid = np.meshgrid(ylow + np.arange(ny), xlow + np.arange(nx))
+            dx = self.xgrid - self.xcenter
+            dy = self.ygrid - self.ycenter
+            dist2 = dx**2 + dy**2
+            self.disc_mask = np.clip(np.sign(self.r_disc**2 - dist2), 0.0, 1.0)
+            inside_outer_edge = np.clip(np.sign(self.r_outer**2 - dist2), 0.0, 1.0)
+            outside_inner_edge = np.clip(np.sign(dist2 - self.r_inner**2), 0.0, 1.0)
+            self.annulus_mask = inside_outer_edge * outside_inner_edge
+
+            # Apply punches:
+            if df_punches is not None:
+                if len(df_punches) >= 1:
+                    self._apply_punches(image_obj.plate_solution)  # only punches for this aperture.
+
+            # Evaluate and store several new fields:
+            self.evaluate()
+            del self.subimage, self.xgrid, self.ygrid, self.disc_mask, self.annulus_mask
 
         # Add other fields useful to calling code:
         image_center_x = self.image.shape[0] / 2.0
@@ -203,10 +219,6 @@ class Aperture:
         self.x1024 = (self.xcenter - image_center_x) / 1024.0
         self.y1024 = (self.ycenter - image_center_y) / 1024.0
         self.vignette = sqrt(self.x1024**2 + self.y1024**2)
-
-        # Remove unneeded fields from object:
-        del self.xlow, self.xhigh, self.ylow, self.yhigh, self.subimage
-        del self.xgrid, self.ygrid, self.disc_mask, self.annulus_mask
 
     def evaluate(self):
         """
@@ -227,8 +239,9 @@ class Aperture:
         self.annulus_flux = self._eval_sky_005()  # average adus / pixel, sky background
         estimated_background = self.n_disc_pixels * self.annulus_flux
         disc_values = np.ravel(self.subimage[self.disc_mask > 0])  # only values in mask.
-        self.net_flux = np.sum(disc_values) - estimated_background
-        if self.net_flux > 0:
+        this_net_flux = np.sum(disc_values) - estimated_background
+        if this_net_flux > 0:
+            self.net_flux = this_net_flux
             gain = 1.57  # this probably should come from Instrument object.
             annulus_values = np.ravel(self.subimage[self.annulus_mask > 0])
             self.annulus_flux_sigma = np.std(annulus_values)
@@ -248,15 +261,6 @@ class Aperture:
             self.x_centroid = np.sum(net_flux_grid * self.xgrid) / normalizor
             self.y_centroid = np.sum(net_flux_grid * self.ygrid) / normalizor
             self.fwhm = self._eval_fwhm()
-        else:
-            # Values for aperture with no flux (no detected object) inside:
-            self.net_flux = 0.0
-            self.annulus_flux_sigma = 0.0
-            self.net_flux_sigma = 0.0
-            self.sn = 0.0
-            self.x_centroid = self.xcenter
-            self.y_centroid = self.ycenter
-            self.fwhm = 0.0
 
     def yield_recentered(self):
         x_new, y_new = self.x_centroid, self.y_centroid
@@ -328,7 +332,7 @@ class Aperture:
         dy = self.ygrid - self.y_centroid
         dist2 = dx ** 2 + dy ** 2
         net_flux_xy = (self.disc_mask * (self.subimage - self.annulus_flux))
-        mean_dist2 = np.sum(net_flux_xy * dist2) / np.sum(net_flux_xy)
+        mean_dist2 = max(0.0, np.sum(net_flux_xy * dist2) / np.sum(net_flux_xy))
         sigma = sqrt(mean_dist2 / 2.0)
         # this math is verified 20170723, but yields larger FWHM than does MaxIm.
         return FWHM_PER_SIGMA * sigma
@@ -452,7 +456,8 @@ class FITS:
         y = crpix2 + dy
         return x - 1, y - 1  # FITS image origin=(1,1), but our (MaxIm/python) convention=(0,0)
 
-    # def radec_from_xy(self, x, y):
+    def radec_from_xy(self, x, y):
+        pass
     #     """
     #     Computes RA and Dec for a give x and y pixel count. Assumes flat image (no distortion,
     #         i.e., pure Tan projection).
