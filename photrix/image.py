@@ -60,8 +60,7 @@ class Image:
         :param star_id: this aperture's name, e.g., '114_1', 'ST Tri'. Unique to this Image [string]
         :param x0: initial x position of aperture center (will be refined) [float]
         :param y0: initial y position of aperture center (will be refined) [float]
-        :return: aperture object [Aperture class object] (probably not needed as it's added
-            to self.apertures in any case)
+        :return: [None]
         """
         if len(self.df_punches) >= 1:
             df_ap_punches = self.df_punches.loc[self.df_punches['StarID'] == star_id, :]
@@ -113,7 +112,9 @@ class Image:
                           'fwhm': ap.fwhm,
                           'x1024': ap.x1024,
                           'y1024': ap.y1024,
-                          'vignette': ap.vignette})
+                          'vignette': ap.vignette,
+                          'sky_bias': ap.sky_bias,
+                          'max_adu': ap.max_adu})
 
     def _recenter_aperture(self, ap_name, max_cycles=2, pixels_convergence=0.05):
         """
@@ -175,6 +176,8 @@ class Aperture:
         self.x_centroid = self.xcenter
         self.y_centroid = self.ycenter
         self.fwhm = 0.0
+        self.sky_bias = 0.0
+        self.max_adu = 0.0
 
         # Compute needed boundaries of subimage around this aperture:
         image_xsize, image_ysize = self.image.shape
@@ -222,23 +225,15 @@ class Aperture:
 
     def evaluate(self):
         """
-        Compute and several fields in this Aperture object.
-        :return: Several results, in Series by index [pandas Series]:
-            'n_disc_pixels': [float]
-            'n_annulus_pixels': [float]
-            'annulus_flux': total, not per-second [float]
-            'annulus_flux_sigma': total, not per-second [float]
-            'net_flux': total, not per-second [float]
-            'net_flux_sigma': total, not per-second [float]
-            'fwhm': Full Width at Half Maximum [float]
-            'x_centroid': new x centroid position [float]
-            'y_centroid': new y centroid position [float]
+        Compute and several fields in this Aperture object. Put them in Aperture object.
+        :return: [None]
         """
         self.n_disc_pixels = np.sum(self.disc_mask)
         self.n_annulus_pixels = np.sum(self.annulus_mask)
         self.annulus_flux = self._eval_sky_005()  # average adus / pixel, sky background
         estimated_background = self.n_disc_pixels * self.annulus_flux
         disc_values = np.ravel(self.subimage[self.disc_mask > 0])  # only values in mask.
+        self.max_adu = np.max(disc_values)
         this_net_flux = np.sum(disc_values) - estimated_background
         if this_net_flux > 0:
             self.net_flux = this_net_flux
@@ -260,7 +255,11 @@ class Aperture:
                 self.ycenter = self.y_centroid  # "
             self.x_centroid = np.sum(net_flux_grid * self.xgrid) / normalizor
             self.y_centroid = np.sum(net_flux_grid * self.ygrid) / normalizor
+
+            # Other evaluation results:
             self.fwhm = self._eval_fwhm()
+            sky_flux_bias = self.n_disc_pixels * self.annulus_flux_sigma
+            self.sky_bias = abs(-2.5 * (sky_flux_bias / self.net_flux / log(10.0)))
 
     def yield_recentered(self):
         x_new, y_new = self.x_centroid, self.y_centroid

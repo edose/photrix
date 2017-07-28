@@ -112,7 +112,7 @@ def test_class_image():
                                       'n_annulus_pixels', 'net_flux', 'net_flux_sigma',
                                       'annulus_flux', 'annulus_flux_sigma',
                                       'x_centroid', 'y_centroid', 'fwhm',
-                                      'x1024', 'y1024', 'vignette'])
+                                      'x1024', 'y1024', 'vignette', 'sky_bias', 'max_adu'])
 
     # Aperture case: near image center, two punches:
     im.add_aperture('dummy_2', 1535, 979)
@@ -137,11 +137,24 @@ def test_class_image():
     this_ap = im.apertures['dummy_3']
     assert [this_ap.x_centroid, this_ap.y_centroid] == pytest.approx([505.53, 481.35], abs=0.005)
     results = im.results_from_aperture('dummy_3')
-    assert results['y_centroid'] == this_ap.y_centroid
-    assert results['fwhm'] == pytest.approx(7.05, abs=0.05)
-    result_3 = im.results_from_aperture('dummy_3')
-    ap_3 = im.apertures['dummy_3']
-    assert result_3['x_centroid'] == ap_3.x_centroid
+    assert results['annulus_flux'] == pytest.approx(252.7, abs=1)
+    assert results['annulus_flux_sigma'] == pytest.approx(15.8, abs=0.5)
+    assert results['fwhm'] == pytest.approx(7.05, abs=0.1)
+    assert results['max_adu'] == 441
+    assert results['n_annulus_pixels'] == pytest.approx(448, abs=1)
+    assert results['n_disc_pixels'] == pytest.approx(315, abs=1)
+    assert results['net_flux'] == pytest.approx(7193, abs=1)
+    assert results['net_flux_sigma'] == pytest.approx(372.4, abs=1)
+    assert results['r_disc'] == 10
+    assert results['r_inner'] == 15
+    assert results['r_outer'] == 20
+    assert results['sky_bias'] == pytest.approx(0.75, abs=0.1)
+    assert results['vignette'] == pytest.approx(1.13, abs=0.01)
+    assert results['x1024'] == pytest.approx(-1.006, abs=0.001)
+    assert results['x_centroid'] == pytest.approx(505.5, abs=0.1)
+    assert results['y1024'] == pytest.approx(-0.529, abs=0.001)
+    assert results['y_centroid'] == pytest.approx(481.4, abs=0.1)
+    assert results['y_centroid'] == this_ap.y_centroid  # verify equivalence
 
 
 def test_fits__xy_from_radec():

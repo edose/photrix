@@ -8,7 +8,7 @@ import pandas as pd
 from scipy.interpolate import UnivariateSpline
 import statsmodels.formula.api as smf
 
-from .image import FITS, Image, R_DISC
+from .image import FITS, Image, R_DISC, Aperture
 from .user import Instrument, Site
 from .util import MixedModelFit, weighted_mean, jd_from_datetime_utc, RaDec
 from .fov import Fov, FOV_DIRECTORY
@@ -17,6 +17,7 @@ __author__ = "Eric Dose :: New Mexico Mira Project, Albuquerque"
 
 THIS_SOFTWARE_VERSION = '2.0.0'  # as of 20170716
 AN_TOP_DIRECTORY = 'J:/Astro/Images/C14'
+DF_MASTER_FILENAME = 'df_master.csv'
 FITS_REGEX_PATTERN = '^(.+)\.(f[A-Za-z]{2,3})$'
 MIN_FWHM = 1.0
 AAVSO_REPORT_DELIMITER = ','
@@ -291,7 +292,7 @@ def make_df_master(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
     Make the master DataFrame of all required information for downstream photometric processing.
     :param an_top_directory:
     :param an_rel_directory:
-    :return: df_master [large pandas DataFrame, one row per observation]
+    :return: [None] df_master is written as csv file to Photometry/df_master.txt.
     """
     # Build cross-reference DataFrame fits_fov_list:
     fits_fov_list = []
@@ -348,6 +349,10 @@ def make_df_master(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
         print(' >>>>> STOPPING at user request.')
         return None
 
+    print()
+    df_ur = pd.read_csv(os.path.join(an_top_directory, an_rel_directory,
+                                     'Photometry', 'File-renaming.txt'),
+                        sep=';', index_col='PhotrixName')
     fov_names = df_fits_fov['FOVname'].drop_duplicates().sort_values()
     df_master_list = []
     n_rows = 0
@@ -401,7 +406,8 @@ def make_df_master(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
                                          'fwhm': 'FWHM',
                                          'x1024': 'X1024',
                                          'y1024': 'Y1024',
-                                         'vignette': 'Vignette'},
+                                         'vignette': 'Vignette',
+                                         'sky_bias': 'SkyBias'},
                                 inplace=True)
             df_apertures = df_apertures.loc[df_apertures['net_flux'] > 0.0, :]
             df_apertures['InstMag'] = -2.5 * np.log10(df_apertures['net_flux']) + \
@@ -412,6 +418,22 @@ def make_df_master(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
             df_apertures['ModelStarID'] = image.fits.object + '_' + df_apertures['StarID']
             df_apertures.drop(['n_disc_pixels', 'n_annulus_pixels', 'net_flux', 'net_flux_sigma'],
                               axis=1, inplace=True)  # delete columns
+
+            # For each aperture, add its max ADU from the original ("Ur", uncalibrated) FITS file:
+            ur_filename = df_ur.loc[fits_name, 'UrName']
+            df_apertures['UrFITSfile'] = ur_filename
+            ur_image = Image.from_fits_path(an_top_directory, os.path.join(an_rel_directory, 'Ur'),
+                                            ur_filename)
+            df_apertures['MaxADU_Ur'] = np.nan
+            df_apertures['LogADU'] = np.nan
+            for star_id in df_apertures.index:
+                ap = Aperture(ur_image, star_id,
+                              df_apertures.loc[star_id, 'Xcentroid'],
+                              df_apertures.loc[star_id, 'Ycentroid'],
+                              df_punches=None)
+                df_apertures.loc[star_id, 'MaxADU_Ur'] = ap.max_adu
+                if ap.max_adu > 0.0:
+                    df_apertures.loc[star_id, 'LogADU'] = log10(ap.max_adu)
 
             # Add FOV star data to each aperture row:
             df = pd.merge(df_apertures, df_star_data_numbered, how='left', on='StarID')
@@ -474,17 +496,14 @@ def make_df_master(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
             serials_to_update = df_group.loc[np.isnan(df_group['CatMagError']), 'Serial']
             df_master.loc[serials_to_update, 'CatMagError'] = max_catmagerror
 
-    # Construct SkyBias and LogADU variables (df_master columns):
+    # Write df_master to file:
+    fullpath = os.path.join(an_top_directory, an_rel_directory, 'Photometry', DF_MASTER_FILENAME)
+    df_master.to_csv(fullpath, sep=';', quotechar='"', quoting=2)  # 2=quotes around non-numerics.
 
-    # Add column for old (Ur) filenames:
-
-
-
+    # Finish & exit:
     _archive_fov_files(an_top_directory, an_rel_directory, fov_names)
-
     _write_omit_txt_stub(an_top_directory, an_rel_directory)
-
-
+    # return df_master
 
 
 class SkyModel:
@@ -1870,7 +1889,7 @@ def get_df_master(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
     """
     if an_rel_directory is None:
         return None
-    fullpath = os.path.join(an_top_directory, an_rel_directory, 'Photometry', 'df_master.csv')
+    fullpath = os.path.join(an_top_directory, an_rel_directory, 'Photometry', DF_MASTER_FILENAME)
     if not os.path.exists(fullpath):
         return None
     df_master = pd.read_csv(fullpath, sep=';')
@@ -1929,8 +1948,8 @@ def _rename_to_photrix(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None)
             jd_mid_list.append(jd_from_datetime_utc(this_fits.utc_mid))
             filter_list.append(this_fits.filter)
     df = pd.DataFrame({'UrName': ur_names, 'Object': object_list,
-                       'JD_mid': jd_mid_list, 'Filter': filter_list},
-                      index=ur_names).sort_values(by=['Object', 'JD_mid'])
+                       'JD_mid': jd_mid_list, 'Filter': filter_list})
+    df = df.sort_values(by=['Object', 'JD_mid'])
 
     # Construct new photrix names and add them to DataFrame:
     serial_number = 1
@@ -1945,6 +1964,7 @@ def _rename_to_photrix(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None)
         photrix_name = '-'.join([this_object, '{:04d}'.format(serial_number), this_filter]) + '.fts'
         photrix_names.append(photrix_name)
     df['PhotrixName'] = photrix_names
+    df.index = photrix_names
 
     # Rename all the FITS files:
     for old_name, new_name in zip(df['UrName'], df['PhotrixName']):
