@@ -221,7 +221,7 @@ class Aperture:
         image_center_y = self.image.shape[1] / 2.0
         self.x1024 = (self.xcenter - image_center_x) / 1024.0
         self.y1024 = (self.ycenter - image_center_y) / 1024.0
-        self.vignette = sqrt(self.x1024**2 + self.y1024**2)
+        self.vignette = self.x1024**2 + self.y1024**2  # no sqrt...meant to be parabolic term
 
     def evaluate(self):
         """
@@ -259,7 +259,7 @@ class Aperture:
             # Other evaluation results:
             self.fwhm = self._eval_fwhm()
             sky_flux_bias = self.n_disc_pixels * self.annulus_flux_sigma
-            self.sky_bias = abs(-2.5 * (sky_flux_bias / self.net_flux / log(10.0)))
+            self.sky_bias = abs(-2.5 * (sky_flux_bias / self.net_flux) / log(10.0))
 
     def yield_recentered(self):
         x_new, y_new = self.x_centroid, self.y_centroid

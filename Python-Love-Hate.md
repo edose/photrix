@@ -1,4 +1,4 @@
-* Python Love/Hate
+# Python Love/Hate
 
 **Three things I love about python:***
 

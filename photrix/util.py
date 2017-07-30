@@ -264,7 +264,7 @@ def degrees_as_hex(angle_degrees, seconds_decimal_places=2):
 
 def weighted_mean(values, weights):
     """
-    Returns weighted mean and weighted std deviation of the mean (not of observations).
+    Returns weighted mean, weighted std deviation of values, and weighted std deviation of the mean.
     :param values: list (or other iterable) of values to be averaged
     :param weights: list (or other iterable) of weights; length must = length of values
     :return: 3-tuple (weighted mean, weighted std dev (population), weighted std dev of mean)
@@ -512,12 +512,6 @@ class MixedModelFit:
                                                 left_on=self.group_var,
                                                 right_index=True, how='left',
                                                 sort=False)['GroupValue']  # Series (left-join)
-            # THE FOLLOWING COMMENTS ARE DEFUNCT for a general Class. --------------------
-            # Random effect is ***SUBTRACTED***, because original fit was
-            #    InstMag ~ CatMag + Random effect + offsets + other fixed effects
-            #    and now its surrogate CatMag we're trying to estimate
-            # total_prediction = predicted_on_fixed_only - predicted_on_random_only
-            # END DEFUNCT COMMENTS. -------------------------------------------------------
             total_prediction = predicted_on_fixed_only + predicted_on_random_only
         else:
             total_prediction = predicted_on_fixed_only

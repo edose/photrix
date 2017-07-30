@@ -52,7 +52,7 @@ class Fov:
         ra_str, dec_str = Fov._directive_words(lines, "#CENTER")[:2]
         self.ra = ra_as_degrees(ra_str)
         self.dec = dec_as_degrees(dec_str)
-        self.chart = Fov._directive_words(lines, "#CHART")[0]
+        self.chart = Fov._directive_value(lines, "#CHART")
         self.fov_date = Fov._directive_words(lines, "#DATE")[0]
 
         # ---------- Main-target section.

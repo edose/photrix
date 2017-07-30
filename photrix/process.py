@@ -128,9 +128,8 @@ def start(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
 def assess(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
     """
     Rigorously assess FITS files and directory structure for readiness to construct df_master.
-    Collect and print all exceptions and summary stats in a pandas DataFrame.
-    Makes no changes to data. May be run as many times as needed (after start() and before
-        make_df_master().
+    Collect and print all warnings and summary stats. Makes no changes to data.
+    May be run as many times as needed, after start() and before make_df_master().
     :param an_top_directory: [string]
     :param an_rel_directory: [string]
     :return: [None]
@@ -287,7 +286,7 @@ def assess(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
         print('        Correct errors and rerun assess() until no errors remain.')
 
 
-def make_df_master(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
+def make_df_master(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None, ask_user=True):
     """
     Make the master DataFrame of all required information for downstream photometric processing.
     :param an_top_directory:
@@ -344,10 +343,13 @@ def make_df_master(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
         print(' >>>>> STOPPING: at least one FOV file is missing.')
         return None
 
-    answer = input('.....Proceed? (y/n): ')
-    if answer.strip().lower()[0] != 'y':
-        print(' >>>>> STOPPING at user request.')
-        return None
+    if ask_user is True:
+        answer = input('.....Proceed? (y/n): ')
+        if answer.strip().lower()[0] != 'y':
+            print(' >>>>> STOPPING at user request.')
+            return None
+    else:
+        print('ask_user = False, so make_df_master() continues...')
 
     print()
     df_ur = pd.read_csv(os.path.join(an_top_directory, an_rel_directory,
@@ -366,8 +368,8 @@ def make_df_master(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
         star_id_list, ra_list, dec_list, star_type_list, mags_list = zip(*star_data)
         df_star_data_numbered = pd.DataFrame({'Number': range(len(star_data)),
                                               'StarID': star_id_list,
-                                              'DegRA': ra_list, 'DegDec': dec_list,
-                                              'StarType': star_type_list,
+                                              'degRA': ra_list, 'degDec': dec_list,
+                                              'StarType': [s.title() for s in star_type_list],
                                               'Mags': mags_list})
         df_star_data_numbered.index = range(len(df_star_data_numbered))
         if len(fov.punches) >= 1:
@@ -383,8 +385,8 @@ def make_df_master(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
             image = Image.from_fits_path(an_top_directory,
                                          os.path.join(an_rel_directory, 'Calibrated'), fits_name)
             for star_id, ra, dec in zip(df_star_data_numbered['StarID'],
-                                        df_star_data_numbered['DegRA'],
-                                        df_star_data_numbered['DegDec']):
+                                        df_star_data_numbered['degRA'],
+                                        df_star_data_numbered['degDec']):
                 x0, y0 = image.fits.xy_from_radec(RaDec(ra, dec))
                 image.add_aperture(star_id, x0, y0)
             image.add_punches(df_punches=df_punches)
@@ -416,7 +418,8 @@ def make_df_master(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
                                            (df_apertures['net_flux_sigma'] /
                                             df_apertures['net_flux'])  # math verified 20170726.
             df_apertures['ModelStarID'] = image.fits.object + '_' + df_apertures['StarID']
-            df_apertures.drop(['n_disc_pixels', 'n_annulus_pixels', 'net_flux', 'net_flux_sigma'],
+            df_apertures.drop(['n_disc_pixels', 'n_annulus_pixels', 'max_adu',
+                               'net_flux', 'net_flux_sigma'],
                               axis=1, inplace=True)  # delete columns
 
             # For each aperture, add its max ADU from the original ("Ur", uncalibrated) FITS file:
@@ -481,24 +484,29 @@ def make_df_master(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
                 print(fits_name, '=', len(df), 'rows',
                       '--> NO ROWS from this file ... df_master_now_has', n_rows, 'rows.')
 
-    # Make df_master by appending all individual-image dataframes:
+    # Make df_master by concatenating all individual-image dataframes:
     df_master = pd.DataFrame(pd.concat(df_master_list, ignore_index=True))
-    df_master.sort_values(by=['Object', 'JD_mid', 'Number'])  # keeps image stars in FOV order.
-    df_master.drop('Number', axis=1, inplace=True)
+    df_master.sort_values(['JD_mid', 'StarType', 'Number'], inplace=True)
+    df_master.drop(['Number', 'Object'], axis=1, inplace=True)
     df_master.insert(0, 'Serial', range(1, 1 + len(df_master)))  # inserts in place
-    df_master.index = df_master['Serial']
+    df_master.index = list(df_master['Serial'])
 
     # For comp stars w/ CatMagError==NA, overwrite w/ largest CatMagError for same FOV and filter:
-    df_groupby = df_master[df_master['StarType'] == 'comp'].groupby(['FOV', 'Filter'])
+    # TODO: revisit using largest CatMagError for all CatMagError values. Seems too harsh.
+    # TODO: move this loop to CatMagError computation (just above). Avoids .groupby().
+    df_groupby = df_master[df_master['StarType'] == 'Comp'].groupby(['FOV', 'Filter'])
     for group_name, df_group in df_groupby:
-        if any(np.isnan(df_group['CatMagError'])):
+        serials_nan_error = df_group.loc[np.isnan(df_group['CatMagError']), 'Serial'].tolist()
+        serials_zero_error = df_group.loc[df_group['CatMagError'] <= 0.0, 'Serial'].tolist()
+        serials_to_update = serials_nan_error + serials_zero_error
+        if sum(serials_to_update) >= 1:
             max_catmagerror = df_group['CatMagError'].max()
-            serials_to_update = df_group.loc[np.isnan(df_group['CatMagError']), 'Serial']
             df_master.loc[serials_to_update, 'CatMagError'] = max_catmagerror
 
     # Write df_master to file:
     fullpath = os.path.join(an_top_directory, an_rel_directory, 'Photometry', DF_MASTER_FILENAME)
-    df_master.to_csv(fullpath, sep=';', quotechar='"', quoting=2)  # 2=quotes around non-numerics.
+    df_master.to_csv(fullpath, sep=';', quotechar='"',
+                     quoting=2, index=False)  # quoting=2-->quotes around non-numerics.
 
     # Finish & exit:
     _archive_fov_files(an_top_directory, an_rel_directory, fov_names)

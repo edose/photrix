@@ -884,3 +884,117 @@ def _overwrite_stare_comps_txt(an_top_directory, an_rel_directory, directive_lin
     all_text = [line + '\n' for line in (header + directive_lines_to_write)]
     with open(fullpath, 'w') as f:
         f.writelines(all_text)
+
+
+def test_make_df_master():
+    # For now, do this in external directories. Later, set it up in photrix test subdirectories.
+    # For now, we do not construct df_master.csv files here, we construct them separately,
+    #     then only compare them here.
+
+    # Read in dataframe as constructed by R software (2015-7):
+    df_r = pd.read_csv('J:/Astro/Images/C14/20170710/Photometry/df_master.csv', sep=';',)
+    df_r.index = df_r['Serial']
+    # Execute test function (photrix, python), and read dataframe back in:
+    # process.make_df_master('J:/Astro/Images/C14', '20170710-py', ask_user=False)
+    df_py = pd.read_csv('J:/Astro/Images/C14/20170710-py/Photometry/df_master.csv', sep=';')
+    df_py.index = df_py['Serial']
+
+    assert set(df_py.columns) == set(df_r.columns)  # columns must be same, differing order OK.
+    assert len(df_py) == len(df_r)
+    assert df_py['Serial'].tolist() == list(range(1, 1 + len(df_py)))
+
+    # Check column dtypes are OK:
+    for col in df_py.columns:
+        col_types_same = (df_py[col].dtype == df_r[col].dtype)
+        col_type_ok = col_types_same or\
+                      (str(df_py[col].dtype).startswith('float') and
+                       str(df_r[col].dtype).startswith('int'))
+        if not col_type_ok:
+            print('py column', col, 'is', str(df_py[col].dtype), 'but r has', df_r[col].dtype)
+        assert col_type_ok
+
+    # Check that object and integer column contents are exactly equal,
+    #     and that float column contents are approximately equal.
+    print()
+    assert [col[:3] in ['obj', 'str', 'int', 'flo'] for col in df_py.columns]
+    py_cols = [col for col in df_py.columns
+               if str(df_py[col].dtype).lower()[:3] in ['obj', 'str', 'int']] +\
+              [col for col in df_py.columns
+               if str(df_py[col].dtype).lower()[:3] == 'flo']  # exact cols first, then floats.
+    for col in py_cols:
+        print('starting col', col)
+        py_type = str(df_py[col].dtype).lower()[:3]
+        py_values = list(df_py[col])
+        r_values = list(df_r[col])
+        if col == 'UTC_start':
+            assert all([py.split('+')[0] == r.replace('T', ' ')
+                        for (py, r) in zip(py_values, r_values)])  # py is ISO 8601, R ~ different.
+        elif col == 'SkyADU':
+            mean_shift = sum(py_values)/len(py_values) - sum(r_values)/len(r_values)
+            assert mean_shift == pytest.approx(-6, abs=2)  # seems to be the shift.
+        elif col in ['SkySigma', 'FWHM']:
+            pct_abs_diff = [abs(py - r) / ((py + r) / 2) * 100.0
+                            for (py, r) in zip(py_values, r_values)
+                            if py > 0 and r > 0]
+            mean_pct_abs_diff = sum(pct_abs_diff) / len(pct_abs_diff)
+            assert mean_pct_abs_diff < 5.0
+        elif col in ['Vignette', 'X1024', 'Y1024']:
+            abs_diff = [abs(py-r) for (py, r) in zip(py_values, r_values)]
+            mean_abs_diff = sum(abs_diff)/len(abs_diff)
+            assert mean_abs_diff < 0.004
+        elif col in ['Xcentroid', 'Ycentroid']:
+            abs_diff = [abs(py - r) for (py, r) in zip(py_values, r_values)]
+            mean_abs_diff = sum(abs_diff) / len(abs_diff)
+            assert mean_abs_diff < 0.2
+        elif col == 'SkyBias':
+            pass  # probably going to delete this term before too long, so don't bother testing.
+        elif col == 'InstMag':
+            stdev_diff_bright = (pd.Series([py - r
+                                            for (py, r) in zip(py_values, r_values)
+                                            if py < -6])).std()
+            assert stdev_diff_bright < 0.015
+        elif col == 'InstMagSigma':
+            max_diff = (pd.Series([abs(py - r)
+                                     for (py, r) in zip(py_values, r_values)
+                                     if (py > 0) and (py < 0.03)])).max()
+            assert max_diff < 0.015
+        elif col == 'CatMag':
+            both_nan = [np.isnan(py) and np.isnan(r) for (py, r) in zip(py_values, r_values)]
+            equal = [py == r for (py, r) in zip(py_values, r_values)]
+            cat_mag_match = [b or e for (b,e) in zip(both_nan, equal)]
+            assert all(cat_mag_match)
+        elif col == 'CatMagError':
+            both_nan = [np.isnan(py) and np.isnan(r) for (py, r) in zip(py_values, r_values)]
+            equal = [py == r for (py, r) in zip(py_values, r_values)]
+            r_nan_py_max = []
+            for (py, r, f, star) in zip(py_values, r_values, df_py['Filter'], df_py['ModelStarID']):
+                this_tf = False
+                if np.isnan(r) and not np.isnan(py):
+                    this_max = max(df_py.loc[(df_py['Filter'] == f)
+                                             & (df_py['ModelStarID'] == star)
+                                             & (df_py['CatMagError'] is not None),
+                                             'CatMagError'])
+                    this_tf = (py == this_max)
+                r_nan_py_max.append(this_tf)
+            cat_mag_match = [(b or e or rp) for (b, e, rp) in zip(both_nan, equal, r_nan_py_max)]
+            assert all(cat_mag_match)
+        elif col == 'CI':
+            py_nan = set(np.isnan(py_values))
+            r_nan = set(np.isnan(r_values))
+            assert py_nan == r_nan
+            max_diff = pd.Series([abs(py - r) for (py, r) in zip(py_values, r_values)]).max()
+            assert max_diff < 0.001
+        elif py_type in ['obj', 'str', 'int']:
+            if not py_values == r_values:
+                print('col', col, 'differ')
+            assert py_values == r_values
+        else:
+            # Here, both are presumed to be floats:
+            py_values = [float(v) for v in py_values]
+            r_values = [float(v) for v in r_values]
+            if not py_values == pytest.approx(r_values):
+                print('col', col, 'differ')
+            assert py_values == pytest.approx(r_values)
+
+
+

@@ -149,7 +149,7 @@ def test_class_image():
     assert results['r_inner'] == 15
     assert results['r_outer'] == 20
     assert results['sky_bias'] == pytest.approx(0.75, abs=0.1)
-    assert results['vignette'] == pytest.approx(1.13, abs=0.01)
+    assert results['vignette'] == pytest.approx(results['x1024']**2 + results['y1024']**2, abs=0.01)
     assert results['x1024'] == pytest.approx(-1.006, abs=0.001)
     assert results['x_centroid'] == pytest.approx(505.5, abs=0.1)
     assert results['y1024'] == pytest.approx(-0.529, abs=0.001)
