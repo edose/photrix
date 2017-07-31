@@ -672,12 +672,16 @@ class SkyModel:
             instrument = Instrument(self.instrument_name)
             transform_vi = instrument.filters[self.filter]['transform']['V-I']
             dep_var_offset += transform_vi * self.df_model['CI']
+            print(' >>>>> Transform (Color Index V-I) not fit: value fixed at',
+                  '{0:.3f}'.format(transform_vi))
         if self.fit_extinction:
             fixed_effect_var_list.append('Airmass')
         else:
             site = Site(self.site_name)
             extinction = site.extinction[self.filter]
             dep_var_offset += extinction * self.df_model['Airmass']
+            print(' >>>>> Extinction (Airmass) not fit: value fixed at',
+                  '{0:.3f}'.format(extinction))
         if self.fit_sky_bias:
             if sum([x != 0 for x in self.df_model['SkyBias']]) > int(len(self.df_model) / 2):
                 fixed_effect_var_list.append('SkyBias')
@@ -1020,6 +1024,8 @@ class PredictionSet:
 
         _write_aavso_report_map_stub(self.an_top_directory, self.an_rel_directory)
 
+        self._write_summary_to_console()
+
     def compute_comp_mags(self):
         """
         Get raw, predicted mag estimates for ALL eligible comp-star observations, in all filters.
@@ -1220,8 +1226,7 @@ class PredictionSet:
         df = pd.merge(df_predictions_checks_targets, df_transforms,
                       how='left', left_on='Filter', right_index=True)
         df['TransformedMag'] = df['UntransformedMag'] - df['Transform'] * df['CI']
-        df = df[[np.isnan(tm) == False for tm in df['TransformedMag']]]
-        df_transformed_without_errors = df
+        df_transformed_without_errors = df.loc[~np.isnan(df['TransformedMag']), :]
         return df_transformed_without_errors
 
     def _compute_all_errors(self, df_transformed_without_errors):
@@ -1250,8 +1255,11 @@ class PredictionSet:
                 cirrus_sigma = \
                     float(self.df_cirrus_effect.loc[self.df_cirrus_effect['Image'] == image,
                                                     'CirrusSigma'])
-                df_targets_checks = (df_transformed[df_transformed['FITSfile'] == image])\
-                    [['Serial', 'InstMagSigma']]
+                # df_targets_checks = (df_transformed[df_transformed['FITSfile'] == image])\
+                #     [['Serial', 'InstMagSigma']]  # USE NEXT LINE...(uses .loc[]
+                df_targets_checks = df_transformed.loc[df_transformed['FITSfile'] == image,
+                                                       ['Serial', 'InstMagSigma']]
+
                 for serial in df_targets_checks['Serial']:
                     inst_mag_sigma = \
                         float(df_targets_checks.loc[df_targets_checks['Serial'] == serial,
@@ -1289,14 +1297,29 @@ class PredictionSet:
 
         return df_transformed
 
+    def _write_summary_to_console(self):
+        counts_by_star_type = self.df_transformed[['ModelStarID', 'StarType']]\
+            .groupby(['StarType']).count()['ModelStarID']
+        n_target_stars = len(self.df_transformed.loc[self.df_transformed['StarType'] == 'Target',
+                                                     'ModelStarID'].unique())
+        print('\nThis PredictionSet yields',
+              str(counts_by_star_type['Target']), 'Target obs for',
+              str(n_target_stars), 'targets and',
+              str(counts_by_star_type['Check']), 'Check observations.\n')
+        print('Now you are ready to:\n',
+              '    1. run ps.stare_comps(fov=\'XX Xxx\', star_ID=\'\', filter=\'\') '
+              'if any eclipsers or other stares\n',
+              '    2. run ps.markup_report(), then combine/reject target obs in report_map.txt\n',
+              '    3. repeat 1. and 2. as needed\n',
+              '    4. run ps.aavso_report() and submit it to AAVSO.')
+
     def stare_comps(self, fov, star_id, this_filter):
         lines = stare_comps(self.df_transformed, fov, star_id, this_filter)
         print('\n'.join(lines))
 
-    def markup_report(self, write_txt_file=True):
+    def markup_report(self):
         """
         Makes markup report from current PredictionSet object.
-        :param write_txt_file: True iff markup_report.txt to be written to current directory.
         :return: text string ready for printing (e.g., by copy/paste into Microsoft Word).
         """
 
@@ -1343,7 +1366,7 @@ class PredictionSet:
         df_text['Exp'] = [s[:-2] + '  ' if s.endswith('.0') else s
                           for s in df_text['Exp']]  # remove any trailing decimal point and zero
         df_text['Mag'] = format_column(df['Mag'], decimal_pts=3)
-        df_text['MaxADU'] = format_column(df['MaxADU'], min_width=5)
+        df_text['MaxADU'] = format_column(round(df['MaxADU'].astype(int)), min_width=6)
         df_text['FWHM'] = format_column(df['FWHM'], decimal_pts=2, min_width=4)
         df_text['JD_fract'] = format_column(df['JD_num'], decimal_pts=4, min_width=6)
         df_text['Check'] = format_column(df['Check'], min_width=3)
@@ -1390,7 +1413,6 @@ class PredictionSet:
         with open(output_fullpath, 'w') as this_file:
             this_file.write(''.join(lines))
         print('Done.\n' + 'Written to file \'' + output_fullpath + '\'.', flush=True)
-        return lines
 
     def aavso_report(self, write_file=True, return_df=False):
         """

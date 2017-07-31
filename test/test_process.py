@@ -892,7 +892,7 @@ def test_make_df_master():
     #     then only compare them here.
 
     # Read in dataframe as constructed by R software (2015-7):
-    df_r = pd.read_csv('J:/Astro/Images/C14/20170710/Photometry/df_master.csv', sep=';',)
+    df_r = pd.read_csv('J:/Astro/Images/C14/20170710-R/Photometry/df_master.csv', sep=';',)
     df_r.index = df_r['Serial']
     # Execute test function (photrix, python), and read dataframe back in:
     # process.make_df_master('J:/Astro/Images/C14', '20170710-py', ask_user=False)
@@ -931,7 +931,7 @@ def test_make_df_master():
                         for (py, r) in zip(py_values, r_values)])  # py is ISO 8601, R ~ different.
         elif col == 'SkyADU':
             mean_shift = sum(py_values)/len(py_values) - sum(r_values)/len(r_values)
-            assert mean_shift == pytest.approx(-6, abs=2)  # seems to be the shift.
+            assert mean_shift == pytest.approx(0, abs=2)  # seems to be the shift.
         elif col in ['SkySigma', 'FWHM']:
             pct_abs_diff = [abs(py - r) / ((py + r) / 2) * 100.0
                             for (py, r) in zip(py_values, r_values)
