@@ -235,10 +235,10 @@ def test_class_skymodel():
     assert modelV.transform ==\
         (Instrument(modelV.instrument_name)).filters[modelV.filter]['transform']['V-I']
     assert modelV.extinction == Site(modelV.site_name).extinction[modelV.filter]
-    assert modelV.vignette == pytest.approx(-0.00586, abs=0.0001)  # changed
+    assert modelV.vignette == pytest.approx(-0.00603, abs=0.0001)  # changed
     assert modelV.x == 0
     assert modelV.y == 0
-    assert modelV.sky_bias == pytest.approx(0.6653, abs=0.001)
+    assert modelV.sky_bias == pytest.approx(0.6671, abs=0.001)
     assert modelV.log_adu == 0
     assert modelV.sigma == pytest.approx(0.0143, abs=0.001)
     # Test SkyModel._predict_fixed_only():
@@ -251,7 +251,7 @@ def test_class_skymodel():
                                           'Std_SA35-0001-V.fts'],
                              'InstMag': [-7.68043698, -10.7139893, -6.500945076]},
                             index=['9997a', '9998a', '9999a'])
-    expected_star_mags = [12.3406, 9.1917, 13.3358]  # ideal CatMags
+    expected_star_mags = [12.3553, 9.2302, 13.2887]  # ideal CatMags
     mag_predictions_fixed_only = modelV._predict_fixed_only(df_input)
     random_effect_values = modelV.df_image.loc[df_input['FITSfile'], 'Value']
     # Remember: we SUBTRACT random effects (because original fit was
@@ -290,12 +290,12 @@ def test_class_skymodel():
     assert modelV.transform ==\
         (Instrument(modelV.instrument_name)).filters[modelV.filter]['transform']['V-I']
     assert modelV.extinction == Site(modelV.site_name).extinction[modelV.filter]
-    assert modelV.vignette == pytest.approx(-0.00027, abs=0.0001)
+    assert modelV.vignette == pytest.approx(-0.00050, abs=0.0001)
     assert modelV.x == 0
     assert modelV.y == 0
-    assert modelV.sky_bias == pytest.approx(0.5456, abs=0.001)
-    assert modelV.log_adu == pytest.approx(-0.0290, abs=0.001)
-    assert modelV.sigma == pytest.approx(0.0136, abs=0.001)
+    assert modelV.sky_bias == pytest.approx(0.5500, abs=0.001)
+    assert modelV.log_adu == pytest.approx(-0.0284, abs=0.001)
+    assert modelV.sigma == pytest.approx(0.0135, abs=0.001)
     # Test SkyModel._predict_fixed_only():
     df_input = pd.DataFrame({'Serial': [9997, 9998, 9999],
                              'SkyBias': [0.55, 0.9, 0.5454],
@@ -307,7 +307,7 @@ def test_class_skymodel():
                                           'Std_SA35-0001-V.fts'],
                              'InstMag': [-7.68043698, -10.7139893, -6.500945076]},
                             index=['9997a', '9998a', '9999a'])
-    expected_star_mags = [12.3782, 9.2846, 13.3766]  # ideal CatMags
+    expected_star_mags = [12.3921, 9.3211, 13.3284]  # ideal CatMags
     mag_predictions_fixed_only = modelV._predict_fixed_only(df_input)
     random_effect_values = modelV.df_image.loc[df_input['FITSfile'], 'Value']
     # Remember: we SUBTRACT random effects (because original fit was
@@ -685,7 +685,7 @@ def test_class_predictionset():
     assert ps.df_transformed.shape == (532, 36)
     assert list(ps.df_transformed['Serial'].iloc[[0, 10, 500]]) == [441, 332, 1589]
     assert ps.df_transformed['TransformedMag'].sum() == pytest.approx(6408.9, abs=1)  # changed
-    assert ps.df_transformed['TotalSigma'].sum() == pytest.approx(10.115, abs=0.01)
+    assert ps.df_transformed['TotalSigma'].sum() == pytest.approx(10.103, abs=0.01)
 
 
 def test_stare_comps():
@@ -699,18 +699,18 @@ def test_stare_comps():
                                             '12,23,34,45', '34']})
     df_test.index = df_test['Serial']
 
-    result_A1 = process.stare_comps(df_test, fov='A', star_id='Star1', this_filter='V')
+    result_A1 = process.get_stare_comps(df_test, fov='A', star_id='Star1', this_filter='V')
     assert len(result_A1) == 5
     assert result_A1[0].startswith('EDIT file ')
     assert result_A1[4].strip() == '4 comps -> 2 images qualify  -->   #COMPS A, V, 12, 23, 34, 45'
 
-    result_A2 = process.stare_comps(df_test, fov='A', star_id='Star2', this_filter='V')
+    result_A2 = process.get_stare_comps(df_test, fov='A', star_id='Star2', this_filter='V')
     assert len(result_A2) == 5
     assert result_A2[1].strip() == '1 comps -> 2 images qualify  -->   #COMPS A, V, 34'
     assert result_A2[3].strip() == '3 comps -> 1 images qualify  -->   #COMPS A, V, 12, 23, 34'
 
     # Case: only one image (won't happen for real stares, but an edge case):
-    result_B1 = process.stare_comps(df_test, fov='B', star_id='Star1', this_filter='V')
+    result_B1 = process.get_stare_comps(df_test, fov='B', star_id='Star1', this_filter='V')
     assert len(result_B1) == 2
     assert result_B1[1].strip() == '>>> One or zero qualifying images in dataframe.'
 
@@ -823,7 +823,7 @@ def test_predictionset_aavso_report():
                                skymodel_list=skymodel_list)
     df_report = ps.aavso_report(write_file=True, return_df=True)
 
-    assert df_report.shape == (291, 17)
+    assert df_report.shape == (397, 17)
 
 
 # ---------------  INTERNAL TEST-HELPER FUNCTIONS ----------------------------------------------

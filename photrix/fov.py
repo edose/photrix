@@ -32,6 +32,8 @@ class Fov:
                 lines = fov_file.readlines()
             self.is_valid = True  # conditional on parsing in rest of __init__()
         else:
+            # TODO: replace error print stmts by a new field "reason_invalid",
+            # TODO: and a new signature parameter 'print_errors=False.'
             print('>>>>> FOV file \'' + fov_fullpath + '\' not found. FOV object invalid.')
             self.is_valid = False
             return

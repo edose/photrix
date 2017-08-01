@@ -44,7 +44,7 @@ START_PROCESSING_HERE___________ = ''
 #       instrument_name='Borea', site_name='DSW',
 #       max_inst_mag_sigma=0.05, skymodel_list=[v, r, i])  # skymodel_list = list of SkyModel objs
 #    IF STARES exist in this AN:
-#        stare_comps(an_rel_directory='20170509', instrument_name='Borea')
+#        get_stare_comps(an_rel_directory='20170509', instrument_name='Borea')
 #        --> [edit stare_comps.txt to reflect choice of stare comps, each filter]
 #        plot_stare_target(an_rel_directory='20170509', fov=FOV)  # ensure OK
 #    make_report_map(an_rel_directory='20170509')
@@ -84,10 +84,12 @@ def start(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
     else:
         print('>>>>> Could not create \'' + target_subdir + '\'. (Already exists?)')
     fits_subdir = os.path.join(an_top_directory, an_rel_directory)
+    n_moved = 0
     for fits_entry in os.scandir(fits_subdir):
         if fits_entry.is_file():
             shutil.move(os.path.join(fits_entry.path),
                         os.path.join(target_subdir, fits_entry.name))
+            n_moved += 1
 
     # Make remaining needed subdirectories:
     needed_subdirectories = ['Calibrated', 'Exclude', 'Photometry', 'FOV']
@@ -118,7 +120,8 @@ def start(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
     #     (within this rel_directory's /Uncalibrated subdirectory):
     _rename_to_photrix(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=an_rel_directory)
 
-    print('\n>>>>> Next:')
+    print('.start() has moved', str(n_moved), 'FITS files to /Uncalibrated & has renamed them.')
+    print('\n >>>>> Next:')
     print('    1. Calibrate with MaxIm now (File > Batch Save and Convert,')
     print('           from /Uncalibrated to /Calibrated.')
     print('    2. Visually inspect all FITS, e.g., with MaxIm')
@@ -229,7 +232,7 @@ def assess(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
             print('    ' + f + ' has FITS Object = \'' + fits_object + '\'.')
         print('\n')
     else:
-        print('All FITS objects match.')
+        print('All FITS objects match their filenames.')
 
     fov_file_not_ready = df.loc[~ df['FovFileReady'], 'Filename']
     if len(fov_file_not_ready) >= 1:
@@ -237,7 +240,7 @@ def assess(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
         for f in fov_file_not_ready:
             fits_object = df.loc[f, 'Object']
             # fits_object = FITS(an_top_directory, fits_subdir, f).object
-            print('    ' + f + 'is missing FOV file \'' + fits_object + '\'.')
+            print('    ' + f + ' is missing FOV file \'' + fits_object + '\'.')
         print('\n')
     else:
         print('All FOV files are ready.')
@@ -272,7 +275,7 @@ def assess(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
     # Set all FITS file extensions to '.fts' (MaxIm calibration sets it to '.fit' for some reason):
     _set_fits_extensions(an_top_directory=an_top_directory, fits_subdir=fits_subdir,
                          fits_filenames=df['Filename'])
-    print('All FITS extensions are now \'.fts\'.')
+    print('All FITS extensions are OK (=\'.fts\').')
 
     # Summarize and write instructions for next steps:
     n_warnings = len(not_calibrated) + len(not_platesolved) + len(object_nonmatch) +\
@@ -511,6 +514,7 @@ def make_df_master(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None, ask
     # Finish & exit:
     _archive_fov_files(an_top_directory, an_rel_directory, fov_names)
     _write_omit_txt_stub(an_top_directory, an_rel_directory)
+    print()
     # return df_master
 
 
@@ -865,6 +869,7 @@ class SkyModel:
                  s=str(len(self.df_model)) + ' observations in model.',
                  verticalalignment='top', horizontalalignment='center',
                  fontsize=12)
+        fig.canvas.set_window_title(self.filter + ': Q-Q')
         plt.show()
 
         # FIGURE 2 (multiplot): Set up plot grid and style parameters:
@@ -964,6 +969,7 @@ class SkyModel:
                      '                   ' + self.filter + ' filter                ' +
                      '{:%Y-%m-%d     %H:%M  utc}'.format(datetime.now(timezone.utc)),
                      color='darkblue', fontsize=20, weight='bold')
+        fig.canvas.set_window_title(self.filter + ': 12 plots')
         plt.show()
 
 
@@ -1284,15 +1290,15 @@ class PredictionSet:
         df_transformed = df_transformed.sort_values(by=['ModelStarID', 'JD_mid'])
 
         # ############# Start temporary code block: mimic R df:
-        r_columns = ['Serial', 'ModelStarID', 'FITSfile', 'StarID', 'Chart',
-                     'Xcentroid', 'Ycentroid',
-                     'InstMag', 'InstMagSigma', 'StarType', 'CatMag', 'CatMagError',
-                     'Exposure', 'JD_mid', 'Filter', 'Airmass', 'CI', 'SkyBias', 'Vignette',
-                     'LogADU', 'CirrusEffect', 'CirrusSigma', 'NumCompsUsed',
-                     'CompIDsUsed', 'NumCompsRemoved', 'JD_num', 'TransformedMag', 'ModelSigma',
-                     'TotalSigma', 'FOV', 'MaxADU_Ur', 'FWHM', 'SkyADU', 'SkySigma']
-        df_r = (df_transformed.copy())[r_columns]
-        df_r.to_csv(r'C:/24hrs/df_r.txt', sep=';', quotechar='"')  # '.txt', else Excel misbehaves
+        # r_columns = ['Serial', 'ModelStarID', 'FITSfile', 'StarID', 'Chart',
+        #              'Xcentroid', 'Ycentroid',
+        #              'InstMag', 'InstMagSigma', 'StarType', 'CatMag', 'CatMagError',
+        #              'Exposure', 'JD_mid', 'Filter', 'Airmass', 'CI', 'SkyBias', 'Vignette',
+        #              'LogADU', 'CirrusEffect', 'CirrusSigma', 'NumCompsUsed',
+        #              'CompIDsUsed', 'NumCompsRemoved', 'JD_num', 'TransformedMag', 'ModelSigma',
+        #              'TotalSigma', 'FOV', 'MaxADU_Ur', 'FWHM', 'SkyADU', 'SkySigma']
+        # df_r = (df_transformed.copy())[r_columns]
+        # df_r.to_csv(r'C:/24hrs/df_r.txt', sep=';', quotechar='"')  # '.txt', else Excel misbehaves
         # ############# End temporary code to mimic R df.
 
         return df_transformed
@@ -1307,15 +1313,41 @@ class PredictionSet:
               str(n_target_stars), 'targets and',
               str(counts_by_star_type['Check']), 'Check observations.\n')
         print('Now you are ready to:\n',
-              '    1. run ps.stare_comps(fov=\'XX Xxx\', star_ID=\'\', filter=\'\') '
+              '    1. run ps.stare_comps(fov=\'XX Xxx\', star_id=\'\', this_filter=\'\') '
               'if any eclipsers or other stares\n',
-              '    2. run ps.markup_report(), then combine/reject target obs in report_map.txt\n',
-              '    3. repeat 1. and 2. as needed\n',
-              '    4. run ps.aavso_report() and submit it to AAVSO.')
+              '    2. run ps.markup_report(), then combine/reject target obs in'
+              ' report_map.txt\n',
+              '    3. run ps.aavso_report() and submit it to AAVSO.\n')
 
     def stare_comps(self, fov, star_id, this_filter):
-        lines = stare_comps(self.df_transformed, fov, star_id, this_filter)
+        lines = get_stare_comps(self.df_transformed, fov, star_id, this_filter)
         print('\n'.join(lines))
+
+    def stare_plot(self, star_id):
+        # TODO: add this_filter parm and facility, default this-filter=None for all filters.
+        import matplotlib.pyplot as plt
+
+        # Setup data:
+        df = (self.df_transformed.copy())
+        df = df.loc[df['StarID'] == star_id, :]
+        if len(df) == 0:
+            print('This PredictionSet has no data for star_id \'' + star_id + '\'.')
+            return
+        floor_x = floor(df['JD_mid'].min())
+        x = df['JD_mid'] - floor_x
+        y = df['TransformedMag']
+
+        # Construct & draw stare plot:
+        fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(12, 8))  # (width, height) in "inches"
+        ax.grid(True, color='lightgray', zorder=-1000)
+        ax.set_title(star_id + '      ' + self.an_rel_directory,
+                     color='darkblue', fontsize=20, weight='bold')
+        ax.set_xlabel('JD(mid) - ' + str(floor_x))
+        ax.set_ylabel('Best Mag')
+        ax.scatter(x=x, y=y, alpha=0.8, zorder=+1000)
+        plt.gca().invert_yaxis()  # per custom of plotting magnitudes brighter=upward
+        fig.canvas.set_window_title(star_id)
+        plt.show()
 
     def markup_report(self):
         """
@@ -1343,7 +1375,7 @@ class PredictionSet:
         df = pd.merge(df, df_check_stars, how='left', on='FITSfile')
         df.index = df['Serial']
         # df = df.sort_values(by=['Target', 'FITSfile', 'Filter', 'Exp'])
-        df = df.sort_values(by=['FOV', 'Target', 'FITSfile'])
+        df = df.sort_values(by=['Target', 'FOV', 'JD_num'])
 
         # A nested helper function:
         def format_column(iterable, decimal_pts=None, min_width=0, left_pad=1):
@@ -1387,7 +1419,8 @@ class PredictionSet:
         # Make text lines of report:
         lines = ['MARKUP REPORT for ' + self.an_rel_directory +
                  '        generated by photrix ' + THIS_SOFTWARE_VERSION +
-                 '  at  ' + '{:%Y-%m-%d %H:%M  UTC}'.format(datetime.now(timezone.utc))]
+                 '  at  ' + '{:%Y-%m-%d %H:%M  UTC}'.format(datetime.now(timezone.utc)) +
+                 '        ' + str(len(df)) + ' observations.']
         left_spacer = 2 * ' '
         nan_text = ' - '
         header_line = left_spacer + ' '.join([col.rjust(dict_widths[col]) for col in column_list])
@@ -1428,7 +1461,8 @@ class PredictionSet:
         # Construct text header lines:
         header = ["#TYPE=Extended",
                   "#OBSCODE=DERA",  # DERA = Eric Dose's observer code @ AAVSO
-                  "#SOFTWARE=python scripts, https://github.com/edose/photrix tag/version=" +
+                  "#SOFTWARE=custom python scripts, available at"
+                  " https://github.com/edose/photrix tag/version=" +
                   THIS_SOFTWARE_VERSION,
                   "#DELIM=" + AAVSO_REPORT_DELIMITER,
                   "#DATE=JD",
@@ -1436,11 +1470,6 @@ class PredictionSet:
                   "#This report of " + str(len(df_report)) + " observations was generated " +
                   '{:%Y-%m-%d %H:%M:%S UTC}'.format(datetime.now(timezone.utc)) +
                   " from raw data in directory " + self.an_rel_directory + ".",
-                  "#Interim software platforms:",
-                  "#--- FITS handling and Aperture photometry: "
-                  "R scripts, https://github.com/edose/photometry-R tag/version 1.2.2",
-                  "#--- Transforms, sky models, and report generation: "
-                  "python scripts, https//github.com/edose/photrix tag/version 2.0.0",
                   "#Eric Dose, New Mexico Mira Project, ABQ, NM",
                   "#",
                   "#NAME,DATE,MAG,MERR,FILT,TRANS,MTYPE,CNAME,CMAG,KNAME,KMAG,AMASS," +
@@ -1608,7 +1637,6 @@ class PredictionSet:
                 # Single comp-star case:
                 df_report.loc[rows_to_update, 'CompName'] = (df_comps_this_jd['StarID']).iloc[0]
                 df_report.loc[rows_to_update, 'CompMag'] = (df_comps_this_jd['ObsMag']).iloc[0]
-                # df_report.loc[rows_to_update, 'Notes'] += ' / 1 comp'
 
         # Nested function for convenience:
         def all_same(list_or_series):
@@ -1686,14 +1714,15 @@ class PredictionSet:
             df_new['NComps'] = df_combine['NComps'].min()
             df_new['Airmass'] = df_combine['Airmass'].mean()
             df_new['Notes'] = str(n_combine) + ' obs  >= ' + \
-                str(df_new['NComps'].iloc[0]) + ' comps'
+                str(int(df_new['NComps'].iloc[0])) + ' comps'
             df_report.update(df_new)
             df_report.drop(serials_to_delete, inplace=True)  # drop rows by index
-            print('Combination of Serials ' + ' '.join(df_combine['Serial'].astype(str)) +
-                  ': done.')
+            print('Combination of Serials ' +
+                  ' '.join(df_combine['Serial'].astype(int).astype(str)) + ': done.')
         return df_report
 
 END_PROCESSING_HERE____________ = ''
+
 
 class TransformModel:
     def __init__(self, an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None,
@@ -1927,7 +1956,7 @@ def get_df_master(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
     return df_master
 
 
-def stare_comps(df_transformed, fov=None, star_id=None, this_filter=None):
+def get_stare_comps(df_transformed, fov=None, star_id=None, this_filter=None):
     df = df_transformed.copy()
     df = df[df['FOV'] == fov]
     df = df[df['StarID'] == star_id]
@@ -2152,7 +2181,7 @@ def _write_omit_txt_stub(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=Non
 
 def _curate_stare_comps(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None, df_in=None):
     """
-    Using user's stare_comps.txt in this an_rel_directory, 
+    Using user's stare_comps.txt in this an_rel_directory,
        remove unwanted (stare) comp observations from further use.
     :return: data for all observations remaining eligible after this curation [DataFrame],
                 and warning messages [list of strings]
@@ -2202,7 +2231,7 @@ def _write_stare_comps_txt_stub(an_top_directory=AN_TOP_DIRECTORY, an_rel_direct
     """
     lines = [';----- This is stare_comps.txt for AN directory ' + an_rel_directory,
              ';----- Select comp stars (by FOV, filter, StarID) from input to '
-             '_predict_fixed_only()',
+             'rerun of PredictionSet() ',
              ';----- Example directive line:',
              ';',
              ';#COMPS  Obj, V, 132, 133 144    ; to KEEP from FOV \'Obj\': '
@@ -2411,7 +2440,7 @@ def _write_aavso_report_map_stub(an_top_directory, an_rel_directory):
              ";"]
     lines = [line + '\n' for line in lines]
     fullpath = os.path.join(an_top_directory, an_rel_directory, 'Photometry',
-                            'aavso_report_map.txt')
+                            'report_map.txt')
     if not os.path.exists(fullpath):
         with open(fullpath, 'w') as f:
             f.writelines(lines)

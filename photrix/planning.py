@@ -847,6 +847,7 @@ def make_an_roster(an_date_string, output_directory, site_name='DSW', instrument
             csv_written = True
         except PermissionError:
             input('***** CLOSE file \'' + output_fullpath + '\' and hit Enter.')
+    print('Done.')
 
 
 def make_an_plan(plan_excel_path='c:/24hrs/Planning.xlsx', site_name='DSW', instrument_name='Borea',
