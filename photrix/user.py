@@ -88,7 +88,9 @@ class Instrument:
         .camera["shortest_exposure"] : in seconds (float)
         .camera["saturation_adu"] : maximum ADUs while linear (float)
         .filters[filter(string)]["reference_exposure_mag10"] : possibly several (float)
-        .filters[filter(string)]["transform"][color(string)] : possibly several (float)
+        [for transforms use either self.transform(filter, ci_type) or self.transforms(filter)
+        .filter_list: list of filters for this instrument [list of strings]
+        ._filter_data: complex data structure of filter data, best avoided.
         .is_valid : True if attribute values appear valid (boolean)
     """
     def __init__(self, instrument_name):
@@ -124,17 +126,45 @@ class Instrument:
         camera["saturation_adu"] = camera.get("saturation_adu", 64000)
         self.camera = camera
 
-        self.filters = data.get("filters")
+        self._filter_data = data.get('filters')
+        self.filter_list = list(self._filter_data.keys())
 
         is_valid = True  # default to be falsified if any error.
-
+        if len(self.filter_list) == 0:
+            is_valid = False
         self.is_valid = is_valid
 
-    def filter_list(self):
-        return list(self.filters.keys())
+    def transforms(self, filter):
+        """
+        Returns all transform info for one given filter name, e.g., 'V'.
+        :param filter: as 'V' [string]
+        :return: list of 2-tuples (CI_type, CI_value), most preferred CI_type first [list].
+        """
+        if filter not in self.filter_list:
+            return []
+        transform_list = list(self._filter_data[filter]['transform'])
+        keys = [list(t.keys())[0] for t in transform_list]
+        vals = [list(t.values())[0] for t in transform_list]
+        pairs = [(k, v) for (k, v) in zip(keys, vals) if v is not None]
+        return pairs
+
+    def transform(self, filter, ci_type):
+        """
+        Returns ONE transform for one given filter and Color Index type.
+        :param filter: as 'V' [string]
+        :param ci_type: as 'V-I' [string]
+        :return: transform value [float] if it exists for this instrument, else None.
+        """
+        if filter not in self.filter_list:
+            return None
+        pairs = self.transforms(filter)
+        for pair in pairs:
+            if pair[0] == ci_type:
+                return pair[1]
+        return None
 
     def __repr__(self):
-        return "Instrument('" + self.filename + "')"
+        return "Instrument('" + self.filename + "'), \'" + self.description + '\''
 
     def __str__(self):
         return self.__repr__() + " valid=" + str(self.is_valid)

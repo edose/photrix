@@ -33,6 +33,7 @@ def get_aavso_webobs_raw_table(star_id, num_obs=100, jd_start=None, jd_end=None)
         url += "&start=" + str(jd_start)
     if jd_end is not None:
         url += "&end=" + str(jd_end)
+    # TODO: Try to use requests Session objects for performance.
     r = requests.get(url)
     obs_list = []
     if r.status_code == HTTP_OK_CODE:

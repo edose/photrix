@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 from scipy.interpolate import UnivariateSpline
 import statsmodels.formula.api as smf
+import matplotlib.pyplot as plt
 
 from .image import FITS, Image, R_DISC, Aperture
 from .user import Instrument, Site
@@ -294,6 +295,7 @@ def make_df_master(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None, ask
     Make the master DataFrame of all required information for downstream photometric processing.
     :param an_top_directory:
     :param an_rel_directory:
+    :param ask_user: True to ask user before building df_master; False to proceed directly.
     :return: [None] df_master is written as csv file to Photometry/df_master.txt.
     """
     # Build cross-reference DataFrame fits_fov_list:
@@ -674,7 +676,7 @@ class SkyModel:
             fixed_effect_var_list.append('CI')
         else:
             instrument = Instrument(self.instrument_name)
-            transform_vi = instrument.filters[self.filter]['transform']['V-I']
+            transform_vi = instrument.transform(self.filter, 'V-I')
             dep_var_offset += transform_vi * self.df_model['CI']
             print(' >>>>> Transform (Color Index V-I) not fit: value fixed at',
                   '{0:.3f}'.format(transform_vi))
@@ -739,7 +741,7 @@ class SkyModel:
             self.transform = self.mm_fit.df_fixed_effects.loc['CI', 'Value']  # .loc(row, col)
         else:
             instrument = Instrument(self.instrument_name)
-            self.transform = instrument.filters[self.filter]['transform']['V-I']
+            self.transform = instrument.transform(self.filter, 'V-I')
 
         if self.fit_extinction:
             self.extinction = self.mm_fit.df_fixed_effects.loc['Airmass', 'Value']
@@ -814,8 +816,6 @@ class SkyModel:
         return predicted_star_mags
 
     def plots(self):
-        import matplotlib.pyplot as plt
-
         # Setup for all Figures.
         obs_is_std = [name.startswith('Std_') for name in self.df_model['FOV']]
         obs_point_colors = ['darkgreen' if obs_is_std[i] is True else 'black'
@@ -1726,18 +1726,19 @@ END_PROCESSING_HERE____________ = ''
 
 class TransformModel:
     def __init__(self, an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None,
-                 filter=None, ci_filters=None, fovs_to_include="All",
+                 filter=None, ci_type=None, fovs_to_include="All",
                  instrument_name='Borea', site_name='DSW',
                  max_cat_mag_error=0.03, max_inst_mag_sigma=0.03, max_ci=+2.5,
                  saturation_adu=None, fit_sky_bias=True,
                  fit_extinction=True, fit_log_adu=True):
         """
-        Constructs a transform on filter against filter pair ci_filters, given a df_master.csv
-            in the given directory.
+        Constructs a transform on filter against ci filter description ci_type,
+            given a df_master.csv in the given directory.
         :param an_top_directory: e.g., 'J:\Astro\Images\C14' [string]
         :param an_rel_directory: e.g., '20170504'. The dir 'Photometry' is subdir of this. [string]
         :param filter: name of filter to which this model applies [string, e.g., 'V' or 'R']
-        :param ci_filters: a list of two color-index filter names, e.g., ['V','I'] for V-I index
+        :param ci_type: two color-index filter names separated by minus sign,
+            e.g., 'V-I' for V-I index [string]
         :param fovs_to_include: defines which eligible rows (by FOV) will be included:
             Choices:
                 "All" will use all eligible rows in df_master;
@@ -1758,7 +1759,11 @@ class TransformModel:
         self.an_top_directory = an_top_directory
         self.an_rel_directory = an_rel_directory
         self.filter = filter
-        self.ci_filters = ci_filters
+        self.ci_filters = [s.strip().upper() for s in (ci_type.strip().split('-'))]
+        if len(self.ci_filters) != 2:
+            print(' >>>>> Invalid ci_type \'' + ci_type + '\'')
+            self.is_valid = False
+            return
         self.fovs_to_include = fovs_to_include
         self.instrument_name = instrument_name
         self.site_name = site_name

@@ -46,13 +46,19 @@ def test_Instrument():
     assert i.camera["microns_per_pixel"] == 9
     assert i.camera["shortest_exposure"] == 0.6
     assert i.camera["saturation_adu"] == 54000
-    assert i.filters["V"]["reference_exposure_mag10"] == 22
-    assert i.filters["R"]["reference_exposure_mag10"] == 30
-    assert i.filters["V"]["transform"]["V-I"] == 0.02
-    assert i.filters["V"]["transform"]["B-V"] == 0
-    assert i.filters["V"]["transform"]["V-R"] == 0
-    assert i.filters["I"]["transform"]["V-I"] == 0.025
-    assert set(i.filter_list()) == {"V", "R", "I"}  # set
+    assert i._filter_data["V"]["reference_exposure_mag10"] == 22
+    assert i._filter_data["R"]["reference_exposure_mag10"] == 30
+    assert len(i.transforms('V')) == 1
+    assert len(i.transforms('R')) == 3
+    assert len(i.transforms('I')) == 2  # doesn't include null/None transforms.
+    assert len(i.transforms('XXX')) == 0  # filter absent from instrument file
+    assert set(i.filter_list) == {"V", "R", "I"}  # set
+    assert i.transforms('V') == [('V-I', 0.02)]
+    assert i.transforms('R') == [('V-I', 0.03), ('B-V', -0.04), ('V-R', 0)]
+    assert i.transforms('I') == [('V-I', 0.025), ('V-R', 0)]
+    assert i.transform('R', 'B-V') == -0.04
+    assert i.transform('X', 'V-I') is None
+    assert i.transform('V', 'A-B') is None
 
     instrument_name = "Instrument_test2"
     i = user.Instrument(instrument_name)
@@ -73,8 +79,10 @@ def test_Instrument():
     assert i.camera["microns_per_pixel"] == 0
     assert i.camera["shortest_exposure"] == 0
     assert i.camera["saturation_adu"] == 64000
-    assert i.filters["V"]["reference_exposure_mag10"] == 22
-    assert i.filters["V"]["transform"]["V-I"] == 0.02
+    assert i._filter_data["V"]["reference_exposure_mag10"] == 22
+    assert i.filter_list == ['V']
+    assert i.transforms('V') == [('V-I', 0.02)]
+    assert i.transform('V', 'V-I') == 0.02
 
 
 def test_Astronight():

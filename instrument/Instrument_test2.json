@@ -14,9 +14,9 @@
   "filters": {
     "V": {
       "reference_exposure_mag10": 22,
-      "transform": {
-        "V-I": 0.02
-      }
+      "transform": [
+        {"V-I": 0.02}
+      ]
     }
   }
 }

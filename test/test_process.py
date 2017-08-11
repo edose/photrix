@@ -12,6 +12,7 @@ from photrix.util import MixedModelFit
 PHOTRIX_ROOT_DIRECTORY = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TEST_TOP_DIRECTORY = os.path.join(PHOTRIX_ROOT_DIRECTORY, "test")
 
+
 def test__get_line_parms():
     assert process._get_line_parms('#SERIAL  12, 34 44 , 42  ;  this is a comment',
                                    '#SERIAL', True, 1, None) == (['12', '34', '44', '42'], None)
@@ -233,7 +234,7 @@ def test_class_skymodel():
     assert isinstance(modelV.mm_fit, MixedModelFit)
     assert len(modelV.mm_fit.df_fixed_effects) == 3
     assert modelV.transform ==\
-        (Instrument(modelV.instrument_name)).filters[modelV.filter]['transform']['V-I']
+        (Instrument(modelV.instrument_name)).transform(modelV.filter, 'V-I')
     assert modelV.extinction == Site(modelV.site_name).extinction[modelV.filter]
     assert modelV.vignette == pytest.approx(-0.00603, abs=0.0001)  # changed
     assert modelV.x == 0
@@ -288,7 +289,7 @@ def test_class_skymodel():
     assert isinstance(modelV.mm_fit, MixedModelFit)
     assert len(modelV.mm_fit.df_fixed_effects) == 4
     assert modelV.transform ==\
-        (Instrument(modelV.instrument_name)).filters[modelV.filter]['transform']['V-I']
+        (Instrument(modelV.instrument_name)).transform(modelV.filter, 'V-I')
     assert modelV.extinction == Site(modelV.site_name).extinction[modelV.filter]
     assert modelV.vignette == pytest.approx(-0.00050, abs=0.0001)
     assert modelV.x == 0
@@ -724,7 +725,7 @@ def test_transform_model():
     # Case: one FOV with one image:
     tm = process.TransformModel(an_top_directory=an_top_directory,
                                 an_rel_directory=an_rel_directory,
-                                filter='V', ci_filters=['V', 'I'], fovs_to_include='RZ Mon',
+                                filter='V', ci_type='V-I', fovs_to_include='RZ Mon',
                                 instrument_name='Borea', site_name='DSW')
     assert tm.is_valid
     assert len(tm.image_list) == 1
@@ -741,7 +742,7 @@ def test_transform_model():
     # Case: one FOV with multiple images:
     tm = process.TransformModel(an_top_directory=an_top_directory,
                                 an_rel_directory=an_rel_directory,
-                                filter='V', ci_filters=['V', 'I'], fovs_to_include='Std_SA32',
+                                filter='V', ci_type='V-I', fovs_to_include='Std_SA32',
                                 instrument_name='Borea', site_name='DSW')
     assert tm.is_valid
     assert len(tm.image_list) == 4
@@ -752,7 +753,7 @@ def test_transform_model():
     # Case: list of FOVs:
     tm = process.TransformModel(an_top_directory=an_top_directory,
                                 an_rel_directory=an_rel_directory,
-                                filter='V', ci_filters=['V', 'I'],
+                                filter='V', ci_type='V-I',
                                 fovs_to_include=['Std_SA32', 'RZ Mon'],
                                 instrument_name='Borea', site_name='DSW')
     assert tm.is_valid
@@ -762,7 +763,7 @@ def test_transform_model():
     # Case: fovs_to_include = "Standards" (test data selection only):
     tm = process.TransformModel(an_top_directory=an_top_directory,
                                 an_rel_directory=an_rel_directory,
-                                filter='V', ci_filters=['V', 'I'], fovs_to_include='Standards',
+                                filter='V', ci_type='V-I', fovs_to_include='Standards',
                                 instrument_name='Borea', site_name='DSW')
     assert tm.is_valid
     assert len(tm.image_list) == 7
@@ -773,7 +774,7 @@ def test_transform_model():
     # Case: fovs_to_include = "All" (test data selection only):
     tm = process.TransformModel(an_top_directory=an_top_directory,
                                 an_rel_directory=an_rel_directory,
-                                filter='V', ci_filters=['V', 'I'], fovs_to_include='All',
+                                filter='V', ci_type='V-I', fovs_to_include='All',
                                 instrument_name='Borea', site_name='DSW')
     assert tm.is_valid
     all_images = df_master['FITSfile'].drop_duplicates().tolist()
@@ -790,7 +791,7 @@ def test_transform_model():
     # Case: fovs_to_include = "All" w/ different color index (test data selection only):
     tm = process.TransformModel(an_top_directory=an_top_directory,
                                 an_rel_directory=an_rel_directory,
-                                filter='R', ci_filters=['R', 'I'], fovs_to_include='All',
+                                filter='R', ci_type='R-I', fovs_to_include='All',
                                 instrument_name='Borea', site_name='DSW')
     assert tm.is_valid
     assert len(tm.image_list) == 18
@@ -823,7 +824,7 @@ def test_predictionset_aavso_report():
                                skymodel_list=skymodel_list)
     df_report = ps.aavso_report(write_file=True, return_df=True)
 
-    assert df_report.shape == (397, 17)
+    assert df_report.shape == (291, 17)
 
 
 # ---------------  INTERNAL TEST-HELPER FUNCTIONS ----------------------------------------------
