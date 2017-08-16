@@ -39,6 +39,13 @@ class Timespan:
         delay = timedelta(seconds=seconds)
         return Timespan(self.start+delay, self.end+delay)
 
+    def expand_seconds(self, seconds):
+        # Use negative seconds to contract Timespan. New Timespan will have non-negative duration.
+        expansion = timedelta(seconds=seconds)
+        new_start = min(self.start - expansion, self.midpoint)
+        new_end = max(self.end + expansion, self.midpoint)
+        return Timespan(new_start, new_end)
+
     def intersect(self, other):
         new_start = max(self.start, other.start)
         new_end = min(self.end, other.end)

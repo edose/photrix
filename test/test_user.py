@@ -46,8 +46,8 @@ def test_Instrument():
     assert i.camera["microns_per_pixel"] == 9
     assert i.camera["shortest_exposure"] == 0.6
     assert i.camera["saturation_adu"] == 54000
-    assert i._filter_data["V"]["reference_exposure_mag10"] == 22
-    assert i._filter_data["R"]["reference_exposure_mag10"] == 30
+    assert i.filter_data["V"]["reference_exposure_mag10"] == 22
+    assert i.filter_data["R"]["reference_exposure_mag10"] == 30
     assert len(i.transforms('V')) == 1
     assert len(i.transforms('R')) == 3
     assert len(i.transforms('I')) == 2  # doesn't include null/None transforms.
@@ -79,7 +79,7 @@ def test_Instrument():
     assert i.camera["microns_per_pixel"] == 0
     assert i.camera["shortest_exposure"] == 0
     assert i.camera["saturation_adu"] == 64000
-    assert i._filter_data["V"]["reference_exposure_mag10"] == 22
+    assert i.filter_data["V"]["reference_exposure_mag10"] == 22
     assert i.filter_list == ['V']
     assert i.transforms('V') == [('V-I', 0.02)]
     assert i.transform('V', 'V-I') == 0.02

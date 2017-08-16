@@ -254,7 +254,7 @@ def assess(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
     if len(odd_fwhm_list) >= 1:
         print('\nUnusual FWHM (in pixels):')
         for f, fwhm in odd_fwhm_list:
-            print('    ' + f + 'has unusual FWHM of ' + '{0:.2f}'.format(fwhm) + ' pixels.')
+            print('    ' + f + ' has unusual FWHM of ' + '{0:.2f}'.format(fwhm) + ' pixels.')
         print('\n')
     else:
         print('All FWHM values seem OK.')
@@ -268,7 +268,7 @@ def assess(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
     if len(odd_fl_list) >= 1:
         print('\nUnusual FocalLength (vs mean of ' + '{0:.1f}'.format(mean_fl) + ' mm:')
         for f, fl in odd_fl_list:
-            print('    ' + f + 'has unusual Focal length of ' + str(fl))
+            print('    ' + f + ' has unusual Focal length of ' + str(fl))
         print('\n')
     else:
         print('All Focal Lengths seem OK.')
@@ -290,11 +290,13 @@ def assess(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
         print('        Correct errors and rerun assess() until no errors remain.')
 
 
-def make_df_master(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None, ask_user=True):
+def make_df_master(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None,
+                   instrument_name='Borea', ask_user=True):
     """
     Make the master DataFrame of all required information for downstream photometric processing.
     :param an_top_directory:
     :param an_rel_directory:
+    :param instrument_name: name of Instrument (object) that took data [string]
     :param ask_user: True to ask user before building df_master; False to proceed directly.
     :return: [None] df_master is written as csv file to Photometry/df_master.txt.
     """
@@ -347,9 +349,10 @@ def make_df_master(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None, ask
     if not all_fovs_exist:
         print(' >>>>> STOPPING: at least one FOV file is missing.')
         return None
+    print(' ------------------------------\n    ' + str(len(df_ask_user)) + ' FOVS.')
 
     if ask_user is True:
-        answer = input('.....Proceed? (y/n): ')
+        answer = input('    .....Proceed? (y/n): ')
         if answer.strip().lower()[0] != 'y':
             print(' >>>>> STOPPING at user request.')
             return None
@@ -357,6 +360,7 @@ def make_df_master(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None, ask
         print('ask_user = False, so make_df_master() continues...')
 
     print()
+    instrument = Instrument(instrument_name)
     df_ur = pd.read_csv(os.path.join(an_top_directory, an_rel_directory,
                                      'Photometry', 'File-renaming.txt'),
                         sep=';', index_col='PhotrixName')
@@ -384,7 +388,9 @@ def make_df_master(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None, ask
         else:
             df_punches = pd.DataFrame()
 
+        df_fov_list = []
         fits_names = df_fits_fov.loc[df_fits_fov['FOVname'] == fov_name, 'FITSname']
+
         for fits_name in fits_names:
             # Construct Image object for this FITS file:
             image = Image.from_fits_path(an_top_directory,
@@ -451,17 +457,17 @@ def make_df_master(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None, ask
             # Add catalog mag, CatMagError, and color index from FOV stars and Image's filter:
             df['CatMag'] = np.nan
             df['CatMagError'] = np.nan
-            df['CI'] = np.nan
+            df['CI'] = np.nan  # old-school V-I color index
             for star_id in df['StarID']:
                 mags = df.loc[star_id, 'Mags']
                 # We extract from mags (dict) with .get() in case this filter is missing.
                 mag_and_error = mags.get(image.fits.filter, (np.nan, np.nan))
                 df.loc[star_id, 'CatMag'] = mag_and_error[0]
                 df.loc[star_id, 'CatMagError'] = mag_and_error[1]
-                # TODO: Make choice of color index passbands more flexible (distant future?).
-                ci_mag_1 = mags.get('V', (np.nan, np.nan))[0]
-                ci_mag_2 = mags.get('I', (np.nan, np.nan))[0]
-                df.loc[star_id, 'CI'] = ci_mag_1 - ci_mag_2
+                # TODO: Make choice of color index passbands more flexible.
+                ci_mag_1 = mags.get('V', (np.nan, np.nan))[0]  # old-school V-I color index
+                ci_mag_2 = mags.get('I', (np.nan, np.nan))[0]  # old-school V-I color index
+                df.loc[star_id, 'CI'] = ci_mag_1 - ci_mag_2    # old-school V-I color index
             df.drop('Mags', axis=1, inplace=True)
 
             # Add FITS data to all rows:
@@ -480,7 +486,7 @@ def make_df_master(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None, ask
             df['Chart'] = fov.chart
 
             # Append this image's dataframe to list, write image line to console:
-            df_master_list.append(df)
+            df_fov_list.append(df)
             n_rows += len(df)
             if len(df) >= 1:
                 print(fits_name, '=', len(df), 'rows',
@@ -489,7 +495,12 @@ def make_df_master(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None, ask
                 print(fits_name, '=', len(df), 'rows',
                       '--> NO ROWS from this file ... df_master_now_has', n_rows, 'rows.')
 
-    # Make df_master by concatenating all individual-image dataframes:
+        # Make df_fov by concatenating all and complete df_fov
+        df_fov = pd.DataFrame(pd.concat(df_fov_list, ignore_index=True))
+        df_fov = _add_ci_values(df_fov, df_star_data_numbered, instrument)
+        df_master_list.append(df_fov)
+
+    # Make df_master by concatenating all fov dataframes:
     df_master = pd.DataFrame(pd.concat(df_master_list, ignore_index=True))
     df_master.sort_values(['JD_mid', 'StarType', 'Number'], inplace=True)
     df_master.drop(['Number', 'Object'], axis=1, inplace=True)
@@ -1669,7 +1680,7 @@ class PredictionSet:
                     print('>>>>> Non-uniform Comp Names for line: \'' + this_line +
                           '\'...Combine is skipped.')
                     continue
-                real_check_names = [cn for cn in df_combine['CheckName'] if not np.isnan(cn)]
+                real_check_names = [cn for cn in df_combine['CheckName'] if cn is not None]
                 if len(real_check_names) >= 2:
                     if not all_same(real_check_names):
                         print('>>>>> Non-uniform Check Stars for line: \'' + this_line +
@@ -1959,6 +1970,45 @@ def get_df_master(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
     df_master = pd.read_csv(fullpath, sep=';')
     df_master.index = df_master['Serial']
     return df_master
+
+
+def _add_ci_values(df_fov, df_star_data_numbered, instrument):
+    # Killswitch is next line:
+    return df_fov
+
+    df_fov['CI_type'] = ''
+    df_fov['CI_value'] = np.nan
+    df_by_filter = df_fov.groupby('Filter')
+    for this_filter, df in df_by_filter.groups:
+        transforms = instrument.transforms(this_filter)
+        # Decide best CI type for this filter:
+        if len(instrument.transforms(this_filter)) == 1:
+            # Easy case: only one transform for this filter, so use it:
+            ci_type = instrument.transforms(this_filter)[0]
+            ci_filters = [s.strip().upper() for s in (ci_type.strip().split('-'))]
+            ci_filter_1 = ci_filters[0]
+            ci_filter_2 = ci_filters[1]
+        else:
+            # Hard case: have to decide which transform to use for this FOV and filter:
+            for this_transform in instrument.transforms(this_filter):
+                this_ci_type, this_ci_value = this_transform  # unpack tuple
+                these_ci_filters = [s.strip().upper() for s in (this_ci_type.strip().split('-'))]
+                this_ci_filter_1 = these_ci_filters[0]
+                this_ci_filter_2 = these_ci_filters[1]
+                # Score for this filter: how many target obs satisfy these two criteria:
+                # Criterion 1:
+                # Criterion 2:
+
+        # Fill in CI_type and CI_value (CI_type decided above):
+        # CI type described by ci_filter_1 and ci_filter_2
+        star_ids = df['StarID'].unique()
+        for star_id in star_ids:
+            mags = df_star_data_numbered.loc[df_star_data_numbered['StarID'] == star_id, 'Mags']
+            ci_mag_1 = mags[ci_filter_1][0]
+            ci_mag_2 = mags[ci_filter_2][0]
+            df.loc[df_star_data_numbered['StarID'] == star_id, 'CI_type'] = ci_type
+            df.loc[df_star_data_numbered['StarID'] == star_id, 'CI_value'] = ci_mag_1 - ci_mag_2
+    return df_fov
 
 
 def get_stare_comps(df_transformed, fov=None, star_id=None, this_filter=None):

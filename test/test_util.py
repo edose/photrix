@@ -182,6 +182,13 @@ def test_Timespan():
     ts1delay = ts1.delay_seconds(120)
     assert ts1delay.start == ts1.start + timedelta(seconds=120)
     assert ts1delay.end == ts1.end + timedelta(seconds=120)
+    # Test .expand_seconds():
+    ts1expand = ts1.expand_seconds(27)
+    assert ts1expand.start == ts1.start - timedelta(seconds=27)
+    assert ts1expand.end == ts1.end + timedelta(seconds=27)
+    ts1contract = ts1.expand_seconds(-0.6 * ts1.seconds)
+    assert ts1contract.start == ts1.midpoint
+    assert ts1contract.end == ts1.midpoint
     # Test .intersect():
     ts1a = util.Timespan(dt1 + timedelta(hours=0.5), dt2 + timedelta(hours=3))
     ts1a_int1 = ts1.intersect(ts1a)

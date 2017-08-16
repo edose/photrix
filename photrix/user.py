@@ -90,7 +90,7 @@ class Instrument:
         .filters[filter(string)]["reference_exposure_mag10"] : possibly several (float)
         [for transforms use either self.transform(filter, ci_type) or self.transforms(filter)
         .filter_list: list of filters for this instrument [list of strings]
-        ._filter_data: complex data structure of filter data, best avoided.
+        .filter_data: complex data structure of filter data, best avoided.
         .is_valid : True if attribute values appear valid (boolean)
     """
     def __init__(self, instrument_name):
@@ -126,8 +126,8 @@ class Instrument:
         camera["saturation_adu"] = camera.get("saturation_adu", 64000)
         self.camera = camera
 
-        self._filter_data = data.get('filters')
-        self.filter_list = list(self._filter_data.keys())
+        self.filter_data = data.get('filters')
+        self.filter_list = list(self.filter_data.keys())
 
         is_valid = True  # default to be falsified if any error.
         if len(self.filter_list) == 0:
@@ -142,7 +142,7 @@ class Instrument:
         """
         if filter not in self.filter_list:
             return []
-        transform_list = list(self._filter_data[filter]['transform'])
+        transform_list = list(self.filter_data[filter]['transform'])
         keys = [list(t.keys())[0] for t in transform_list]
         vals = [list(t.values())[0] for t in transform_list]
         pairs = [(k, v) for (k, v) in zip(keys, vals) if v is not None]

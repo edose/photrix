@@ -1634,7 +1634,7 @@ def write_summary(plan_list, an, fov_dict, output_directory, exp_time_factor):
 
 def calc_exp_time(mag, filter, instrument, max_exp_time, exp_time_factor=1):
     # Raw exposure time from mag + properties of instrument (camera & filters).
-    exp_time_from_mag = instrument.filters[filter]['reference_exposure_mag10'] *\
+    exp_time_from_mag = instrument.filter_data[filter]['reference_exposure_mag10'] *\
                         10.0 ** ((mag - 10.0) / 2.5)
 
     # Apply exposure time factor (from user, for this night) (before asymptotes and limits):
