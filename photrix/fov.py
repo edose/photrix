@@ -1,5 +1,6 @@
 
 import os
+import sys
 import pandas as pd
 import json
 from collections import Counter
@@ -12,6 +13,7 @@ __author__ = "Eric Dose :: New Mexico Mira Project, Albuquerque"
 
 FOV_DIRECTORY = "C:/Dev/Photometry/FOV/"
 CHART_DIRECTORY = 'C:/Dev/Photometry/Chart'
+DEFAULT_PUNCHES_TEXT_PATH = 'C:/Dev/Photometry/punches.txt'
 VALID_FOV_OBSERVING_STYLES = ["Standard", "Stare", "Monitor", "LPV"]
 CURRENT_SCHEMA_VERSION = "1.5"
 LPV_MAG_SINE_FRACTION = 0.5
@@ -877,51 +879,176 @@ def get_chart_error(bands, chart_filter_name):
     return chart_error
 
 
-# def all_fovs_1_4_to_1_5(fov_1_4_directory=FOV_DIRECTORY, fov_1_5_directory=None):
-#     """
-#     Convenience function to upgrade all FOVs in fov_1_4_directory from 1.4 to 1.5
-#     :param fov_1_4_directory: directory from which to read (all) FOV 1.4 files  [string]
-#     :param fov_1_5_directory: director to which to write FOV 1.5 files [string]
-#     :return: summary of operations [string]
-#     """
-#     # Create new empty FOV 1.5 directory if needed:
-#     if fov_1_5_directory is None:
-#         if fov_1_4_directory.endswith('/FOV/'):
-#             fov_1_5_directory = fov_1_4_directory.split('/FOV/')[0] + '/FOV1_5/'
-#         else:
-#             print('You must provide a valid fov_1_5_directory. Stopping.')
-#             return
-#     os.makedirs(fov_1_5_directory, exist_ok=True)  # create directory if doesn't already exist.
-#
-#     # Delete any pre-existing files in 1.5 directory:
-#     filenames = os.listdir(fov_1_5_directory)
-#     for filename in filenames:
-#         fullpath = os.path.join(fov_1_5_directory, filename)
-#         os.remove(fullpath)
-#
-#     # Populate new FOV 1.5 directory with all FOV 1.4 files, to begin:
-#     import shutil
-#     objectnames = os.listdir(fov_1_4_directory)
-#     filenames = [name for name in objectnames if name.endswith(".txt")]
-#     for filename in filenames:
-#         source_path = os.path.join(fov_1_4_directory, filename)
-#         shutil.copy2(source_path, fov_1_5_directory)
-#     print('All ' + str(len(filenames)) + ' FOVs copied.')
-#
-#     # Perform all one-line 1.4 --> 1.5 changes (in new directory):
-#     delete_directive(fov_1_5_directory, fov_1_5_directory, '#STARE_HOURS')
-#     delete_directive(fov_1_5_directory, fov_1_5_directory, '#ACP_DIRECTIVES')
-#     move_directive(fov_1_5_directory, fov_1_5_directory,
-#                    directive_to_move='#ACP_COMMENTS', directive_before_new_position='#MOTIVE')
-#     change_directive_value(fov_1_5_directory, fov_1_5_directory, '#FORMAT_VERSION', '1.5',
-#                            ' FOV format version defined April 24 2017')
-#     print('All one-line changes made.')
-#
-#     # For each FOV, update #STARS section to include mag errors from AAVSO VSP chart:
-#     names = all_fov_names(fov_1_5_directory)
-#     # names = [name for name in names if name.startswith('A')]  # <<< Remove this in production!
-#     all_warning_lines = []
-#     for name in names:
-#         warning_lines = insert_chart_data(name, fov_1_5_directory)
-#         all_warning_lines.extend(warning_lines)
-#     print('\n'.join(all_warning_lines) + '\nDone.')
+def add_punches_from_text(punches_txt_path=DEFAULT_PUNCHES_TEXT_PATH, delim='\t'):
+    # TESTED OK (exhaustive, manual) September 26, 2017.
+    """
+    User fn to add all new punches from punches.txt into appropriate FOV. DOES CHANGE FOV FILES.
+    :param punches_txt_path: text file containing punch information, gen from Excel file [string]
+    :param delim: delimiter between fields in punches.txt, prob always tab character [string]
+    :return: [null]
+    """
+    FOV_STAR_TOLERANCE = 5  # in arcseconds
+    MIN_PUNCH_DIST_FROM_TARGET = 2  # in arcseconds
+    MAX_PUNCH_DIST_FROM_TARGET = 20  # in arcseconds
+
+    df_in = pd.read_table('C:/Dev/Photometry/punches.txt', sep='\t',
+                          header=0, dtype='str', comment=';')[['FOV', 'Target', 'RA', 'Dec']]
+    df_in = df_in[pd.notnull(df_in['RA'])]  # remove blank lines (those without a RA entry).
+    punch_list = []
+    for i in range(len(df_in)):
+        line_fov = df_in['FOV'].iloc[i]
+        if pd.isnull(line_fov):
+            line_fov = ''
+        line_target = df_in['Target'].iloc[i]
+        if pd.isnull(line_target):
+            line_target = ''
+        line_ra = df_in['RA'].iloc[i]
+        line_dec = df_in['Dec'].iloc[i]
+        if len(line_fov) >= 1:
+            # This is a target line. Set target variables for punch lines to follow.
+            target_fov, target, target_ra, target_dec = \
+                line_fov, line_target, ra_as_degrees(line_ra), dec_as_degrees(line_dec)
+            continue  # This target line is now parsed. Move on.
+        if line_fov == '' and line_target == '' and len(line_ra) >= 1 and len(line_dec) >= 1:
+            # This is a punch line. Add row to df_punches.
+            punch_ra, punch_dec = ra_as_degrees(line_ra), dec_as_degrees(line_dec)
+            distance = 3600 * RaDec(punch_ra, punch_dec).degrees_from(RaDec(target_ra, target_dec))
+            d_north = round(3600 * (punch_dec - target_dec), 2)
+            d_east = round(3600 * (punch_ra - target_ra) *
+                           math.cos((math.pi / 180.0) * target_dec), 2)
+            this_punch = {'i': i, 'FOV': target_fov, 'Target': target,
+                          'Target_RA': target_ra, 'Target_Dec': target_dec,
+                          'Punch_RA': punch_ra, 'Punch_Dec': punch_dec,
+                          'D_North': d_north, 'D_East': d_east, 'Distance': distance}
+            punch_list.append(this_punch)
+            continue  # This punch line has been added to dict that will construct df_punches.
+        print('>>>>> Cannot parse input line ' + str(i) + ': ' +
+              ', '.join([line_fov, line_target, line_ra, line_dec]))
+        sys.exit()
+
+    df_punches = pd.DataFrame(punch_list)
+    # --> BEFORE writing into FOV files, verify here that the master data frame df_punches:
+    #     (1) each FOV entry actually has a valid FOV file associated with it,
+    #     (2) each punch target is present in the FOV file, and
+    #     (3) each punch target RA and Dec is close to that in the FOV file.
+    all_ok = True  # default value to be falsified by any failure to verify.
+    fov_list = df_punches['FOV'].unique()
+    for fov_name in fov_list:
+        this_fov = Fov(fov_name)
+        if not this_fov.is_valid:
+            print('>>>>> FOV file ' + fov_name + ' does not exist.')
+            all_ok = False
+            continue
+        fov_stars = this_fov.aavso_stars
+        df_this_fov = df_punches.loc[df_punches['FOV'] == fov_name, :]
+
+        for i_target in range(len(df_this_fov)):
+            target = df_this_fov['Target'].iloc[i_target]
+            target_ra = df_this_fov['Target_RA'].iloc[i_target]
+            target_dec = df_this_fov['Target_Dec'].iloc[i_target]
+            fov_star_ids = [star.star_id for star in this_fov.aavso_stars]
+
+            # Verify this target in present in this FOV:
+            if target not in fov_star_ids:
+                print('>>>>> Target ' + target + ' is missing from FOV file ' + fov_name)
+                all_ok = False
+                continue
+
+            # Verify target's RA,Dec position in punch file is very close to that in FOV file:
+            target_index = fov_star_ids.index(target)
+            fov_target_star = this_fov.aavso_stars[target_index]
+            distance = 3600.0 * RaDec(target_ra, target_dec)\
+                .degrees_from(RaDec(fov_target_star.ra, fov_target_star.dec))
+            if distance > FOV_STAR_TOLERANCE:
+                print('>>>>> Target ' + target + ' in FOV ' + fov_name +
+                      'has punch list RA,Dec=(' + target_ra + ',' + target_dec +
+                      ') which does not match FOV file\'s RA,Dec=(' +
+                      fov_target_star.ra + ',' + fov_target_star.dec + ').')
+                all_ok = False
+                continue
+
+    # Print any warnings:
+    df_too_close = df_punches.loc[df_punches['Distance'] < MIN_PUNCH_DIST_FROM_TARGET, :]
+    num_too_close = len(df_too_close)
+    if num_too_close >= 1:
+        print('\n>>>>> WARNING: ' + str(len(df_too_close)) +
+              'requested punches have punches too close to targets:')
+        for i in df_too_close.index:
+            print('  '.join([df_too_close.loc[i, 'FOV'],
+                             df_too_close.loc[i, 'Target'],
+                             df_too_close.loc[i, 'Distance']]))
+
+    # Print summary:
+    print('\n' + str(len(df_punches)) + ' punches read in from text file.')
+    print('Largest Target-Punch distance = ' +
+          '{:.2f}'.format(max(df_punches['Distance'])) + ' arcsec.')
+
+    # If user approves it, write all #PUNCH lines into the FOV files:
+    recommend_proceed = all_ok \
+        and num_too_close == 0 \
+        and max(df_punches['Distance']) <= MAX_PUNCH_DIST_FROM_TARGET
+    answer = input('Proceed? Recommend ' + ('Yes' if recommend_proceed else 'NO!!!') + ' (y/n):')
+    if answer.strip().lower()[0] == 'y':
+        for i in df_punches.index:
+            radec_target = RaDec(df_punches.loc[i, 'Target_RA'], df_punches.loc[i, 'Target_Dec'])
+            radec_punch = RaDec(df_punches.loc[i, 'Punch_RA'], df_punches.loc[i, 'Punch_Dec'])
+            add_one_punch(df_punches.loc[i, 'FOV'], df_punches.loc[i, 'Target'],
+                          radec_target, radec_punch, False)
+        print('All ' + str(len(df_punches)) + ' punches written into ' +
+              str(len(fov_list)) + ' FOV files.')
+    else:
+        print('No change to FOV files.')
+    # return df_punches
+
+
+def add_one_punch(fov_name, star_id, star_ra_dec, punch_ra_dec, user_must_confirm=False):
+    """
+    Service fn that inserts one punch line into one FOV file (usually called by add_punches()).
+    :param fov_name: (string)
+    :param star_id: (string)
+    :param star_ra_dec: sky location of star as found during user det of punch (RaDec object).
+    :param punch_ra_dec: punch location of star as found during user det of punch (RaDec object).
+    :param user_must_confirm: if True, fn stops to ask user to confirm writing into FOV file.
+    :return: True if insertion happened reasonably, else False.
+    """
+    if fov_name is None or star_id is None:
+        return False
+    star_id = star_id.strip()
+    fov_fullpath = os.path.join(FOV_DIRECTORY, fov_name + '.txt')
+    with open(fov_fullpath) as fov_file:
+        lines = fov_file.readlines()
+
+    # Find line beginning with '#STARS':
+    for i, line in enumerate(lines):
+        if line.upper().startswith('#STARS'):
+            i_stars = i
+            break
+
+    # Verify that star_id is in FOV's list of stars:
+    fov = Fov(fov_name)
+    stars_list = fov.aavso_stars
+    star_id_list = [s.star_id for s in stars_list]
+    if star_id not in star_id_list:
+        return False
+
+    # Build text line to insert into FOV file:
+    d_north = 3600.0 * (punch_ra_dec.dec - star_ra_dec.dec)  # arcseconds
+    d_east = 3600.0 * (punch_ra_dec.ra - star_ra_dec.ra) * \
+        math.cos((math.pi / 180.0) * star_ra_dec.dec)
+    new_punch_line = '#PUNCH ' + star_id + ' : ' +\
+                     '{:.2f}'.format(d_north).rjust(8) + '{:.2f}'.format(d_east).rjust(8) + \
+                     '   ;   dNorth dEast of punch center vs target star, in arcsec' + '\n'
+    this_print_line = fov_name + ' ::: ' + '#PUNCH ' + star_id + ' : ' +\
+        '{:.2f}'.format(d_north).rjust(8) + '{:.2f}'.format(d_east).rjust(8)
+
+    # Confirm if required, then write in to FOV file:
+    if user_must_confirm:
+        answer = input('FOV ' + fov_name + ':\n' + new_punch_line)
+        ok_to_write = (answer.strip().lower()[0] == 'y')
+    else:
+        ok_to_write = True
+    if ok_to_write:
+        lines.insert(i_stars, new_punch_line)  # insert just before #STARS line, then exit.
+        with open(fov_fullpath, 'w') as fov_file:
+            fov_file.writelines(lines)
+        print(this_print_line)
