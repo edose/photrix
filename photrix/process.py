@@ -41,15 +41,14 @@ START_PROCESSING_HERE___________ = ''
 #    v = make_model(an_rel_directory='20170509', instrument_name='Borea', filter='V)
 #       ... and so on for other filters esp. 'R' and 'I'.
 #    --> [edit omit.txt until all models are right]
-#    pred = PredictionSet(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None,
+#    ps = PredictionSet(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None,
 #       instrument_name='Borea', site_name='DSW',
 #       max_inst_mag_sigma=0.05, skymodel_list=[v, r, i])  # skymodel_list = list of SkyModel objs
 #    IF STARES exist in this AN:
-#        get_stare_comps(an_rel_directory='20170509', instrument_name='Borea')
-#        --> [edit stare_comps.txt to reflect choice of stare comps, each filter]
-#        plot_stare_target(an_rel_directory='20170509', fov=FOV)  # ensure OK
-#    make_report_map(an_rel_directory='20170509')
-#    aavso_report(an_rel_directory='20170509', software_version='2.0.5')
+#        ps.stare_comps(fov='ST Tri', star_id='ST Tri')
+#        ps.stare_plot(star_id='ST Tri')
+#    ps.markup_report()
+#    ps.aavso_report(an_rel_directory='20170509')
 #    --> [upload to AAVSO]
 #    --> [LCG review; edit FOV files if needed]
 #    --> [check guiding exp times for possible FOV #CENTER (RaDec) adjustment]
@@ -1034,12 +1033,13 @@ class PredictionSet:
         self.df_all_curated_obs, warning_lines = _curate_stare_comps(self.an_top_directory,
                                                                      self.an_rel_directory,
                                                                      self.df_all_eligible_obs)
-
         self.df_comp_mags = self.compute_comp_mags()
 
         self.df_cirrus_effect = self._compute_cirrus_effect(self.df_comp_mags)
 
         df_transformed_without_errors = self._compute_transformed_mags()
+
+        print('\nWait for it...\n')
 
         self.df_transformed = self._compute_all_errors(df_transformed_without_errors)
 
@@ -1324,15 +1324,18 @@ class PredictionSet:
         n_target_stars = len(self.df_transformed.loc[self.df_transformed['StarType'] == 'Target',
                                                      'ModelStarID'].unique())
         print('\nThis PredictionSet yields',
-              str(counts_by_star_type['Target']), 'Target obs for',
+              str(counts_by_star_type['Target']), 'raw Target obs for',
               str(n_target_stars), 'targets and',
               str(counts_by_star_type['Check']), 'Check observations.\n')
         print('Now you are ready to:\n',
-              '    1. run ps.stare_comps(fov=\'XX Xxx\', star_id=\'\', this_filter=\'\') '
-              'if any eclipsers or other stares\n',
-              '    2. run ps.markup_report(), then combine/reject target obs in'
+              '    1. (Optional) run '
+              'df_master=pr.get_df_master(an_rel_directory=\'' + self.an_rel_directory +
+              '\').sort_values([\'ModelStarID\', \'Filter\'])\n',
+              '    2. (If stares) run ps.stare_comps(fov=\'XX Xxx\', star_id=\'\', '
+              'this_filter=\'\')\n',
+              '    3. run ps.markup_report(), then combine/reject target obs in'
               ' report_map.txt\n',
-              '    3. run ps.aavso_report() and submit it to AAVSO.\n')
+              '    4. run ps.aavso_report() and submit it to AAVSO.\n')
 
     def stare_comps(self, fov, star_id, this_filter):
         lines = get_stare_comps(self.df_transformed, fov, star_id, this_filter)

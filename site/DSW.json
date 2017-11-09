@@ -7,8 +7,8 @@
   "min_altitude": 29,
   "twilight_sun_alt": -9,
   "extinction": {
-    "V": 0.210,
-    "R": 0.163,
-    "I": 0.115
+    "V": 0.1885,
+    "R": 0.1455,
+    "I": 0.109
   }
 }

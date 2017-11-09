@@ -750,6 +750,11 @@ def insert_chart_data(fov_name, fov_directory=FOV_DIRECTORY):
                 above_stars_directive = False
         else:
             stars_lines.append(line)
+    if len(stars_lines) <= 0:
+        error_line = "Either no #STARS line or no star lines after #STARS."
+        print(error_line)
+        warning_lines.append(error_line)
+        return warning_lines
 
     # Read JSON chart file, or download from VSP (JSON format) and cache it:
     os.makedirs(CHART_DIRECTORY, exist_ok=True)  # create directory if doesn't already exist.
