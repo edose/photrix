@@ -38,12 +38,12 @@ START_PROCESSING_HERE___________ = ''
 #    ----------- all the above will continue in R. ----------------------------
 #    --------------------------------------------------------------------------
 #    ----------- The actual photrix.process workflow starts HERE: -------------
-#    v = make_model(an_rel_directory='20170509', instrument_name='Borea', filter='V)
+#    V = SkyModel(an_rel_directory='20170509', instrument_name='Borea', filter='V')
 #       ... and so on for other filters esp. 'R' and 'I'.
 #    --> [edit omit.txt until all models are right]
 #    ps = PredictionSet(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None,
 #       instrument_name='Borea', site_name='DSW',
-#       max_inst_mag_sigma=0.05, skymodel_list=[v, r, i])  # skymodel_list = list of SkyModel objs
+#       max_inst_mag_sigma=0.05, skymodel_list=[V, R, I])  # skymodel_list = list of SkyModel objs
 #    IF STARES exist in this AN:
 #        ps.stare_comps(fov='ST Tri', star_id='ST Tri')
 #        ps.stare_plot(star_id='ST Tri')
