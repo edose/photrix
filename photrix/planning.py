@@ -58,6 +58,7 @@ NEW_FILTER_DURATION = 10  # seconds; filter change and focuser change
 NEW_EXPOSURE_DURATION = 22  # seconds; guider check, image download, plate solving (excl exposure)
 AUTOFOCUS_DURATION = 170  # seconds, includes slew & filter wheel changes
 
+V_MAG_WARNING = 17  # a V magnitude larger than this triggers a warning line in Summary file.
 
 def make_df_fov(fov_directory=FOV_DIRECTORY, fov_names_selected=None):
     """
@@ -152,7 +153,7 @@ def complete_df_fov_an(df_fov, user_update_tolerance_days=DEFAULT_UPDATE_TOLERAN
         .assign(seconds=0.0) \
         .assign(available=' - '.join(2*[4*' '])) \
         .assign(an_priority=0.0) \
-        .assign(an_priority_bars='') # all dummy values to be overwritten later.
+        .assign(an_priority_bars='')  # all dummy values to be overwritten later.
 
     # Fill in most columns.
     for ind in df_fov.index:
@@ -660,7 +661,8 @@ def make_an_roster(an_date_string, output_directory, site_name='DSW', instrument
                    exp_time_factor=1, min_an_priority=4):
     """
     Generates new .csv file containing info on each fov available this astronight.
-       Typical usage: make_an_roster("2017127", "C:/Astro/ACP/AN20170127/"
+       Typical usage: make_an_roster("2017127", "C:/Astro/ACP/AN20170127/",
+       user_update_tolerance_days=0.1, exp_time_factor=0.8)
     :param an_date_string: as '20170127. Date of the evening to plan for [string]
     :param output_directory: directory in which to write Roster csv file [string]
     :param site_name: [string]
@@ -1600,6 +1602,21 @@ def write_summary(plan_list, an, fov_dict, output_directory, exp_time_factor):
                                                     u'\N{DEGREE SIGN}' + ', should be >= ' +
                                                     str(MIN_MOON_DEGREES_DEFAULT) +
                                                     u'\N{DEGREE SIGN}')
+
+            # Insert warning line if FOV target estimated to be too faint in V:
+            act = this_action.action_type.lower()
+            if act == 'fov':
+                fov_name = this_action.parsed_action[1]
+                this_fov = fov_dict[fov_name]
+                if this_fov.observing_style.lower() == 'lpv':
+                    mags = this_fov.estimate_lpv_mags(an.local_middark_jd)
+                    v_mag = mags.get('V', None)
+                    if v_mag is not None:
+                        if v_mag >= V_MAG_WARNING:
+                            action_summary_lines.append(
+                                '***** WARNING: above target estim. V Mag ~ ' +
+                                '{:.2f}'.format(v_mag) +
+                                ' very faint (>' + str(V_MAG_WARNING) + ').')
 
             # Error if plan chains to itself, or if chained-to plan file does not exist:
             if this_action.action_type.lower() == 'chain':

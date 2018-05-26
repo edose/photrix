@@ -1353,6 +1353,8 @@ class PredictionSet:
         floor_x = floor(df['JD_mid'].min())
         x = df['JD_mid'] - floor_x
         y = df['TransformedMag']
+        color_dict = {'V': 'green', 'R': 'orange', 'I': 'red', 'B': 'blue'}
+        colors = [color_dict[f] for f in df['Filter']]
 
         # Construct & draw stare plot:
         fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(12, 8))  # (width, height) in "inches"
@@ -1361,7 +1363,7 @@ class PredictionSet:
                      color='darkblue', fontsize=20, weight='bold')
         ax.set_xlabel('JD(mid) - ' + str(floor_x))
         ax.set_ylabel('Best Mag')
-        ax.scatter(x=x, y=y, alpha=0.8, zorder=+1000)
+        ax.scatter(x=x, y=y, color=colors, alpha=0.8, zorder=+1000)
         plt.gca().invert_yaxis()  # per custom of plotting magnitudes brighter=upward
         fig.canvas.set_window_title(star_id)
         plt.show()
@@ -1685,6 +1687,10 @@ class PredictionSet:
                 if not all_same(df_combine['CompName']):
                     print('>>>>> Non-uniform Comp Names for line: \'' + this_line +
                           '\'...Combine is skipped.')
+                    for i in range(len(df_combine)):
+                        print(df_combine['Serial'].iloc[i],
+                              df_combine['NComps'].iloc[i],
+                              df_combine['CompName'].iloc[i])
                     continue
                 real_check_names = [cn for cn in df_combine['CheckName'] if cn is not None]
                 if len(real_check_names) >= 2:
