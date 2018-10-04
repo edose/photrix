@@ -1,0 +1,17 @@
+;----- This is omit.txt for AN directory $an_for_test
+;----- Use this file to omit observations from input to SkyModel (all filters).
+;----- Example directive lines:
+;
+;#OBS    Obj-0000-V, 132 ; to omit star 132 from FITS image Obj-0000-V.fts
+;#STAR   FOV, 132, V     ; to omit star 132 from all FITS with FOV and filter V
+;#STAR   FOV, 132        ; to omit star 132 from all FITS with FOV and ALL filters
+;#IMAGE  Obj-0000-V      ; to omit FITS image Obj-0000-V.fts specifically
+;#JD     0.72, 1         ; to omit fractional JD from 0.72 through 1
+;#SERIAL 123,77 54   6   ; to omit observations by Serial number (many per line OK)
+;
+;----- Add your directive lines:
+;
+#SERIAL  348 203 1884 678 182 177 1653 1880 ;  V outliers
+#IMAGE   QZ Aql-0001-V  ;  crazy cirrus term
+#SERIAL  352 690  ;  R outliers
+#SERIAL  703 875 193  ;  I outliers

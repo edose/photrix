@@ -28,27 +28,21 @@ START_PROCESSING_HERE___________ = ''
 #######
 #
 #  photrix.process workflow:
-#    from photrix.process import *
-#    ----------- The next few steps stay in R (not python) for now:
-#    precheck(an_rel_directory='20170509', instrument_name='Borea')
-#    pre_cal(an_rel_directory='20170509', instrument_name='Borea')
-#    --> [do MaxIm DL calibration]
-#    post_cal(an_rel_directory='20170509', instrument_name='Borea')
-#    make_df_master(an_rel_directory='20170509', instrument_name='Borea')
-#    ----------- all the above will continue in R. ----------------------------
-#    --------------------------------------------------------------------------
-#    ----------- The actual photrix.process workflow starts HERE: -------------
-#    V = SkyModel(an_rel_directory='20170509', instrument_name='Borea', filter='V')
-#       ... and so on for other filters esp. 'R' and 'I'.
-#    --> [edit omit.txt until all models are right]
-#    ps = PredictionSet(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None,
-#       instrument_name='Borea', site_name='DSW',
-#       max_inst_mag_sigma=0.05, skymodel_list=[V, R, I])  # skymodel_list = list of SkyModel objs
+#    import photrix.planning as pl, photrix.process as pr
+#    pr.start(an_rel_directory='20170509')
+#    [do MaxIm DL calibration]
+#    pr.assess(an_rel_directory='20170509')
+#    pr.make_df_master(an_rel_directory='20170509', instrument_name='Borea', ask_user=False)
+#    V = pr.SkyModel(an_rel_directory='20170509', instrument_name='Borea', filter='V')
+#    R = pr.SkyModel(an_rel_directory='20170509', instrument_name='Borea', filter='R')
+#    I = pr.SkyModel(an_rel_directory='20170509', instrument_name='Borea', filter='I')
+#       ... [whilte editing omit.txt until all V, R, and I models are right]
+#    ps = pr.PredictionSet(an_rel_directory='20170816', skymodel_list=[V,R,I])
 #    IF STARES exist in this AN:
-#        ps.stare_comps(fov='ST Tri', star_id='ST Tri')
+#        ps.stare_comps(fov='ST Tri', star_id='ST Tri', this_filter='V')
 #        ps.stare_plot(star_id='ST Tri')
 #    ps.markup_report()
-#    ps.aavso_report(an_rel_directory='20170509')
+#    ps.aavso_report()
 #    --> [upload to AAVSO]
 #    --> [LCG review; edit FOV files if needed]
 #    --> [check guiding exp times for possible FOV #CENTER (RaDec) adjustment]
@@ -62,9 +56,9 @@ START_PROCESSING_HERE___________ = ''
 
 
 def start(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
-    """
-    First step in photrix processing pipeline.
+    """First step in photrix processing pipeline.
     Always starts with raw directory exactly as downloaded from telescope PC.
+    Typical usage: pr.start(an_rel_directory='20180804')
     :param an_top_directory:
     :param an_rel_directory:
     :return: None
@@ -133,11 +127,12 @@ def assess(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
     Rigorously assess FITS files and directory structure for readiness to construct df_master.
     Collect and print all warnings and summary stats. Makes no changes to data.
     May be run as many times as needed, after start() and before make_df_master().
+    Typical usage: pr.assess(an_rel_directory='20180811')
     :param an_top_directory: [string]
     :param an_rel_directory: [string]
     :return: [None]
     """
-    # TODO: Add checks for guide exposure time.
+    # TODO: Add checks for guide exposure time. (?)
     # TODO: Add checks for binning=(1,1), when binning fields become available in FITS objects.
     # Make DataFrame of all files (& dirs) in directory, add some per-file info, and sort:
     filenames, isdir, extensions = [], [], []
@@ -148,6 +143,17 @@ def assess(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
         extensions.append(os.path.splitext(entry.name)[-1].lower())  # file extensions
     df = pd.DataFrame({'Filename': filenames, 'IsDir': isdir, 'Extensions': extensions},
                       index=filenames).sort_values(by=['Filename'])
+
+    # Offer to delete any .src source files found (by-product of TheSkyX plate solutions).
+    src_files = df.loc[df['Extensions'] == '.src', 'Filename']
+    if len(src_files) >= 1:
+        answer = input(' ..... ' + str(len(src_files)) +
+                       ' .src files found. Delete them? (y/n, recommend y):')
+        if answer.strip().lower()[0] == 'y':
+            for filename in src_files:
+                fullpath = os.path.join(an_top_directory, an_rel_directory, "Calibrated", filename)
+                os.remove(fullpath)
+        df = df.loc[~(df['Extensions'] == '.src'), :]  # remove df rows for files just deleted.
 
     # Directories: should be none; report and remove them from df:
     dirs = df.loc[df['IsDir'], 'Filename']
@@ -291,8 +297,8 @@ def assess(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
 
 def make_df_master(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None,
                    instrument_name='Borea', ask_user=True):
-    """
-    Make the master DataFrame of all required information for downstream photometric processing.
+    """Make the master DataFrame of all required information for downstream photometric processing.
+    Typical usage: pr.make_df_master(an_rel_directory='20180811', ask_user=False)
     :param an_top_directory:
     :param an_rel_directory:
     :param instrument_name: name of Instrument (object) that took data [string]
@@ -538,9 +544,9 @@ class SkyModel:
                  fit_sky_bias=True, fit_vignette=True, fit_xy=False,
                  fit_transform=False, fit_extinction=True, fit_log_adu=True,
                  do_plots=True):
-        """
-        Constructs a sky model using mixed-model regression on df_master.
+        """Constructs a sky model using mixed-model regression on df_master.
             Normally used by make_model()
+        Typical usage: V = pr.SkyModel(an_rel_directory='20180804', filter='V', fit_extinction=True)
         :param an_top_directory: e.g., 'J:\Astro\Images\C14' [string]
         :param an_rel_directory: e.g., '20170504'. The dir 'Photometry' is subdir of this. [string]
         :param filter: name of filter to which this model applies [string, e.g., 'V' or 'R']
@@ -559,7 +565,6 @@ class SkyModel:
         Parameter 'fit_star_id' is not included in this version (has never been used in R, and
             would lead to crossed RE vars).
         """
-
         self.an_top_directory = an_top_directory
         self.an_rel_directory = an_rel_directory
         self.filter = filter
@@ -618,6 +623,7 @@ class SkyModel:
         self._build_output()
         if do_plots:
             self.plots()
+        self.print_high_cirrus()
         # self.to_json_file()  # GIVE UP on JSON -- it can't handle DataFrames and Series.
         _write_stare_comps_txt_stub(self.an_top_directory, self.an_rel_directory)
 
@@ -982,16 +988,24 @@ class SkyModel:
         fig.canvas.set_window_title(self.filter + ': 12 plots')
         plt.show()
 
+    def print_high_cirrus(self):
+        df_cirrus = self.df_image.copy()
+        df_cirrus['AbsValue'] = abs(df_cirrus['Value'])
+        lines_to_print = max(6, int(0.05 * len(df_cirrus)))
+        df_cirrus = df_cirrus.sort_values(by='AbsValue', ascending=False).head(lines_to_print)
+        df_cirrus['mmag Cirrus'] = 1000.0 * df_cirrus['Value']
+        print('--------------------------------------------')
+        print(pd.DataFrame(df_cirrus['mmag Cirrus']))
+
 
 class PredictionSet:
     def __init__(self, an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None,
                  instrument_name='Borea', site_name='DSW',
                  max_inst_mag_sigma=0.05, skymodel_list=None):
-        """
-        Constructs a prediction set, i.e., a set of best estimates of comp, check, and target star
+        """        Constructs a prediction set, i.e., a set of best estimates of comp, check, and target star
         magnitudes, ready for marking up (curating) and reporting to the AAVSO (for example).
         Usages:
-            ps = pr.PredictionSet(an_top_directory='20170816')
+            ps = pr.PredictionSet(an_rel_directory='20170816', skymodel_list=[V,R,I])
             ps.markup_report()
             ps.aavso_report()
         :param an_top_directory: e.g., 'J:\Astro\Images\C14' [string]
@@ -1373,9 +1387,7 @@ class PredictionSet:
         Makes markup report from current PredictionSet object.
         :return: text string ready for printing (e.g., by copy/paste into Microsoft Word).
         """
-
         print('\nWriting \'markup_report.txt\'...', end='', flush=True)
-
         # First, make check-star dataframe:
         df = self.df_transformed.copy()
         df_check_stars = df.loc[df['StarType'] == 'Check',
@@ -1394,7 +1406,9 @@ class PredictionSet:
         df = pd.merge(df, df_check_stars, how='left', on='FITSfile')
         df.index = df['Serial']
         # df = df.sort_values(by=['Target', 'FITSfile', 'Filter', 'Exp'])
-        df = df.sort_values(by=['Target', 'FOV', 'JD_num'])
+        # df = df.sort_values(by=['Target', 'FOV', 'JD_num'])
+        # TODO: verify same order as for aavso_report.
+        df = df.sort_values(by=['Target', 'JD_num'])  # same as for aavso_report (verify)
 
         # A nested helper function:
         def format_column(iterable, decimal_pts=None, min_width=0, left_pad=1):
@@ -1476,6 +1490,7 @@ class PredictionSet:
         """
 
         df_report = self._apply_report_map_txt()
+        df_report = df_report.sort_values(by=['TargetName', 'JD'])  # same as for markup_report (verify)
 
         # Construct text header lines:
         header = ["#TYPE=Extended",
@@ -1536,7 +1551,7 @@ class PredictionSet:
             with open(fullpath, 'w') as f:
                 f.writelines(lines_to_write)
             print('AAVSO report for AN ' + self.an_rel_directory + ' written to: ' +
-                  fullpath + '\n   = ' + str(len(df_formatted)) + ' observations.')
+                  fullpath + '\n   = ' + str(len(df_formatted)) + ' reportable observations.')
 
         # Return DataFrame if requested:
         if return_df:
@@ -1551,8 +1566,8 @@ class PredictionSet:
 
         df_report = self.df_transformed.copy()
         df_report = df_report[['Serial', 'StarType', 'StarID', 'JD_mid',
-                              'TransformedMag', 'TotalSigma', 'InstMagSigma',
-                              'ModelSigma', 'CirrusSigma', 'Filter']]
+                               'TransformedMag', 'TotalSigma', 'InstMagSigma',
+                               'ModelSigma', 'CirrusSigma', 'Filter']]
         df_report.rename(columns={'StarID': 'TargetName', 'JD_mid': 'JD', 'TransformedMag': 'Mag'},
                          inplace=True)
         df_report['CompName'] = ''
@@ -1610,7 +1625,6 @@ class PredictionSet:
         print(str(rows_before - rows_after), 'serials removed altogether.')
 
         # Apply #JD directives:
-        rows_before = len(df_report)
         omit_lines = [line for line in lines if line.startswith('#JD')]
         for this_line in omit_lines:
             raw_parms, warning_lines = _get_line_parms(this_line, '#JD', True, 2, 2)
@@ -1618,15 +1632,16 @@ class PredictionSet:
                 print('>>>>> Can\'t parse line:', warning_lines)
             else:
                 min_jd_fract, max_jd_fract = np.float64(raw_parms)
-                if (min_jd_fract >= 0.0) or (max_jd_fract < 2.0):
+                if (min_jd_fract >= 0.0) and (max_jd_fract < 2.0):
                     floor_jd = floor(min(df_report['JD']))
                     rows_to_keep = ((df_report['JD'] < floor_jd + min_jd_fract)|\
                                      (df_report['JD'] > floor_jd + max_jd_fract))
+                    rows_before_omit = len(df_report)
                     df_report = df_report[rows_to_keep]
-                    rows_after = len(df_report)
-                    print('Omitted fractional JD range:', '.4f'.format(min_jd_fract), 'to',
-                          '.4f'.format(max_jd_fract), '=',
-                          str(rows_before - rows_after), 'observations.')
+                    rows_after_omit = len(df_report)
+                    print('Omitted fractional JD range:', '{:.4f}'.format(min_jd_fract), 'to',
+                          '{:.4f}'.format(max_jd_fract), '=',
+                          str(rows_before_omit - rows_after_omit), 'observations.')
 
         # Add check-star names and mags  as new columns (look up from self.df_transformed):
         df_checks = ((self.df_transformed.copy())[self.df_transformed['StarType'] == 'Check'])\
@@ -1743,6 +1758,7 @@ class PredictionSet:
             print('Combination of Serials ' +
                   ' '.join(df_combine['Serial'].astype(int).astype(str)) + ': done.')
         return df_report
+
 
 END_PROCESSING_HERE____________ = ''
 

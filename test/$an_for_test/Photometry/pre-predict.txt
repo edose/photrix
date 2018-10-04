@@ -1,0 +1,10 @@
+;----- This is pre-_predict_fixed_only.txt for AN folder 20170504
+;----- Select comp stars (by FOV, filter, & StarID) from input to predictAll().
+;----- Example directive lines:
+;
+;#COMPS  Obj, V, 132, 133 144    ; to KEEP from FOV 'Obj': comp stars '132' '133' and '144' in filter 'V'
+;
+;----- Add your directive lines:
+;
+#COMPS  V1023 Her , V , 117,120,111 
+#COMPS  V1023 Her , I , 117,120,111 

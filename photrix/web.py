@@ -68,3 +68,11 @@ def get_aavso_vsp_chart(chart_id=None):
     else:
         return ""
 
+
+def go(starname):
+    import webbrowser
+    star_safe_name = starname.replace("+", "%2B").replace(" ", "+")
+    url = 'http://www.aavso.org/cgi-bin/lcg.pl?name=' + \
+          star_safe_name + '&auid=' + star_safe_name + \
+        '&lastdays=200&v=on&iband=on&r=on&visual=on&grid=on&width=900&height=750'
+    webbrowser.open(url)

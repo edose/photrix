@@ -18,8 +18,15 @@ from .web import get_aavso_webobs_raw_table
 __author__ = "Eric Dose :: New Mexico Mira Project, Albuquerque"
 
 # USAGE:
-# pl.make_an_roster('20170525', 'c:/Astro/ACP/AN20170525', user_update_tolerance_days=0.1, exp_time_factor=0.8)
-# pl.make_an_plan('c:/Astro/ACP/AN20170525/planning.xlsx', exp_time_factor=1)
+# pl.make_an_roster('20170525', 'c:/Astro/ACP/AN20170525', user_update_tolerance_days=0.1,
+#      exp_time_factor=0.75)
+# pl.make_an_plan('c:/Astro/ACP/AN20170525/planning.xlsx', exp_time_factor=0.75)
+
+# ROSTER Target Statement types:
+# AZ Her  ; standard FOV target
+# STARE 6 ST Tri  ;  standard stare FOV target (6 reps)
+# BURN AA Aur 11:00:00 +34:00:00  ;  Burn target (240 sec in V and I)
+# IMAGE target_name V=12 B=12.5(2) 12:00:00 +23:34:45  ;  arbitrary image
 
 
 FOV_DIRECTORY = "C:/Dev/Photometry/FOV/"
@@ -32,7 +39,7 @@ MIN_MOON_DEGREES_STARE = 60
 STARE_AN_PRIORITY_DIVIDER = 7.5  # >= this goes into the normal Roster list; < goes to low-pri list.
 FITS_DIRECTORY = "J:/Astro/Images"
 DEFAULT_PLAN_DIRECTORY = 'C:/Astro/Plans'
-DT_FMT = '%Y-%m-%d %H:%M:%S.%f%z'  # kludge around py inconsistency in datetime formats
+DT_FMT = '%Y-%m-%d %H:%M:%S.%f%z'  # kludge around py inconsistency in python's datetime formats
 
 PHOTRIX_ROOT_DIRECTORY = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LOCAL_OBS_CACHE_FULLPATH = os.path.join(PHOTRIX_ROOT_DIRECTORY, "local_obs_cache.csv")
@@ -58,7 +65,8 @@ NEW_FILTER_DURATION = 10  # seconds; filter change and focuser change
 NEW_EXPOSURE_DURATION = 22  # seconds; guider check, image download, plate solving (excl exposure)
 AUTOFOCUS_DURATION = 170  # seconds, includes slew & filter wheel changes
 
-V_MAG_WARNING = 17  # a V magnitude larger than this triggers a warning line in Summary file.
+V_MAG_WARNING = 16.5  # a predicted V magnitude > this will trigger a warning line in Summary file.
+
 
 def make_df_fov(fov_directory=FOV_DIRECTORY, fov_names_selected=None):
     """
@@ -178,7 +186,7 @@ def complete_df_fov_an(df_fov, user_update_tolerance_days=DEFAULT_UPDATE_TOLERAN
         max_bars = 16
         int_an_priority = int(round(df_fov.loc[ind, 'an_priority']))
         df_fov.loc[ind, 'an_priority_bars'] = \
-            (8*'*' + (max_bars-8)*'#')[0: min(max_bars, int_an_priority)].ljust(max_bars)
+            (8*'.' + (max_bars-8)*'#')[0: min(max_bars, int_an_priority)].ljust(max_bars)
 
     if remove_zero_an_priority:
         df_fov = df_fov[df_fov['an_priority'] > 0.0]
@@ -205,6 +213,7 @@ class LocalObsCache:
         obs_datetime: datetime of most recent known observation [datetime.datetime UTC]
         obs_mag: magnitude of most recent observation [float]
         obs_mag_filter: filter in which obs_mag was measured [string]
+    Typical usage: pl.make_an_plan('c:/Astro/ACP/AN20170525/planning.xlsx', exp_time_factor=0.75)
     """
     def __init__(self):
         # Read in local cache if it exists.
@@ -304,7 +313,7 @@ class LocalObsCache:
             latest_obs_df = self._latest_stare_obs(fov, recent_observations,
                                                    allow_filters=['V', 'R'])
         else:
-            print('\n*** WARNING: for fov \'' + fov + '(obs_style, target_type) = (' +
+            print('\n*** WARNING: for fov \'' + fov.fov_name + '(obs_style, target_type) = (' +
                   obs_style + ', ' + fov.target_type + ') not understood.', end='', flush=True)
         if cache_row_pre_exists:
             self.df_cache = latest_obs_df.combine_first(self.df_cache)  # overwrites.
@@ -661,7 +670,7 @@ def make_an_roster(an_date_string, output_directory, site_name='DSW', instrument
                    exp_time_factor=1, min_an_priority=4):
     """
     Generates new .csv file containing info on each fov available this astronight.
-       Typical usage: make_an_roster("2017127", "C:/Astro/ACP/AN20170127/",
+       Typical usage: pl.make_an_roster("20170127", "C:/Astro/ACP/AN20170127/",
        user_update_tolerance_days=0.1, exp_time_factor=0.8)
     :param an_date_string: as '20170127. Date of the evening to plan for [string]
     :param output_directory: directory in which to write Roster csv file [string]
@@ -861,7 +870,9 @@ def make_an_plan(plan_excel_path='c:/24hrs/Planning.xlsx', site_name='DSW', inst
     :param instrument_name: an Instrument object for scope to be used.
     :param fov_dict: fov_dict if available, default=None to generate new fov_dict (normal case).
     :param an_start_hhmm: 'hhmm' time to start plan, default=None for 'use excel file (normal case).
+    :param exp_time_factor: multiply *raw* exp times by this; typically 0.6-0.9 [float]
     :return: Writes out Summary file with dateline, and one or more ACP plan files.
+    Typical usage: pl.make_an_plan('c:/Astro/ACP/AN20170525/planning.xlsx', exp_time_factor=0.7)
     """
 
     # TODO: LocalObsCache updates only for fovs actually used, not including Burns.

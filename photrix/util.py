@@ -371,10 +371,12 @@ def az_alt_at_datetime_utc(longitude, latitude, target_radec, datetime_utc):
     if isinstance(longitude, str):
         obs.lon = longitude
     else:
+        # next line wrong?: if string should be in deg not radians?? (masked by long passed as hex string?)
         obs.lon = str(longitude * math.pi / 180)
     if isinstance(latitude, str):
         obs.lat = latitude
     else:
+        # next line wrong?: if string should be in deg not radians?? (masked by long passed as hex string?)
         obs.lat = str(latitude * math.pi / 180)
     obs.date = datetime_utc
     target_ephem = ephem.FixedBody()  # so named to suggest restricting its use to ephem.

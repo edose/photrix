@@ -1,0 +1,21 @@
+;----- This is report_map.txt for AN folder an_for_test
+;----- Use this file to omit and/or combine target observations from AAVSO report.
+;----- Example directive lines:
+;
+;#TARGET  GD Cyg ; to omit this target star altogether from AAVSO report.
+;#JD  0.233 0.311 ; to omit this JD (fractional) range from AAVSO report.
+;#SERIAL  34 44,129  32  1202 ; to omit these 5 Serial numbers from AAVSO report.
+;#COMBINE   80,128 ; to combine (average) these 2 Serial numbers within AAVSO report.
+;----- Add your directive lines:
+;
+#COMBINE  655, 669    641  ;  combines 3 ST Tri in I filter
+#COMBINE  1070  ;  illegal
+;
+#TARGET  V1022 Her  ;  
+;
+#JD  0.95440 0.95507  ;  omit 2 from Y Cep
+;
+#SERIAL  973 987, 1001  980  1651  ;  omit 4 (one already omitted by #TARGET)
+;
+;
+;

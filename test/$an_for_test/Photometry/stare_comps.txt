@@ -1,0 +1,10 @@
+;----- This is stare_comps.txt for AN directory $an_for_test
+;----- Select comp stars (by FOV, filter, & StarID) from input to _predict_fixed_only().
+;----- Example directive line:
+;
+;#COMPS  Obj, V, 132, 133 144    ; to KEEP from FOV 'Obj': comp stars '132' '133' and '144' in filter 'V'
+;
+;----- Add your directive lines:
+;
+#COMPS  V1023 Her , V , 117,120,111
+#COMPS  V1023 Her , I , 117,120,111

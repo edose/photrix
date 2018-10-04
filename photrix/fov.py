@@ -354,7 +354,11 @@ class AavsoSequenceStar_WithMagErrors:
                 for mag_word in mag_words:
                     mag_split = mag_word.split("=")
                     this_filter = mag_split[0]
-                    mag_error = mag_split[1].split("(")
+                    try:
+                        mag_error = mag_split[1].split("(")
+                    except IndexError:
+                        print('Error reading star string: \'' + star_string + '\'')
+                        exit(0)
                     this_mag = float(mag_error[0])
                     this_error = float(mag_error[1].replace(")", "")) / 1000.0  # mMag to Mag
                     if this_mag > 0.0:  # mag missing from mags means no data available.
@@ -1057,3 +1061,53 @@ def add_one_punch(fov_name, star_id, star_ra_dec, punch_ra_dec, user_must_confir
         with open(fov_fullpath, 'w') as fov_file:
             fov_file.writelines(lines)
         print(this_print_line)
+
+
+def change_directive_value2(fov_directory=FOV_DIRECTORY, out_fov_directory=None):
+    """
+    Updates Mira FOVs' longest GAP_SCORE_DAYS.
+    :param fov_directory: source directory [string]
+    :param out_fov_directory: output directory, may be same as source directory [string]
+    :return: [nothing]
+    """
+    NEW_LONGEST_GSD = 4  # probably was 5% of period
+    if out_fov_directory is None:
+        print('\n\nPlease give a new output FOV directory.\n\n')
+        return
+    names = all_fov_names(fov_directory)
+    os.makedirs(out_fov_directory, exist_ok=True)  # make output directory if doesn't exist.
+    for name in names:
+        fov = Fov(fov_name=name)
+        if fov.target_type.lower() == 'mira':
+            new_lines = []
+            in_fullpath = os.path.join(fov_directory, name + ".txt")
+            with open(in_fullpath) as fov_file:
+                lines = fov_file.readlines()
+            for line in lines:
+                if line.startswith('#GAP_SCORE_DAYS'):
+                    if ';' in line:
+                        halves = line.split(';', maxsplit=1)
+                        comment = halves[1]
+                    else:
+                        comment = ''
+                    new_gsd = fov.gap_score_days.copy()
+                    new_gsd[2] = min(new_gsd[2], (NEW_LONGEST_GSD / 100.0) * fov.period)
+                    gsd_strings = []
+                    for i in range(3):
+                        gsd = '{:.2f}'.format(new_gsd[i])
+                        # if gsd.endswith('.00'):
+                        #     gsd = gsd[:-3]
+                        gsd_strings.append(gsd)
+                    new_line = '#GAP_SCORE_DAYS'.ljust(20) + ' '.join(gsd_strings) +\
+                               '  ;' + comment
+                    new_lines.append(new_line)
+                    print(name.ljust(30) + ': ' + str(fov.gap_score_days[2]) + ' ' +
+                          gsd_strings[2])
+                else:
+                    new_lines.append(line)
+
+            out_fullpath = os.path.join(out_fov_directory, name + ".txt")
+            with open(out_fullpath, 'w') as out_file:
+                out_file.writelines(new_lines)
+
+    print('Done.')

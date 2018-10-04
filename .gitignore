@@ -4,3 +4,20 @@ test/.cache/
 __pycache__/
 .cache/
 $Archive
+early workflow steps.xlsx
+FWHM math test.xlsx
+RaDec_degrees_from.xlsx
+*.Rdata
+test/$data_for_test/CE Aur-0001-V-TheSkyX.SRC
+~$FWHM math test.xlsx
+FOV_new_GSD
+
+local_obs_cache\.csv
+
+photrix/scratch\.py
+
+test/\$an_for_test/Photometry/model-V\.json
+
+test/\$data_for_test/AD Dra-S001-R001-C001-I\.fts
+
+*.fts
