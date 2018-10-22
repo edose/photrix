@@ -53,16 +53,16 @@ ABSOLUTE_MAX_EXPOSURE_TIME = 600  # seconds
 ABSOLUTE_MIN_EXPOSURE_TIME = 3  # seconds
 MIN_TOTAL_EXP_TIME_PER_FILTER = 9  # seconds, thus 3 exposures max per filter for LPVs
 
-PLAN_START_DURATION = 60  # seconds
+PLAN_START_DURATION = 45  # seconds
 CHILL_DURATION = 60  # seconds; this may be overestimated
 QUITAT_DURATION = 0  # seconds
 AFINTERVAL_DURATION = 0  # seconds; beyond AUTOFOCUS_DURATION that this invokes
 BURN_DURATION = 11*60  # seconds
 CHAIN_DURATION = 3  # seconds; a guess
 SHUTDOWN_DURATION = 480  # seconds; a guess
-NEW_TARGET_DURATION = 100  # seconds; slew + guider start
+NEW_TARGET_DURATION = 90  # seconds; slew + guider start
 NEW_FILTER_DURATION = 10  # seconds; filter change and focuser change
-NEW_EXPOSURE_DURATION = 22  # seconds; guider check, image download, plate solving (excl exposure)
+NEW_EXPOSURE_DURATION = 18  # seconds; guider check, image download, plate solving (excl exposure)
 AUTOFOCUS_DURATION = 170  # seconds, includes slew & filter wheel changes
 
 V_MAG_WARNING = 16.5  # a predicted V magnitude > this will trigger a warning line in Summary file.
@@ -979,6 +979,12 @@ def parse_excel(excel_path, site_name='DSW'):
                         plan_actions.append(('waituntil', 'sun_degrees', value))
                     else:
                         plan_actions.append(('waituntil', 'hhmm', value))
+                elif cell_str_lower.startswith('skipfilter'):
+                    value = command[len('skipfilter'):].strip()
+                    if cell_str_lower.startswith('skipfilters'):
+                        value = command[len('skipfilters'):].strip()  # deprecated SKIPFILTERS (plural) case
+                    skipfilter_list = [item.strip() for item in value.split()]
+                    plan_actions.append(('skipfilter', skipfilter_list))
                 elif cell_str_lower.startswith('shutdown'):
                         plan_actions.append(('shutdown',))
                 elif cell_str_lower.startswith('chain'):
@@ -1085,7 +1091,7 @@ def reorder_actions(raw_plan_list):
                              ['quitat'],
                              ['afinterval'],
                              ['waituntil', 'chill', 'stare', 'fov', 'burn',
-                              'image', 'autofocus', 'comment'],
+                              'image', 'autofocus', 'comment', 'skipfilter'],
                              ['flats', 'darks'],
                              ['shutdown'],
                              ['chain']]  # actions within each sublist retain user's given order
@@ -1107,6 +1113,7 @@ def reorder_actions(raw_plan_list):
 
 
 def add_raw_durations_and_lines(plan_list, an, fov_dict, instrument, exp_time_factor=1):
+    skipfilter_list = []
     for i_plan in range(len(plan_list)):  # a Plan namedtuple
         this_plan = plan_list[i_plan]
         for i_action in range(len(this_plan.action_list)):  # an Action namedtuple
@@ -1157,6 +1164,13 @@ def add_raw_durations_and_lines(plan_list, an, fov_dict, instrument, exp_time_fa
                 summary_lines = ['AUTOFOCUS']
                 acp_plan_lines = [';', '#AUTOFOCUS']
                 raw_duration = AUTOFOCUS_DURATION
+            elif this_type == 'skipfilter':
+                summary_lines = ['SKIPFILTER ' + ' '.join(parsed_action[1])]
+                if len(parsed_action[1]) == 0:
+                    summary_lines[0] += '(none)'
+                acp_plan_lines = [';', ';' + summary_lines[0]]
+                skipfilter_list = parsed_action[1]
+                raw_duration = 0
             elif this_type == 'comment':
                 summary_lines = [';' + parsed_action[1]]
                 acp_plan_lines = [';' + parsed_action[1]]
@@ -1175,7 +1189,8 @@ def add_raw_durations_and_lines(plan_list, an, fov_dict, instrument, exp_time_fa
                 summary_lines = ['fov ' + fov_name]
                 filters, counts, exp_times, target_overhead, repeat_duration = \
                     make_fov_exposure_data(fov_name, an, fov_dict, instrument,
-                                           exp_time_factor=exp_time_factor)
+                                           exp_time_factor=exp_time_factor,
+                                           skipfilter_list=skipfilter_list)
                 raw_duration = target_overhead + 1 * repeat_duration
                 duration_comment = ' --> ' + str(round(raw_duration / 60.0, 1)) + ' min'
                 this_fov = fov_dict[fov_name]
@@ -1212,7 +1227,8 @@ def add_raw_durations_and_lines(plan_list, an, fov_dict, instrument, exp_time_fa
                 summary_lines = ['Stare ' + str(n_repeats) + ' repeats at ' + fov_name]
                 filters, counts, exp_times, target_overhead, repeat_duration = \
                     make_fov_exposure_data(fov_name, an, fov_dict, instrument,
-                                           exp_time_factor=exp_time_factor)
+                                           exp_time_factor=exp_time_factor,
+                                           skipfilter_list=[])
                 raw_duration = target_overhead + n_repeats * repeat_duration
                 duration_comment = str(round(repeat_duration / 60.0, 1)) + ' min/repeat --> ' + \
                                    str(round(raw_duration / 60.0, 1)) + ' min (raw)'
@@ -1420,15 +1436,17 @@ def add_altitudes(plan_list, an, fov_dict):
     return plan_list
 
 
-def make_fov_exposure_data(fov_name, an, fov_dict=None, instrument=None, exp_time_factor=1):
+def make_fov_exposure_data(fov_name, an, fov_dict=None, instrument=None, exp_time_factor=1,
+                           skipfilter_list=[]):
     """
     Calculates exposure data for ONE REPEAT of one given fov.
-    :param exp_time_factor: 
     :param fov_name: [string]
     :param an: [Astronight object]
     :param fov_dict:
     :param instrument: instrument data [Instrument object]
-    :return: tuple: (filters [list of str], counts [list of int], exp_times [list of float], 
+    :param exp_time_factor:
+    :param skipfilter_list: list of filter names to omit from this FOV observation [list of strings].
+    :return: tuple: (filters [list of str], counts [list of int], exp_times [list of float],
         target_overhead [float], repeat_duration [float])
     """
     if fov_dict is not None:
@@ -1444,23 +1462,25 @@ def make_fov_exposure_data(fov_name, an, fov_dict=None, instrument=None, exp_tim
     counts = []
     exp_times = []
     mags = dict()
+    omit_list = [f.lower() for f in skipfilter_list]
     for obs in this_fov.observing_list:
         filter, mag, count = obs
-        filters.append(filter)
-        counts.append(count)
-        if obs_style.lower() in ['standard', 'monitor', 'stare']:
-            exp_time = calc_exp_time(mag, filter, instrument, this_fov.max_exposure,
-                                     exp_time_factor=exp_time_factor)
-        elif obs_style.lower() == 'lpv':
-            if len(mags) == 0:
-                mags = this_fov.estimate_lpv_mags(an.local_middark_jd)  # dict (get on 1st obs only)
-            exp_time = calc_exp_time(mags[filter], filter, instrument, this_fov.max_exposure,
-                                     exp_time_factor=exp_time_factor)
-        else:
-            print('****** WARNING: fov \'' + fov_name +
-                  '\' has unrecognized observing style \'' + obs_style + '\'.')
-            return None
-        exp_times.append(exp_time)
+        if filter.lower().strip() not in omit_list:
+            filters.append(filter)
+            counts.append(count)
+            if obs_style.lower() in ['standard', 'monitor', 'stare']:
+                exp_time = calc_exp_time(mag, filter, instrument, this_fov.max_exposure,
+                                         exp_time_factor=exp_time_factor)
+            elif obs_style.lower() == 'lpv':
+                if len(mags) == 0:
+                    mags = this_fov.estimate_lpv_mags(an.local_middark_jd)  # dict (get on 1st obs only)
+                exp_time = calc_exp_time(mags[filter], filter, instrument, this_fov.max_exposure,
+                                         exp_time_factor=exp_time_factor)
+            else:
+                print('****** WARNING: fov \'' + fov_name +
+                      '\' has unrecognized observing style \'' + obs_style + '\'.')
+                return None
+            exp_times.append(exp_time)
     if obs_style.lower() != 'stare':
         counts, exp_times = repeat_short_exp_times(counts, exp_times)
     target_overhead = NEW_TARGET_DURATION  # TODO: get this from instrument object
