@@ -12,7 +12,7 @@ from photrix.util import RaDec, ra_as_degrees, dec_as_degrees
 
 __author__ = "Eric Dose :: New Mexico Mira Project, Albuquerque"
 
-TOP_DIRECTORY = 'J:/Astro/Images/C14'
+TOP_DIRECTORY = 'J:/Astro/Images/Borea Photrix'
 FITS_REGEX_PATTERN = '^(.+)\.(f[A-Za-z]{2,3})$'
 FITS_EXTENSIONS = ['fts', 'fit', 'fits']  # allowed filename extensions
 ISO_8601_FORMAT = '%Y-%m-%dT%H:%M:%S'

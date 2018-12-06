@@ -893,11 +893,11 @@ def test_make_df_master():
     #     then only compare them here.
 
     # Read in dataframe as constructed by R software (2015-7):
-    df_r = pd.read_csv('J:/Astro/Images/C14/20170710-R/Photometry/df_master.csv', sep=';',)
+    df_r = pd.read_csv('J:/Astro/Images/Borea Photrix/20170710-R/Photometry/df_master.csv', sep=';',)
     df_r.index = df_r['Serial']
     # Execute test function (photrix, python), and read dataframe back in:
-    # process.make_df_master('J:/Astro/Images/C14', '20170710-py', ask_user=False)
-    df_py = pd.read_csv('J:/Astro/Images/C14/20170710-py/Photometry/df_master.csv', sep=';')
+    # process.make_df_master('J:/Astro/Images/Borea Photrix', '20170710-py', ask_user=False)
+    df_py = pd.read_csv('J:/Astro/Images/Borea Photrix/20170710-py/Photometry/df_master.csv', sep=';')
     df_py.index = df_py['Serial']
 
     assert set(df_py.columns) == set(df_r.columns)  # columns must be same, differing order OK.

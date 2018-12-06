@@ -21,3 +21,5 @@ test/\$an_for_test/Photometry/model-V\.json
 test/\$data_for_test/AD Dra-S001-R001-C001-I\.fts
 
 *.fts
+
+scratch/

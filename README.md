@@ -180,7 +180,7 @@ This python function arranges all the subdirectories (of the downloaded AN image
 
 ...where the parameters are:
 
- - *an_top_directory* is the directory holding all AN image data (default  = 'J:/Astro/Images/C14' which you will surely need to change)
+ - *an_top_directory* is the directory holding all AN image data (default  = 'J:/Astro/Images/Borea Photrix' which you will surely need to change)
  - *an_rel_directory* is the subdirectory under *an_top_directory*, typically like '20180519'
 
 This also renames the files from ACP naming (e.g., "ST Tri-S001-R001-C001-I.fts" to simple and sequential names, by FOV name, in order of the images' date and time regardless of filter (e.g., "ST Tri-0003-I.fts").

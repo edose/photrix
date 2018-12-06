@@ -17,7 +17,7 @@ from .fov import Fov, FOV_DIRECTORY
 __author__ = "Eric Dose :: New Mexico Mira Project, Albuquerque"
 
 THIS_SOFTWARE_VERSION = '2.0.0'  # as of 20170716
-AN_TOP_DIRECTORY = 'J:/Astro/Images/C14'
+AN_TOP_DIRECTORY = 'J:/Astro/Images/Borea Photrix'
 DF_MASTER_FILENAME = 'df_master.csv'
 FITS_REGEX_PATTERN = '^(.+)\.(f[A-Za-z]{2,3})$'
 MIN_FWHM = 1.0
@@ -345,8 +345,10 @@ def make_df_master(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None,
     len_fov = max(len(s) for s in df_ask_user.index) + 1
     print('\n' + '  FOV'.ljust(len_fov), 'N FITS', 'FOV exists', 'Check Star')
     for ind in df_ask_user.index:
+        n_fits = df_ask_user.loc[ind, 'N_FITS']
+        singleton_mark = '*' if n_fits == 1 else ' '
         print(df_ask_user.loc[ind, 'FOV'].ljust(len_fov),
-              str(df_ask_user.loc[ind, 'N_FITS']).rjust(len('N FITS')),
+              (str(df_ask_user.loc[ind, 'N_FITS']) + ' ' + singleton_mark).rjust(len('N FITS')),
               '    ' + df_ask_user.loc[ind, 'FOV_file_exists_text'].ljust(6),
               df_ask_user.loc[ind, 'CheckStar'])
 
@@ -547,7 +549,7 @@ class SkyModel:
         """Constructs a sky model using mixed-model regression on df_master.
             Normally used by make_model()
         Typical usage: V = pr.SkyModel(an_rel_directory='20180804', filter='V', fit_extinction=True)
-        :param an_top_directory: e.g., 'J:\Astro\Images\C14' [string]
+        :param an_top_directory: e.g., 'J:\Astro\Images\Borea Photrix' [string]
         :param an_rel_directory: e.g., '20170504'. The dir 'Photometry' is subdir of this. [string]
         :param filter: name of filter to which this model applies [string, e.g., 'V' or 'R']
         :param instrument_name: name of Instrument, e.g., 'Borea' [string; name of Instrument obj]
@@ -1008,7 +1010,7 @@ class PredictionSet:
             ps = pr.PredictionSet(an_rel_directory='20170816', skymodel_list=[V,R,I])
             ps.markup_report()
             ps.aavso_report()
-        :param an_top_directory: e.g., 'J:\Astro\Images\C14' [string]
+        :param an_top_directory: e.g., 'J:\Astro\Images\Borea Photrix' [string]
         :param an_rel_directory: e.g., '20170504'. The dir 'Photometry' is subdir of this. [string]
         :param instrument_name: name of Instrument, e.g., 'Borea' [string; name of Instrument obj]
         :param site_name: name of observing site, e.g., 'DSW' [string; name of Site object]
@@ -1773,7 +1775,7 @@ class TransformModel:
         """
         Constructs a transform on filter against ci filter description ci_type,
             given a df_master.csv in the given directory.
-        :param an_top_directory: e.g., 'J:\Astro\Images\C14' [string]
+        :param an_top_directory: e.g., 'J:\Astro\Images\Borea Photrix' [string]
         :param an_rel_directory: e.g., '20170504'. The dir 'Photometry' is subdir of this. [string]
         :param filter: name of filter to which this model applies [string, e.g., 'V' or 'R']
         :param ci_type: two color-index filter names separated by minus sign,

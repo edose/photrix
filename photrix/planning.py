@@ -62,7 +62,7 @@ CHAIN_DURATION = 3  # seconds; a guess
 SHUTDOWN_DURATION = 480  # seconds; a guess
 NEW_TARGET_DURATION = 90  # seconds; slew + guider start
 NEW_FILTER_DURATION = 10  # seconds; filter change and focuser change
-NEW_EXPOSURE_DURATION = 18  # seconds; guider check, image download, plate solving (excl exposure)
+NEW_EXPOSURE_DURATION = 15  # seconds; guider check, image download, plate solving (excl exposure)
 AUTOFOCUS_DURATION = 170  # seconds, includes slew & filter wheel changes
 
 V_MAG_WARNING = 16.5  # a predicted V magnitude > this will trigger a warning line in Summary file.
@@ -612,7 +612,7 @@ class AavsoWebobs:
 def get_local_aavso_reports(report_dir=None, earliest_an=None):
     pass
     #     report_dict = {}
-    #     for root, dirs, files in os.walk('J:/Astro/Images/C14/'):
+    #     for root, dirs, files in os.walk('J:/Astro/Images/Borea Photrix/'):
     #         if root.endswith("Photometry"):
     #             report = [file for file in files if file.startswith("AAVSO")]
     #             if len(report) >= 1:
@@ -754,6 +754,8 @@ def make_an_roster(an_date_string, output_directory, site_name='DSW', instrument
 
         # For now, we will consider that each Stare FOV wants either minima or maxima but not both.
         event_type_string = STARE_EVENT_TYPES.get(this_fov.target_type.lower(), None)
+        if event_type_string is None:
+            print(this_fov.fov_name + ': probable bad target_type in FOV.')
         do_minima = event_type_string.lower().startswith("min")
         do_maxima = event_type_string.lower().startswith("max")
 
@@ -1508,6 +1510,7 @@ def make_image_exposure_data(filter_entries, instrument, exp_time_factor=1):
         raw_filter, mag_string = entry.split("=", maxsplit=1)
         this_filter = raw_filter.strip()
         bits = mag_string.split("(")
+        # TODO: Add option to interpret 's' at end of bits[0] as seconds exp rather than magnitude.
         this_mag = float(bits[0])
         if len(bits) == 1:  # case e.g. "V=13.2"
             this_count = 1
