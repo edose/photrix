@@ -17,7 +17,8 @@ from .fov import Fov, FOV_DIRECTORY
 __author__ = "Eric Dose :: New Mexico Mira Project, Albuquerque"
 
 THIS_SOFTWARE_VERSION = '2.0.0'  # as of 20170716
-AN_TOP_DIRECTORY = 'J:/Astro/Images/Borea Photrix'
+# AN_TOP_DIRECTORY = 'J:/Astro/Images/Borea Photrix'
+AN_TOP_DIRECTORY = 'C:/Astro/Borea Photrix'
 DF_MASTER_FILENAME = 'df_master.csv'
 FITS_REGEX_PATTERN = '^(.+)\.(f[A-Za-z]{2,3})$'
 MIN_FWHM = 1.0
@@ -484,6 +485,8 @@ def make_df_master(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None,
             df['UTC_start'] = image.fits.utc_start
             df['Exposure'] = image.fits.exposure
             df['JD_mid'] = jd_from_datetime_utc(image.fits.utc_mid)
+            df['JD_fract'] = np.nan  # placeholder value (replaced with real values, below)
+            df['JD_fract2'] = np.nan  # placeholder value (replaced with real values, below)
             df['Filter'] = image.fits.filter
             df['Airmass'] = image.fits.airmass
 
@@ -513,6 +516,11 @@ def make_df_master(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None,
     df_master.drop(['Number', 'Object'], axis=1, inplace=True)
     df_master.insert(0, 'Serial', range(1, 1 + len(df_master)))  # inserts in place
     df_master.index = list(df_master['Serial'])
+
+    # Fill in the JD_fract and JD_fract2 columns:
+    JD_floor = floor(df_master['JD_mid'].min())  # requires that all JD_mid values be known.
+    df_master['JD_fract'] = df_master['JD_mid'] - JD_floor
+    df_master['JD_fract2'] = df_master['JD_fract']**2
 
     # For comp stars w/ CatMagError==NA, overwrite w/ largest CatMagError for same FOV and filter:
     # TODO: revisit using largest CatMagError for all CatMagError values. Seems too harsh.
@@ -545,6 +553,7 @@ class SkyModel:
                  saturation_adu=None,
                  fit_sky_bias=True, fit_vignette=True, fit_xy=False,
                  fit_transform=False, fit_extinction=True, fit_log_adu=True,
+                 fit_jd=False, fit_jd2=False,
                  do_plots=True):
         """Constructs a sky model using mixed-model regression on df_master.
             Normally used by make_model()
@@ -559,11 +568,13 @@ class SkyModel:
         :param max_color_vi: maximum V-I color allowed to stars in model [float]
         :param saturation_adu: ccd ADUs that constitute saturation [float; from Instrument if None] 
         :param fit_sky_bias: True to fit sky bias term [bool]
-        :param fit_log_adu: True to fit log(MaxADU_Ur) as CCD nonlinearity measure [bool]
         :param fit_vignette: True to fit vignette term (dist^2 from ccd center) [bool]
         :param fit_xy: True to fit X and Y gradient terms [bool]
         :param fit_transform: True to fit transform terms; else use values from Instument obj [bool]
         :param fit_extinction: True to fit extinction terms; else use values from Site obj [bool]
+        :param fit_log_adu: True to fit log(MaxADU_Ur) as CCD nonlinearity measure [bool]
+        :param fit_jd: True to fit jd_fract, to capture linearly incr or decr cirrus [bool]
+        :param fit_jd2: True to fit jd_fract^2, to capture quadratically incr or decr cirrus [bool]
         Parameter 'fit_star_id' is not included in this version (has never been used in R, and
             would lead to crossed RE vars).
         """
@@ -586,6 +597,8 @@ class SkyModel:
         self.fit_transform = fit_transform
         self.fit_extinction = fit_extinction
         self.fit_log_adu = fit_log_adu
+        self.fit_jd = fit_jd
+        self.fit_jd2 = fit_jd2
         self.dep_var_name = 'InstMag_with_offsets'
         self.df_model = None    # data to/from regression, one row per input pt [pandas DataFrame]
         self.mm_fit = None      # placeholder [MixedModelFit object]
@@ -715,6 +728,10 @@ class SkyModel:
             fixed_effect_var_list.append('Vignette')
         if self.fit_xy:
             fixed_effect_var_list.extend(['X1024', 'Y1024'])
+        if self.fit_jd:
+            fixed_effect_var_list.extend(['JD_fract'])
+        if self.fit_jd2:
+            fixed_effect_var_list.extend(['JD_fract2'])
 
         # Build 'random-effect' variable:
         random_effect_var_name = 'FITSfile'  # cirrus effect is per-image
@@ -775,6 +792,10 @@ class SkyModel:
             if self.fit_sky_bias is True else 0.0
         self.log_adu = self.mm_fit.df_fixed_effects.loc['LogADU', 'Value'] \
             if self.fit_log_adu is True else 0.0
+        self.jd = self.mm_fit.df_fixed_effects.loc['JD_fract', 'Value'] \
+            if self.fit_jd is True else 0.0
+        self.jd2 = self.mm_fit.df_fixed_effects.loc['JD_fract2', 'Value'] \
+            if self.fit_jd2 is True else 0.0
         self.converged = self.mm_fit.converged
         self.n_obs = len(self.df_model)
         self.n_images = len(self.df_model['FITSfile'].drop_duplicates())
@@ -805,6 +826,10 @@ class SkyModel:
             required_input_columns.append('Vignette')
         if self.fit_xy:
             required_input_columns.extend(['X1024', 'Y1024'])
+        if self.fit_jd:
+            required_input_columns.extend('JD_fract')
+        if self.fit_jd2:
+            required_input_columns.extend('JD_fract2')
         all_present = all([name in df_predict_input.columns for name in required_input_columns])
         if not all_present:
             print('>>>>> SkyModel._predict_fixed_only(): at least one column missing.')
@@ -901,6 +926,7 @@ class SkyModel:
                 ax.axhline(y=0, color='lightgray', linewidth=1, zorder=-100)
 
         # Cirrus Plot (one point per image):
+        # TODO: Modify this somehow to also account for JD_fract and JD_fract2.
         ax = axes[0, 0]
         make_labels(ax, 'Image Cirrus Plot', xlabel_jd, 'mMag')
         ax.scatter(x=self.df_image['JD_mid']-jd_floor, y=self.df_image['Value'] * 1000.0,

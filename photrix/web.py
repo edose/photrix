@@ -34,6 +34,7 @@ def get_aavso_webobs_raw_table(star_id, num_obs=100, jd_start=None, jd_end=None)
     if jd_end is not None:
         url += "&end=" + str(jd_end)
     # TODO: Try to use requests Session objects for performance.
+    # print('get_aavso_webobs_raw_table() >' + url + '<')
     r = requests.get(url)
     obs_list = []
     if r.status_code == HTTP_OK_CODE:
@@ -62,6 +63,7 @@ def get_aavso_vsp_chart(chart_id=None):
     if chart_id is None:
         return ""
     url = "https://www.aavso.org/apps/vsp/api/chart/" + chart_id.strip() + "/?format=json"
+    # print('get_aavso_vsp_chart() >' + url + '<')
     r = requests.get(url)
     if r.status_code == HTTP_OK_CODE:
         return r.text
@@ -75,4 +77,5 @@ def go(starname):
     url = 'http://www.aavso.org/cgi-bin/lcg.pl?name=' + \
           star_safe_name + '&auid=' + star_safe_name + \
         '&lastdays=200&v=on&iband=on&r=on&visual=on&grid=on&width=900&height=750'
+    print('go() >' + url + '<')
     webbrowser.open(url)

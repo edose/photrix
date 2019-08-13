@@ -17,7 +17,7 @@ from .web import get_aavso_webobs_raw_table
 
 __author__ = "Eric Dose :: New Mexico Mira Project, Albuquerque"
 
-# USAGE:
+# USAGE: *******************************************************************
 # pl.make_an_roster('20170525', 'c:/Astro/ACP/AN20170525', user_update_tolerance_days=0.1,
 #      exp_time_factor=0.75)
 # pl.make_an_plan('c:/Astro/ACP/AN20170525/planning.xlsx', exp_time_factor=0.75)
@@ -44,28 +44,37 @@ DT_FMT = '%Y-%m-%d %H:%M:%S.%f%z'  # kludge around py inconsistency in python's 
 PHOTRIX_ROOT_DIRECTORY = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LOCAL_OBS_CACHE_FULLPATH = os.path.join(PHOTRIX_ROOT_DIRECTORY, "local_obs_cache.csv")
 
+# ********** Roster & cache parameters:
 AAVSO_WEBOBS_ROWS_TO_GET = 100
 MIN_ROWS_ONE_STARE = 10
 MAX_DAYS_ONE_STARE = 0.5
 DEFAULT_UPDATE_TOLERANCE_DAYS = 0.083333  # 2 hours
 
-ABSOLUTE_MAX_EXPOSURE_TIME = 600  # seconds
-ABSOLUTE_MIN_EXPOSURE_TIME = 3  # seconds
-MIN_TOTAL_EXP_TIME_PER_FILTER = 9  # seconds, thus 3 exposures max per filter for LPVs
-
-PLAN_START_DURATION = 45  # seconds
+# ********** ACP Timing:
 CHILL_DURATION = 60  # seconds; this may be overestimated
-QUITAT_DURATION = 0  # seconds
+PLAN_START_DURATION = 45  # seconds
+AUTOFOCUS_DURATION = 180  # seconds, includes slew & filter wheel changes
 AFINTERVAL_DURATION = 0  # seconds; beyond AUTOFOCUS_DURATION that this invokes
-BURN_DURATION = 11*60  # seconds
 CHAIN_DURATION = 3  # seconds; a guess
+QUITAT_DURATION = 3  # seconds
 SHUTDOWN_DURATION = 480  # seconds; a guess
-NEW_TARGET_DURATION = 90  # seconds; slew + guider start
-NEW_FILTER_DURATION = 10  # seconds; filter change and focuser change
-NEW_EXPOSURE_DURATION = 15  # seconds; guider check, image download, plate solving (excl exposure)
-AUTOFOCUS_DURATION = 170  # seconds, includes slew & filter wheel changes
 
+# ********** Camera & filter wheel (STXL-6303E) Timing:
+MAX_AGGREGATE_EXPOSURE_NO_GUIDING = 181  # seconds; <====== LIKELY TO INCREASE LATER (autumn 2019).
+GUIDE_STAR_ACQUISITION = 25  # seconds (if needed)
+GUIDER_CHECK_DURATION = 5  # seconds (if needed)
+NEW_EXPOSURE_DURATION_EX_GUIDER_CHECK = 25  # seconds; image download, plate solving (excl exposure)
+NEW_FILTER_DURATION = 8  # seconds; filter change and focuser change
+
+# ********** Mount (L-500) Timing:
+NEW_TARGET_DURATION = 15  # seconds; slew + settle + ACP processing (no guider start etc)
+
+# ********** EVD Preferences:
+BURN_EXPOSURE = 240  # seconds per exposure
 V_MAG_WARNING = 16.5  # a predicted V magnitude > this will trigger a warning line in Summary file.
+ABSOLUTE_MAX_EXPOSURE_TIME = 600  # seconds
+ABSOLUTE_MIN_EXPOSURE_TIME = 2.5  # seconds [20190318, was 3 seconds]
+MIN_TOTAL_EXP_TIME_PER_FILTER = 9  # seconds, thus 4 [was 3] exposures max per filter for LPVs
 
 
 def make_df_fov(fov_directory=FOV_DIRECTORY, fov_names_selected=None):
@@ -696,7 +705,7 @@ def make_an_roster(an_date_string, output_directory, site_name='DSW', instrument
                     '     using exposure time factor = ' + '{:5.3f}'.format(exp_time_factor),
                     an.acp_header_string().replace(',', ' '),
                     '; Site=' + site_name + '   Instrument=' + instrument_name +
-                    '   min.alt=' + '{:0d}'.format(an.site.min_altitude) + u'\N{DEGREE SIGN}']
+                    '    min.alt = ' + '{:.1f}'.format(an.site.min_altitude) + u'\N{DEGREE SIGN}']
 
     # Handle obs_style = 'Standard':
     lines_std = ['\n\n\nSTANDARD roster for ' + an_date_string + ': ' + 50*'-',
@@ -913,10 +922,15 @@ def parse_excel(excel_path, site_name='DSW'):
        e.g., "STARE 100 ST Tri" (typically time-limited by QUITAT, not by number of obs cycles).
     BURN  FOV_name  RA  Dec  ::  for 240-second images in V and I only; no FOV file necessary,
        e.g., "BURN FF Lyr 12:00:00 +23:34:45".
-    IMAGE  target_name  filter_mag_string  RA  Dec  ::  arbitrary imaging,
-       e.g., "IMAGE New target V=12 B=12.5(2) 12:00:00 +23:34:45" to image New target in
-       V filter (once) at targeted mag 12, and B filter twice at targeted mag 12.5. All text between
-       "IMAGE" and first word having an "=" character is assumed to make up the target name.
+    IMAGE  target_name  filter_mag_or_sec_string  RA  Dec  ::  arbitrary imaging,
+       either in magnitudes for the current instrument, or in explicity exposure times (may be mixed on
+       a single line):
+       *** Magnitudes syntax: "IMAGE New target V=12 B=12.5(2) 12:00:00 +23:34:45" to image New target in
+            V filter (once) at targeted mag 12, and B filter twice at targeted mag 12.5.
+       *** Exposure syntax:  "IMAGE New target V=120s B=240s(2) 12:00:00 +23:34:45" to image New target in
+           V filter (once) at 120 seconds, and B filter twice at 240 seconds (exposure times are NOT
+           limited, so be careful!)
+       All text between "IMAGE" and first word including a "=" character will make up the target name.
 
 
     """
@@ -1181,11 +1195,13 @@ def add_raw_durations_and_lines(plan_list, an, fov_dict, instrument, exp_time_fa
                 summary_lines = ['BURN ' + parsed_action[1] + '  ' +
                                  parsed_action[2] + '  ' + parsed_action[3]]
                 acp_plan_lines = [';', '#DITHER 0 ;', '#FILTER V,I ;', '#BINNING 1,1 ;',
-                                  '#COUNT 1,1 ;', '#INTERVAL 240,240 ;',
+                                  '#COUNT 1,1 ;', '#INTERVAL ',
+                                  str(BURN_EXPOSURE) + ',' + str(BURN_EXPOSURE),
                                   ';----> BURN for new FOV file.',
                                   parsed_action[1] + '\t' +
                                   parsed_action[2] + '\t' + parsed_action[3] + ' ;']
-                raw_duration = BURN_DURATION
+                raw_duration = sum(tabulate_target_durations(filters=['V', 'I'], counts=[1, 1],
+                                                             exp_times=[BURN_EXPOSURE, BURN_EXPOSURE]))
             elif this_type == 'fov':
                 fov_name = parsed_action[1]
                 summary_lines = ['fov ' + fov_name]
@@ -1485,11 +1501,8 @@ def make_fov_exposure_data(fov_name, an, fov_dict=None, instrument=None, exp_tim
             exp_times.append(exp_time)
     if obs_style.lower() != 'stare':
         counts, exp_times = repeat_short_exp_times(counts, exp_times)
-    target_overhead = NEW_TARGET_DURATION  # TODO: get this from instrument object
-    repeat_duration = len(filters) * NEW_FILTER_DURATION + \
-                      sum(counts) * NEW_EXPOSURE_DURATION + \
-                      sum([counts[i] * exp_times[i] for i in range(len(counts))])
-    # types (3 lists, two floats): [str], [int], [float], float, float
+    target_overhead, repeat_duration = tabulate_target_durations(filters, counts, exp_times)
+    # return types (3 lists, two floats): [str], [int], [float], float, float
     return filters, counts, exp_times, target_overhead, repeat_duration
 
 
@@ -1510,24 +1523,35 @@ def make_image_exposure_data(filter_entries, instrument, exp_time_factor=1):
         raw_filter, mag_string = entry.split("=", maxsplit=1)
         this_filter = raw_filter.strip()
         bits = mag_string.split("(")
-        # TODO: Add option to interpret 's' at end of bits[0] as seconds exp rather than magnitude.
-        this_mag = float(bits[0])
         if len(bits) == 1:  # case e.g. "V=13.2"
             this_count = 1
         elif len(bits) == 2:               # case e.g. "V=13.2(1)"
             this_count = int(bits[1].replace(")", ""))
-        this_exp_time = calc_exp_time(this_mag, this_filter, instrument, max_exp_time=None,
-                                      exp_time_factor=exp_time_factor)
+        if 's' in bits[0].lower():
+            this_exp_time = float(bits[0].lower().split('s')[0])
+        else:
+            this_mag = float(bits[0])
+            this_exp_time = calc_exp_time(this_mag, this_filter, instrument, max_exp_time=None,
+                                          exp_time_factor=exp_time_factor)
         filters.append(this_filter)
         counts.append(this_count)
         exp_times.append(this_exp_time)
     counts, exp_times = repeat_short_exp_times(counts, exp_times)
-    target_overhead = NEW_TARGET_DURATION  # TODO: get this from instrument object
-    repeat_duration = len(filters) * NEW_FILTER_DURATION + \
-                      sum(counts) * NEW_EXPOSURE_DURATION + \
-                      sum([counts[i] * exp_times[i] for i in range(len(counts))])
-    # types (3 lists, two floats): [str], [int], [float], float, float
+    target_overhead, repeat_duration = tabulate_target_durations(filters, counts, exp_times)
+    # return types (3 lists, two floats): [str], [int], [float], float, float
     return filters, counts, exp_times, target_overhead, repeat_duration
+
+
+def tabulate_target_durations(filters, counts, exp_times):
+    aggregate_exposure = sum([counts[i] * exp_times[i] for i in range(len(counts))])
+    guiding_is_active = aggregate_exposure > MAX_AGGREGATE_EXPOSURE_NO_GUIDING
+    # TODO: get some of the next base values from instrument object.
+    target_overhead = NEW_TARGET_DURATION + (GUIDE_STAR_ACQUISITION if guiding_is_active else 0)
+    repeat_duration = aggregate_exposure + \
+                      len(filters) * NEW_FILTER_DURATION + \
+                      sum(counts) * NEW_EXPOSURE_DURATION_EX_GUIDER_CHECK + \
+                      (sum(counts) * GUIDER_CHECK_DURATION if guiding_is_active else 0)
+    return target_overhead, repeat_duration
 
 
 def repeat_short_exp_times(counts, exp_times):
@@ -1577,7 +1601,8 @@ def write_summary(plan_list, an, fov_dict, output_directory, exp_time_factor):
     all_summary_lines = ['SUMMARY for AN' + an.an_date_string + '   ' + day_of_week.upper(),
                          '     as generated by photrix at ' +
                          '{:%Y-%m-%d %H:%M  UTC}'.format(datetime.now(timezone.utc)),
-                         '     using exposure time factor = ' + '{:5.3f}'.format(exp_time_factor),
+                         '     using exposure time factor = ' + '{:5.3f}'.format(exp_time_factor) +
+                         '     min.alt = ' + '{:.1f}'.format(an.site.min_altitude) + u'\N{DEGREE SIGN}',
                          an.acp_header_string()]
     moon_is_a_factor = an.moon_phase > MOON_PHASE_NO_FACTOR  # for this astronight
 

@@ -249,6 +249,18 @@ class Astronight:
                 start=moonset_2).datetime().replace(tzinfo=timezone.utc)
             ts_moon_up_2 = Timespan(moonrise_2, moonset_2)
             self.ts_dark_no_moon = self.ts_dark.subtract(ts_moon_up_1).subtract(ts_moon_up_2)
+        moon_transit_before = site_obs.previous_transit(moon, start=self.local_middark_utc)
+        moon_transit_after = site_obs.next_transit(moon, start=self.local_middark_utc)
+        seconds_before = abs((moon_transit_before.datetime().replace(tzinfo=timezone.utc) -
+                              self.local_middark_utc).total_seconds())
+        seconds_after  = abs((moon_transit_after.datetime().replace(tzinfo=timezone.utc) -
+                              self.local_middark_utc).total_seconds())
+        # Store the moon transit closer to middark time.
+        if seconds_before < seconds_after:
+            self.moon_transit = moon_transit_before.datetime().replace(tzinfo=timezone.utc)
+        else:
+            self.moon_transit = moon_transit_after.datetime().replace(tzinfo=timezone.utc)
+
     # TODO: Prep all other solar-system bodies, using their RaDecs at local mid-dark (low priority).
     # jupiter = ephem.Jupiter(obs)
     # self.jupiter_radec = RaDec(str(jupiter.ra), str(jupiter.dec))
@@ -431,6 +443,7 @@ class Astronight:
             dark_no_moon_string = 'no moon: ' + \
                                   self.ts_dark_no_moon.start.strftime('%H%M') + '-' + \
                                   self.ts_dark_no_moon.end.strftime('%H%M') + ' UTC'
+        moon_transit_string = 'transit: ' + self.moon_transit.strftime('%H%M')
 
         # Handle LST vs UTC:
         lst_middark_seconds = self.local_middark_lst / 15 * 3600
@@ -451,7 +464,7 @@ class Astronight:
                         dark_start_utc_string + '-' + dark_end_utc_string + ' UTC  = ' + \
                         dark_start_lst_string + '-' + dark_end_lst_string + ' LST\n'
         header_string += '; moon -- ' + moon_phase_string + ' ' + moon_radec_string + \
-                         '   ' + dark_no_moon_string + '\n'
+                         '   ' + dark_no_moon_string + '    ' + moon_transit_string + '\n'
         header_string += '; LST = UTC + ' + lst_vs_utc_string + ' (middark)'
         return header_string
 
