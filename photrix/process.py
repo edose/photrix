@@ -827,9 +827,9 @@ class SkyModel:
         if self.fit_xy:
             required_input_columns.extend(['X1024', 'Y1024'])
         if self.fit_jd:
-            required_input_columns.extend('JD_fract')
+            required_input_columns.append('JD_fract')
         if self.fit_jd2:
-            required_input_columns.extend('JD_fract2')
+            required_input_columns.append('JD_fract2')
         all_present = all([name in df_predict_input.columns for name in required_input_columns])
         if not all_present:
             print('>>>>> SkyModel._predict_fixed_only(): at least one column missing.')
@@ -1128,7 +1128,7 @@ class PredictionSet:
                                   'Xcentroid', 'Ycentroid', 'InstMag', 'InstMagSigma', 'StarType',
                                   'CatMag', 'CatMagError', 'Exposure',
                                   'JD_mid', 'Filter', 'Airmass', 'CI', 'SkyBias', 'LogADU',
-                                  'Vignette']]
+                                  'Vignette', 'JD_fract', 'JD_fract2']]
             # column 'EstimatedMag' does NOT include image/cirrus effect!
             df_estimates_this_skymodel.loc[:, 'EstimatedMag'] = \
                 skymodel._predict_fixed_only(df_predict_input)
@@ -1261,8 +1261,8 @@ class PredictionSet:
         columns_post_predict = ["Serial", "ModelStarID", "FITSfile", "StarID", "Chart",
                                 "Xcentroid", "Ycentroid", "InstMag", "InstMagSigma", "StarType",
                                 "CatMag", "CatMagSaved", "CatMagError", "Exposure", "JD_mid",
-                                "Filter", "Airmass", "CI", "SkyBias", "Vignette", "LogADU",
-                                "PredictedMag"]
+                                "Filter", "Airmass", "CI", "SkyBias", "Vignette",
+                                "JD_fract", "JD_fract2", "LogADU", "PredictedMag"]
         df_estimates_checks_targets = df_estimates_checks_targets[columns_post_predict]
         df_estimates_checks_targets['CatMag'] = df_estimates_checks_targets['CatMagSaved']
         df_estimates_checks_targets = df_estimates_checks_targets.drop(['CatMagSaved'], axis=1)

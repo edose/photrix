@@ -19,7 +19,8 @@ ISO_8601_FORMAT = '%Y-%m-%dT%H:%M:%S'
 FWHM_PER_SIGMA = 2.0 * sqrt(2.0 * log(2))
 SUBIMAGE_MARGIN = 1.5  # subimage pixels around outer annulus, for safety
 
-R_DISC = 10  # for aperture photometry, likely to be adaptive (per image) later.
+# R_DISC altered 10 -> 9 Aug 16 2019 for new L-500 mount.
+R_DISC = 9  # for aperture photometry, likely to be adaptive (per image) later.
 R_INNER = 15  # "
 R_OUTER = 20  # "
 

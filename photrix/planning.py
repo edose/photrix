@@ -52,22 +52,22 @@ DEFAULT_UPDATE_TOLERANCE_DAYS = 0.083333  # 2 hours
 
 # ********** ACP Timing:
 CHILL_DURATION = 60  # seconds; this may be overestimated
-PLAN_START_DURATION = 45  # seconds
-AUTOFOCUS_DURATION = 180  # seconds, includes slew & filter wheel changes
+PLAN_START_DURATION = 30  # seconds
+AUTOFOCUS_DURATION = 170  # seconds, includes slew & filter wheel changes
 AFINTERVAL_DURATION = 0  # seconds; beyond AUTOFOCUS_DURATION that this invokes
 CHAIN_DURATION = 3  # seconds; a guess
 QUITAT_DURATION = 3  # seconds
 SHUTDOWN_DURATION = 480  # seconds; a guess
 
-# ********** Camera & filter wheel (STXL-6303E) Timing:
-MAX_AGGREGATE_EXPOSURE_NO_GUIDING = 181  # seconds; <====== LIKELY TO INCREASE LATER (autumn 2019).
-GUIDE_STAR_ACQUISITION = 25  # seconds (if needed)
-GUIDER_CHECK_DURATION = 5  # seconds (if needed)
-NEW_EXPOSURE_DURATION_EX_GUIDER_CHECK = 25  # seconds; image download, plate solving (excl exposure)
-NEW_FILTER_DURATION = 8  # seconds; filter change and focuser change
-
 # ********** Mount (L-500) Timing:
-NEW_TARGET_DURATION = 15  # seconds; slew + settle + ACP processing (no guider start etc)
+NEW_TARGET_DURATION = 34.3  # seconds; slew + settle + ACP processing (no guider start etc)
+
+# ********** Camera & filter wheel (STXL-6303E) Timing:
+MAX_AGGREGATE_EXPOSURE_NO_GUIDING = 241  # seconds; <====== LIKELY TO INCREASE LATER (autumn 2019).
+GUIDE_STAR_ACQUISITION = 14.2  # seconds (if needed)
+GUIDER_CHECK_DURATION = 4  # seconds (if needed)
+NEW_FILTER_DURATION = 5  # seconds; filter change and focuser change
+NEW_EXPOSURE_DURATION_EX_GUIDER_CHECK = 19.3  # seconds; image download, plate solving (excl exposure)
 
 # ********** EVD Preferences:
 BURN_EXPOSURE = 240  # seconds per exposure
@@ -1195,9 +1195,9 @@ def add_raw_durations_and_lines(plan_list, an, fov_dict, instrument, exp_time_fa
                 summary_lines = ['BURN ' + parsed_action[1] + '  ' +
                                  parsed_action[2] + '  ' + parsed_action[3]]
                 acp_plan_lines = [';', '#DITHER 0 ;', '#FILTER V,I ;', '#BINNING 1,1 ;',
-                                  '#COUNT 1,1 ;', '#INTERVAL ',
-                                  str(BURN_EXPOSURE) + ',' + str(BURN_EXPOSURE),
-                                  ';----> BURN for new FOV file.',
+                                  '#COUNT 1,1 ;', '#INTERVAL ' +
+                                  str(BURN_EXPOSURE) + ',' + str(BURN_EXPOSURE) +
+                                  ' ;----> BURN for new FOV file.',
                                   parsed_action[1] + '\t' +
                                   parsed_action[2] + '\t' + parsed_action[3] + ' ;']
                 raw_duration = sum(tabulate_target_durations(filters=['V', 'I'], counts=[1, 1],
