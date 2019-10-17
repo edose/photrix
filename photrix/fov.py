@@ -943,6 +943,7 @@ def add_punches_from_text(punches_txt_path=DEFAULT_PUNCHES_TEXT_PATH, delim='\t'
     all_ok = True  # default value to be falsified by any failure to verify.
     fov_list = df_punches['FOV'].unique()
     for fov_name in fov_list:
+        print(fov_name)
         this_fov = Fov(fov_name)
         if not this_fov.is_valid:
             print('>>>>> FOV file ' + fov_name + ' does not exist.')
@@ -996,7 +997,8 @@ def add_punches_from_text(punches_txt_path=DEFAULT_PUNCHES_TEXT_PATH, delim='\t'
     recommend_proceed = all_ok \
         and num_too_close == 0 \
         and max(df_punches['Distance']) <= MAX_PUNCH_DIST_FROM_TARGET
-    answer = input('Proceed? Recommend ' + ('Yes' if recommend_proceed else 'NO!!!') + ' (y/n):')
+    answer = input('Proceed to write punches into FOV files? Recommend ' +
+                   ('Yes' if recommend_proceed else 'NO!!!') + ' (y/n):')
     if answer.strip().lower()[0] == 'y':
         for i in df_punches.index:
             radec_target = RaDec(df_punches.loc[i, 'Target_RA'], df_punches.loc[i, 'Target_Dec'])

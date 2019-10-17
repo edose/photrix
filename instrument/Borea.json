@@ -57,6 +57,14 @@
         {"B-V": null},
         {"V-R": null}
       ]
+    },
+    "Clear": {
+      "reference_exposure_mag10": 10,
+      "transform": [
+        {"V-I": null},
+        {"B-V": null},
+        {"V-R": null}
+      ]
     }
   }
 }

@@ -26,7 +26,8 @@ __author__ = "Eric Dose :: New Mexico Mira Project, Albuquerque"
 # AZ Her  ; standard FOV target
 # STARE 6 ST Tri  ;  standard stare FOV target (6 reps)
 # BURN AA Aur 11:00:00 +34:00:00  ;  Burn target (240 sec in V and I)
-# IMAGE target_name V=12 B=12.5(2) 12:00:00 +23:34:45  ;  arbitrary image
+# IMAGE target_name V=12 B=12.5(2) 12:00:00 +23:34:45  ;  arbitrary image, exp time from magnitude
+# IMAGE target_name Clear=240sec(5) 12:00:00 +23:34:45  ;  arbitrary image, exp time requested directly
 
 
 FOV_DIRECTORY = "C:/Dev/Photometry/FOV/"
@@ -43,6 +44,9 @@ DT_FMT = '%Y-%m-%d %H:%M:%S.%f%z'  # kludge around py inconsistency in python's 
 
 PHOTRIX_ROOT_DIRECTORY = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LOCAL_OBS_CACHE_FULLPATH = os.path.join(PHOTRIX_ROOT_DIRECTORY, "local_obs_cache.csv")
+
+EARLIEST_AN_DATE = '20170101'
+LATEST_AN_DATE = '20221231'  # Update this later, I suppose.
 
 # ********** Roster & cache parameters:
 AAVSO_WEBOBS_ROWS_TO_GET = 100
@@ -941,10 +945,11 @@ def parse_excel(excel_path, site_name='DSW'):
     this_plan_id = ''
     plan_actions = []
     an_date_string = str(df.iloc[0, 0]).strip()
-    if 20170101 < int(an_date_string) < 20201231:  # max prob should be related to today's date.
+    if int(EARLIEST_AN_DATE) < int(an_date_string) < int(LATEST_AN_DATE):
         an = Astronight(an_date_string, site_name)
     else:
-        print('>>>>> STOPPING: an_date_string '" + an_date_string + "' SEEMS UNREASONABLE.')
+        print('>>>>> STOPPING: an_date_string '" + an_date_string + "
+              ""' SEEMS UNREASONABLE (update LATEST_AN_DATE?).')
         return
     # print('an_date_string: ' + an_date_string)  # TEST
 

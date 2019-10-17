@@ -2180,6 +2180,7 @@ def _apply_omit_txt(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
         return None
     df_master = get_df_master(an_top_directory=an_top_directory, an_rel_directory=an_rel_directory)
     if df_master is None:
+        print('>>>>> Could not get df_master.')
         return None
 
     fullpath = os.path.join(an_top_directory, an_rel_directory, 'Photometry', 'omit.txt')
