@@ -47,8 +47,6 @@ LOCAL_OBS_CACHE_FULLPATH = os.path.join(PHOTRIX_ROOT_DIRECTORY, "local_obs_cache
 
 EARLIEST_AN_DATE = '20170101'
 LATEST_AN_DATE = '20221231'  # Update this later, I suppose.
-AN_START_REL_UTC_0000 = 19  # timedelta(UTC of actual AN start - nominal AN @ 0000 hours UTC)
-#    (19 is good for North America)
 
 # ********** Roster & cache parameters:
 AAVSO_WEBOBS_ROWS_TO_GET = 100
@@ -57,9 +55,10 @@ MAX_DAYS_ONE_STARE = 0.5
 DEFAULT_UPDATE_TOLERANCE_DAYS = 0.0416667  # 1 hour
 
 # ********** ACP Timing:
-CHILL_DURATION = 360  # seconds
+CHILL_DURATION = 60  # seconds; this may be overestimated
 PLAN_START_DURATION = 30  # seconds
 AUTOFOCUS_DURATION = 170  # seconds, includes slew & filter wheel changes
+AFINTERVAL_DURATION = 0  # seconds; beyond AUTOFOCUS_DURATION that this invokes
 CHAIN_DURATION = 3  # seconds; a guess
 QUITAT_DURATION = 3  # seconds
 SHUTDOWN_DURATION = 480  # seconds; a guess
@@ -68,7 +67,7 @@ SHUTDOWN_DURATION = 480  # seconds; a guess
 NEW_TARGET_DURATION = 34.3  # seconds; slew + settle + ACP processing (no guider start etc)
 
 # ********** Camera & filter wheel (STXL-6303E) Timing:
-MAX_AGGREGATE_EXPOSURE_NO_GUIDING = 241  # seconds;
+MAX_AGGREGATE_EXPOSURE_NO_GUIDING = 241  # seconds; <====== LIKELY TO INCREASE LATER (autumn 2019).
 GUIDE_STAR_ACQUISITION = 14.2  # seconds (if needed)
 GUIDER_CHECK_DURATION = 4  # seconds (if needed)
 NEW_FILTER_DURATION = 5  # seconds; filter change and focuser change
@@ -173,7 +172,7 @@ def complete_df_fov_an(df_fov, user_update_tolerance_days=DEFAULT_UPDATE_TOLERAN
         .assign(end=an.local_middark_utc) \
         .assign(mid=an.local_middark_utc) \
         .assign(seconds=0.0) \
-        .assign(available=' - '.join(2 * [4 * ' '])) \
+        .assign(available=' - '.join(2*[4*' '])) \
         .assign(an_priority=0.0) \
         .assign(an_priority_bars='')  # all dummy values to be overwritten later.
 
@@ -200,7 +199,7 @@ def complete_df_fov_an(df_fov, user_update_tolerance_days=DEFAULT_UPDATE_TOLERAN
         max_bars = 16
         int_an_priority = int(round(df_fov.loc[ind, 'an_priority']))
         df_fov.loc[ind, 'an_priority_bars'] = \
-            (8 * '.' + (max_bars - 8) * '#')[0: min(max_bars, int_an_priority)].ljust(max_bars)
+            (8*'.' + (max_bars-8)*'#')[0: min(max_bars, int_an_priority)].ljust(max_bars)
 
     if remove_zero_an_priority:
         df_fov = df_fov[df_fov['an_priority'] > 0.0]
@@ -229,7 +228,6 @@ class LocalObsCache:
         obs_mag_filter: filter in which obs_mag was measured [string]
     Typical usage: pl.make_an_plan('c:/Astro/ACP/AN20170525/planning.xlsx', exp_time_factor=0.75)
     """
-
     def __init__(self):
         # Read in local cache if it exists.
         if os.path.isfile(LOCAL_OBS_CACHE_FULLPATH):
@@ -240,12 +238,12 @@ class LocalObsCache:
         if need_to_create_empty_cache:
             #  Create *empty* dataframe with dtypes (incl. utc datetimes), write to cache file:
             self.df_cache = pd.DataFrame.from_items([('fov_name', ['dummy']),
-                                                     ('main_target', ['dummy']),
-                                                     ('obs_style', ['dummy']),
-                                                     ('cache_datetime', [datetime.now(timezone.utc)]),
-                                                     ('obs_datetime', [datetime.now(timezone.utc)]),
-                                                     ('obs_mag', [0.0]),
-                                                     ('obs_mag_filter', ['dummy'])])[:0]
+                                            ('main_target', ['dummy']),
+                                            ('obs_style', ['dummy']),
+                                            ('cache_datetime', [datetime.now(timezone.utc)]),
+                                            ('obs_datetime', [datetime.now(timezone.utc)]),
+                                            ('obs_mag', [0.0]),
+                                            ('obs_mag_filter', ['dummy'])])[:0]
             self.df_cache.index.name = 'row_index'
             csv_fullpath = self._write_cache_to_csv()  # empty cache to csv
             print('LocalObsCache: wrote new, empty cache file to ' + csv_fullpath)
@@ -291,7 +289,7 @@ class LocalObsCache:
         if cache_row_pre_exists:
             now = datetime.now(timezone.utc)
             current_cache_datetime = self.df_cache.loc[fov.fov_name, 'cache_datetime']
-            update_age = (now - current_cache_datetime).total_seconds() / (24 * 3600)
+            update_age = (now - current_cache_datetime).total_seconds() / (24*3600)
             if user_update_tolerance_days is None:
                 update_tolerance_days = DEFAULT_UPDATE_TOLERANCE_DAYS
             else:
@@ -422,9 +420,9 @@ class LocalObsCache:
             if num_tests >= 1:
                 for first_test_irow in range(0, num_tests):
                     if not stare_already_found_this_filter:
-                        test_latest_jd = table_this_filter['jd'] \
+                        test_latest_jd = table_this_filter['jd']\
                             .iloc[first_test_irow]
-                        test_earliest_jd = table_this_filter['jd'] \
+                        test_earliest_jd = table_this_filter['jd']\
                             .iloc[first_test_irow + MIN_ROWS_ONE_STARE - 1]
 
                         if test_latest_jd - test_earliest_jd <= MAX_DAYS_ONE_STARE:
@@ -439,13 +437,13 @@ class LocalObsCache:
                             if need_to_replace:
                                 latest_stare_obs = table_this_filter.iloc[first_test_irow]
                                 latest_stare_obs_df = pd.DataFrame.from_items([
-                                    ('fov_name', fov.fov_name),
-                                    ('main_target', fov.main_target),
-                                    ('obs_style', fov.observing_style),
-                                    ('cache_datetime', [datetime.now(timezone.utc)]),
-                                    ('obs_datetime', [datetime_utc_from_jd(latest_stare_obs.jd)]),
-                                    ('obs_mag', [latest_stare_obs.mag]),
-                                    ('obs_mag_filter', [latest_stare_obs.loc['filter']])])
+                                     ('fov_name', fov.fov_name),
+                                     ('main_target', fov.main_target),
+                                     ('obs_style', fov.observing_style),
+                                     ('cache_datetime', [datetime.now(timezone.utc)]),
+                                     ('obs_datetime', [datetime_utc_from_jd(latest_stare_obs.jd)]),
+                                     ('obs_mag', [latest_stare_obs.mag]),
+                                     ('obs_mag_filter', [latest_stare_obs.loc['filter']])])
                                 for column_name in ['cache_datetime', 'obs_datetime']:
                                     latest_stare_obs_df[column_name] = \
                                         [x.to_pydatetime()
@@ -498,7 +496,7 @@ class LocalObsCache:
         # Very specifically writes datetimes in format: '2017-02-07 03:34:45.786374+0000'
         dt_format = '{:' + DT_FMT + '}'
         lines = [','.join(['row_index', 'fov_name', 'main_target', 'obs_style',
-                           'cache_datetime', 'obs_datetime', 'obs_mag', 'obs_mag_filter']) + '\n']
+                          'cache_datetime', 'obs_datetime', 'obs_mag', 'obs_mag_filter']) + '\n']
         for row_index in self.df_cache.index:
             row = self.df_cache.loc[row_index]
             if row['obs_datetime'] is None or isinstance(row['obs_datetime'], type(pd.NaT)):
@@ -615,7 +613,6 @@ class AavsoWebobs:
     Usage: table = AavsoWebobs("AU Aur") [for one obs/night], or
            table = AavsoWebobs("ST Tri", stare=True) [for at least 10 obs/night in filter].
     """
-
     def __init__(self, star_id=None, num_obs=AAVSO_WEBOBS_ROWS_TO_GET, dataframe=None):
         if dataframe is not None:
             self.table = dataframe  # typically for testing only.
@@ -654,29 +651,29 @@ def get_local_aavso_reports(report_dir=None, earliest_an=None):
 #         Returns dict of (fov_name, days_since_last_local_obs).
 #         """
 #         pass
-#     if report_dir is not None and limit_days >= 1:
-#         fov_age_dict = {name: None for name in fov_dict.keys()}  # empty dict to start
-#         #  TODO: get report_list <- [report_text] for every eligible AAVSO report,
-#            latest to earliest.
-#
-#         for report_text in report_list:
-#             #  TODO: get jd_dict
-#                i.e., {fov_name: latest jd_obs} for each main target in AAVSO report.
-#
-#         for an_dir in dir_list:
-#             an_dict = defaultdict(lambda: None)
-#             #  read AAVSO report, fill an_dict with target: latest JD
-#             for fov_name, fov in fov_dict.items():
-#                 an_age = an_dict[fov.main_target]
-#                 if an_age is not None:
-#                     dict_age = fov_age_dict[fov_name]
-#                     if dict_age is not None:
-#                         if an_age < dict_age:
-#                             fov_age_dict[fov_name] = an_age
-#                     else:
-#                         fov_age_dict[fov_name] = an_age
-#     return fov_age_dict
-#
+    #     if report_dir is not None and limit_days >= 1:
+    #         fov_age_dict = {name: None for name in fov_dict.keys()}  # empty dict to start
+    #         #  TODO: get report_list <- [report_text] for every eligible AAVSO report,
+    #            latest to earliest.
+    #
+    #         for report_text in report_list:
+    #             #  TODO: get jd_dict
+    #                i.e., {fov_name: latest jd_obs} for each main target in AAVSO report.
+    #
+    #         for an_dir in dir_list:
+    #             an_dict = defaultdict(lambda: None)
+    #             #  read AAVSO report, fill an_dict with target: latest JD
+    #             for fov_name, fov in fov_dict.items():
+    #                 an_age = an_dict[fov.main_target]
+    #                 if an_age is not None:
+    #                     dict_age = fov_age_dict[fov_name]
+    #                     if dict_age is not None:
+    #                         if an_age < dict_age:
+    #                             fov_age_dict[fov_name] = an_age
+    #                     else:
+    #                         fov_age_dict[fov_name] = an_age
+    #     return fov_age_dict
+    #
 
 
 # ---------------------------------------------
@@ -704,7 +701,7 @@ def make_an_roster(an_date_string, output_directory, site_name='DSW', instrument
     an_year = int(an_date_string[0:4])
     an_month = int(an_date_string[4:6])
     an_day = int(an_date_string[6:8])
-    day_of_week = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'] \
+    day_of_week = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']\
         [datetime(an_year, an_month, an_day).weekday()]
     lines_header = ['ROSTER file for     ' + an_date_string + '   ' + day_of_week,
                     '     as generated by photrix ' +
@@ -715,7 +712,7 @@ def make_an_roster(an_date_string, output_directory, site_name='DSW', instrument
                     '    min.alt = ' + '{:.1f}'.format(an.site.min_altitude) + u'\N{DEGREE SIGN}']
 
     # Handle obs_style = 'Standard':
-    lines_std = ['\n\n\nSTANDARD roster for ' + an_date_string + ': ' + 50 * '-',
+    lines_std = ['\n\n\nSTANDARD roster for ' + an_date_string + ': ' + 50*'-',
                  ',fov,fov, avail_utc,transit,minutes,   stars']
     df_fov_std = filter_df_fov_by_obs_styles(df_fov, obs_style_list=['Standard'])
     df_fov_std = complete_df_fov_an(df_fov_std, user_update_tolerance_days,
@@ -733,8 +730,8 @@ def make_an_roster(an_date_string, output_directory, site_name='DSW', instrument
                                    exp_time_factor=exp_time_factor)
         minutes = (target_overhead + repeat_duration) / 60.0
         n_stars = len(this_fov.aavso_stars)
-        this_fov_line = ',' + fov_name + ',' + fov_name + ', ' + available + ',' + \
-                        "=\"" + transit_hhmm + "\"" + ',' + str(int(minutes)) + \
+        this_fov_line = ',' + fov_name + ',' + fov_name + ', ' + available + ',' +\
+                        "=\"" + transit_hhmm + "\"" + ',' + str(int(minutes)) +\
                         ',' + '{:3d}'.format(n_stars)  # formatting to placate Excel csv weirdness.
         lines_std.append(this_fov_line)
 
@@ -786,7 +783,7 @@ def make_an_roster(an_date_string, output_directory, site_name='DSW', instrument
             else:
                 primaries_exist = len(list_primary_mins) >= 1
             if primaries_exist:
-                df_primary_mins = pd.DataFrame.from_items([('utc', list_primary_mins,)])
+                df_primary_mins = pd.DataFrame.from_items([('utc', list_primary_mins, )])
                 df_primary_mins['event_type'] = "1'"
                 df_events = df_events.append(df_primary_mins)
 
@@ -797,7 +794,7 @@ def make_an_roster(an_date_string, output_directory, site_name='DSW', instrument
             else:
                 secondaries_exist = len(list_secondary_mins) >= 1
             if secondaries_exist:
-                df_secondary_mins = pd.DataFrame.from_items([('utc', list_secondary_mins,)])
+                df_secondary_mins = pd.DataFrame.from_items([('utc', list_secondary_mins, )])
                 df_secondary_mins['event_type'] = "2'"
                 df_events = df_events.append(df_secondary_mins)
 
@@ -808,7 +805,7 @@ def make_an_roster(an_date_string, output_directory, site_name='DSW', instrument
             else:
                 maxima_exist = len(list_maxima) >= 1
             if maxima_exist:
-                df_maxima = pd.DataFrame.from_items([('utc', list_maxima,)])
+                df_maxima = pd.DataFrame.from_items([('utc', list_maxima, )])
                 df_maxima['event_type'] = "max"
                 df_events = df_events.append(df_maxima)
 
@@ -819,8 +816,8 @@ def make_an_roster(an_date_string, output_directory, site_name='DSW', instrument
             for row in df_events.itertuples():
                 events_string += str(row.event_type) + "=" + hhmm_from_datetime_utc(row.utc) + '  '
             this_fov_line = ',' + fov_name + ',' + fov_name + ',' + available + ',' + \
-                            "=\"" + transit_hhmm + "\"" + ',' + str(int(minutes)) + ',' + \
-                            str(int(round(an_priority))) + ' ,' + an_priority_bars + ',' + \
+                            "=\"" + transit_hhmm + "\"" + ',' + str(int(minutes)) + ',' +\
+                            str(int(round(an_priority))) + ' ,' + an_priority_bars + ',' +\
                             '{:7.3f}'.format(period) + ' ,' + events_string + ',' + \
                             "\"  " + motive + "\""  # formatting to placate Excel csv weirdness.
             if an_priority >= STARE_AN_PRIORITY_DIVIDER:
@@ -829,7 +826,7 @@ def make_an_roster(an_date_string, output_directory, site_name='DSW', instrument
                 lines_stare_low_priority.append(this_fov_line)
 
     # Handle obs_style = 'Monitor' or 'LPV':
-    lines_mon_lpv = ['\n\n\nMONITOR / LPV roster for ' + an_date_string + ': ' + 50 * '-',
+    lines_mon_lpv = ['\n\n\nMONITOR / LPV roster for ' + an_date_string + ': ' + 50*'-',
                      ',fov,fov,avail_utc,transit,minutes,   an_priority']
     df_fov_mon_lpv = filter_df_fov_by_obs_styles(df_fov, obs_style_list=['Monitor', 'LPV'])
     df_fov_mon_lpv = filter_df_fov_by_fov_priority(df_fov_mon_lpv,
@@ -854,7 +851,7 @@ def make_an_roster(an_date_string, output_directory, site_name='DSW', instrument
             an_priority_bars = df_fov_mon_lpv.loc[fov_index, 'an_priority_bars']
             motive = Fov(fov_name).motive
             this_fov_line = ',' + fov_name + ',' + fov_name + ', ' + available + ',' + \
-                            "=\"" + transit_hhmm + "\"" + ',' + str(int(minutes)) + ',' + \
+                            "=\"" + transit_hhmm + "\"" + ',' + str(int(minutes)) + ',' +\
                             str(int(round(an_priority))) + ' ,' + an_priority_bars + ',' + \
                             "\"  " + motive + "\""  # formatting to placate Excel csv weirdness.
             lines_mon_lpv.append(this_fov_line)
@@ -862,7 +859,7 @@ def make_an_roster(an_date_string, output_directory, site_name='DSW', instrument
     # Assemble all output lines:
     lines_all = lines_header + \
                 lines_std + \
-                lines_stare_high_priority + lines_stare_low_priority + \
+                lines_stare_high_priority + lines_stare_low_priority +\
                 lines_mon_lpv
 
     # Write all lines to file:
@@ -879,161 +876,48 @@ def make_an_roster(an_date_string, output_directory, site_name='DSW', instrument
     print('Done.')
 
 
-class Plan:
-    """ Holds all data for one ACP plan.
-    :param plan_id: name of this plan, minimalist, as 'C' [string]
-    """
-
-    def __init__(self, plan_id=None, plan_comment=None):
-        self.plan_id = plan_id
-        self.plan_comment = plan_comment.strip()
-        self.directives = []  # as parsed from user input in parse_excel().
-
-        # Values populated in make_events():
-        self.utc_quitat = None  # forced stop time (at end of last event)
-        self.afinterval = None  # in minutes; default=None if no afinterval requested for this plan.
-        self.sets_requested = 1  # default
-        self.chain_destination = None  # next plan filename, None if no chaining requested for this plan.
-        self.events = []  # holds only ONE element per intended event, no matter how many SETS in a plan.
-
-        # Values populated in make_timeline():
-        self.utc_start = None  # actual start time (computed later)
-        self.utc_end = None  # actual end time (computed later)
-        self.sets_completed = 0  # actual number of set cycles completed (integer)
-        self.afinterval_autofocus_count = 0  # count of autofocuses caused by AFINTERVAL, this set.
-
-        # Lists of text lines to go before and after main body of lines (from make_events()):
-        self.summary_pre_lines = []
-        self.summary_post_lines = []
-        self.acp_pre_lines = []
-        self.end_warning_lines = []
-        self.acp_post_lines = []
-
-    def quitat_reached_at(self, utc):
-        if self.utc_quitat is None:
-            return False
-        return utc >= self.utc_quitat
-
-    def __str__(self):
-        return 'Plan object: ' + self.plan_id
-
-
-class Directive:
-    """ Holds all initial data for one user-given directive (e.g., one cell in Excel spreadsheet).
-    :param type: type of directive, from approved list, e.g., 'CHILL' or 'fov'  [string, case-insens.]
-    :param spec: dictionary of specification data to hold, depends on directive type [directory].
-    """
-
-    def __init__(self, type, spec_dict):
-        self.type = type.lower()
-        self.spec = spec_dict
-        self.comment = ''
-
-    def __str__(self):
-        return 'Directive object: ' + self.type
-
-
-class Event:
-    """ Holds all data for one event to be executed (per set).
-        Each Event object will result in at least one line in summary doc and in ACP plan file.
-    """
-
-    def __init__(self, event_type, summary_text, acp_lines, duration_total=0, duration_dict=None,
-                 target_name=None, ra=None, dec=None):
-        self.type = event_type.lower()
-        self.summary_text = summary_text  # starting text for summary document
-        self.summary_lines = []  # final lines for summary document
-        self.acp_lines = acp_lines  # list (always) of lines for ACP plan file [list of strings]
-        self.duration_total = duration_total  # total for event; 0 for waituntil, quitat, etc.
-        # .duration_dict exists only for exposure-event types: burn, stare, fov, and image,
-        #    as: {'target_overhead': in sec, 'repeat_count': n, 'counts': [n], 'exp_times': [in sec]} :
-        self.duration_dict = duration_dict  # dict describing durations of indiv exposures, incl overheads.
-        self.utc_end = None  # for waituntil.
-        self.target_name = target_name  # for any exposure event type (= fov name for most)
-        self.ra = ra  # string, for exposure-event types
-        self.dec = dec  # "
-
-        # For this event's summary line. Values later populated by make_timeline():
-        self.status = None  # any of: 'ok', 'chain', 'quitat', 'wait'
-        self.utc_summary_display = None  # stored only for first SET.
-        self.min_altitude = None  # in degrees, for ALL sets in this plan.
-
-    def calc_actual_duration(self, utc_start, utc_quitat):
-        if utc_quitat is None:
-            return self.duration_total
-        if utc_start >= utc_quitat:
-            return 0
-        if timedelta(seconds=self.duration_total) < utc_quitat - utc_start:
-            return self.duration_total
-        if self.duration_dict is None:
-            return None
-        total_exp_time = self.duration_dict['repeat_count'] * sum([c * e for (c, e) in
-                                                                   zip(self.duration_dict['counts'],
-                                                                       self.duration_dict['exp_times'])])
-        exposure_count = self.duration_dict['repeat_count'] * sum(self.duration_dict['counts'])
-        overhead_per_exposure = (self.duration_total - total_exp_time -
-                                 self.duration_dict['target_overhead']) / exposure_count
-        utc_running = utc_start + timedelta(seconds=self.duration_dict['target_overhead'])
-        for i_repeat in range(self.duration_dict['repeat_count']):
-            for c, e in zip(self.duration_dict['counts'], self.duration_dict['exp_times']):
-                for i_exp in range(c):
-                    utc_running += timedelta(seconds=overhead_per_exposure + e)
-                    if utc_running >= utc_quitat:
-                        return (utc_running - utc_start).total_seconds()
-        return (utc_running - utc_start).total_seconds()
-
-    def calc_lower_altitude(self, an, utc1, utc2):
-        longitude, latitude = an.site.longitude, an.site.latitude
-        longitude_hex, latitude_hex = degrees_as_hex(longitude), degrees_as_hex(latitude)
-        target_radec = RaDec(self.ra, self.dec)
-        _, alt_deg_utc1 = az_alt_at_datetime_utc(longitude_hex, latitude_hex, target_radec, utc1)
-        _, alt_deg_utc2 = az_alt_at_datetime_utc(longitude_hex, latitude_hex, target_radec, utc2)
-        return min(alt_deg_utc1, alt_deg_utc2)
-
-    def __str__(self):
-        return 'Event object: ' + self.summary_text
-
-
 def make_an_plan(plan_excel_path='c:/24hrs/Planning.xlsx', site_name='DSW', instrument_name='Borea',
-                 fov_dict=None, earliest_an_start_hhmm=None, exp_time_factor=1):
-    """  Main user fn to take sketch Excel file and generate Summary and ACP Plan files.
+                 fov_dict=None, an_start_hhmm=None, exp_time_factor=1):
+    """
+    Main user fn to take sketch Excel file and generate Summary and ACP Plan files.
     :param plan_excel_path: full path to Excel file holding all info for one night's observations.
     :param site_name: a Site object for location of observations.
     :param instrument_name: an Instrument object for scope to be used.
     :param fov_dict: fov_dict if available, default=None to generate new fov_dict (normal case).
-    :param earliest_an_start_hhmm: 'hhmm' time to start plan, default=None for 'earliest possible' (normal case).
+    :param an_start_hhmm: 'hhmm' time to start plan, default=None for 'use excel file (normal case).
     :param exp_time_factor: multiply *raw* exp times by this; typically 0.6-0.9 [float]
     :return: Writes out Summary file with dateline, and one or more ACP plan files.
     Typical usage: pl.make_an_plan('c:/Astro/ACP/AN20170525/planning.xlsx', exp_time_factor=0.7)
     """
 
-    # TODO: LocalObsCache updates only for fovs actually used, not including Burns.  ???meant for roster???
-    plan_list, an = parse_excel(plan_excel_path, site_name)
-
-    reorder_directives(plan_list)
+    # TODO: LocalObsCache updates only for fovs actually used, not including Burns.
+    parsed_list, an = parse_excel(plan_excel_path, site_name)
 
     if fov_dict is None:
         fov_dict = make_fov_dict()
     instrument = Instrument(instrument_name)
+    raw_plan_list = make_raw_plan_list(parsed_list, an)
 
-    make_events(plan_list, instrument, fov_dict, an=an, exp_time_factor=exp_time_factor)
+    reordered_plan_list = reorder_actions(raw_plan_list)
 
-    output_directory = os.path.split(plan_excel_path)[0]
+    plan_list = add_raw_durations_and_lines(reordered_plan_list, an, fov_dict, instrument,
+                                            exp_time_factor=exp_time_factor)
 
-    make_timeline(plan_list, an=an, earliest_hhmm=earliest_an_start_hhmm)
+    plan_list = add_timetable(plan_list, an, an_start_hhmm)
 
-    make_acp_plan_files(plan_list, an, output_directory, exp_time_factor)
+    plan_list = add_altitudes(plan_list, an, fov_dict)
 
-    make_summary_file(plan_list, fov_dict, an, output_directory, exp_time_factor)
+    output_directory = os.path.split(plan_excel_path)[0]  # output files -> same dir as excel input
+    write_acp_plans(plan_list, output_directory, exp_time_factor=exp_time_factor)
+    write_summary(plan_list, an, fov_dict, output_directory, exp_time_factor=exp_time_factor)
 
 
 def parse_excel(excel_path, site_name='DSW'):
     """
-    Parses sketch Excel file, returns a list of Plan objects containing all directives and the
-        relevant Astronight object.
+    Parses sketch Excel file and returns a list of actions constituting one night's observations.
     :param excel_path: full path to Excel file holding all info for one night's observations [str].
     :param site_name: a Site object for location of observations [string]
-    :return: list of Plan objects, astronight object (2-tuple)
+    :return: list of actions [list of tuples]
 
     ----- Target types & their syntax:
     FOV_name  ::  for LPV, standards, and other once-per-night targets having FOV files,
@@ -1056,7 +940,6 @@ def parse_excel(excel_path, site_name='DSW'):
     PLAN  plan_id  ::  starts a plan section and names it.
     ;   comment_text  :: semicolon at beginning of cell makes cell a comment only.
     AFINTERVAL nnn  ::  autofocus interval in minutes
-    SETS  nn  ::  number of times to repeat all targets, autofocuses, chills, etc
     AUTOFOCUS       :: force autofocus
     CHILL -nn  :: chill the cooler to -nn deg C
     QUITAT nn:nn  ::  quit plan at nn:nn UTC
@@ -1064,6 +947,7 @@ def parse_excel(excel_path, site_name='DSW'):
     SKIPFILTER filter_name  ::  skip filter for following targets; omit filter_name to restore all filters.
     SHUTDOWN  ::  perform ACP shutdown of camera and park scope
     CHAIN plan_id  ::  chain to next plan
+    FLATS  ::  (deprecated)
     BURN target_id RA Dec  ::  shorthand for IMAGE target_id V=240sec(1) I=240sec(1) RA Dec
     IMAGE target_id exp_specs RA Dec  ::  take images of target at RA, Dec; exp_specs define the
        filters and exposures, e.g., V=12.8 R=120sec(2) I=11(3) where 12.8 is a magnitude, 120sec
@@ -1077,6 +961,7 @@ def parse_excel(excel_path, site_name='DSW'):
     ncol = len(df.columns)
     parsed_list = []  # nested list, one element per ACP plan.
     this_plan_id = ''
+    plan_actions = []
     an_date_string = str(df.iloc[0, 0]).strip()
     if int(EARLIEST_AN_DATE) < int(an_date_string) < int(LATEST_AN_DATE):
         an = Astronight(an_date_string, site_name)
@@ -1084,9 +969,8 @@ def parse_excel(excel_path, site_name='DSW'):
         print('>>>>> STOPPING: an_date_string '" + an_date_string + "
               ""' SEEMS UNREASONABLE (update LATEST_AN_DATE?).')
         return
+    # print('an_date_string: ' + an_date_string)  # TEST
 
-    plan_list = []
-    this_plan = None
     for irow in range(1, nrow):
         for icol in range(ncol):
             cell = df.iloc[irow, icol]
@@ -1104,63 +988,64 @@ def parse_excel(excel_path, site_name='DSW'):
                     comment = split_str[1].rstrip()
                 else:
                     comment = None
+                # print(cell_str_as_read)
 
-                # Determine action type and add action to directive_list:
-                # TODO: Add #AUTOGUIDE directive; later account as field in next exposure target's event.
+                # Determine action type and add action to plan_actions:
                 if cell_str_lower.startswith('plan'):
-                    if this_plan is not None:
-                        plan_list.append(this_plan)  # save previous plan, if any
+                    # Close previous plan if any, probably with chain to next plan:
+                    if len(plan_actions) > 0:
+                        parsed_list.append(plan_actions)
+                        plan_actions = []
+                    # Start next plan:
                     this_plan_id = an_date_string + '_' + command[len('plan'):].strip()
-                    this_plan = Plan(this_plan_id, comment)
-                elif cell_str_lower.startswith('sets'):
-                    set_count = command[len('sets'):].strip()
-                    this_plan.directives.append(Directive('sets', {'count': int(set_count)}))
+                    plan_actions.append(('Plan', this_plan_id, comment))  # append tuple
                 elif cell_str_as_read.startswith(';'):
-                    this_plan.directives.append(Directive('comment', {'text': comment}))
+                    plan_actions.append(('comment', comment))
                 elif cell_str_lower.startswith('afinterval'):
                     minutes = command[len('afinterval'):].strip()
-                    this_plan.directives.append(Directive('afinterval', {'minutes': int(minutes)}))
+                    plan_actions.append(('afinterval', minutes))
                 elif cell_str_lower.startswith('autofocus'):
-                    this_plan.directives.append(Directive('autofocus', {}))
+                    plan_actions.append(('autofocus', '#AUTOFOCUS'))  # i.e., directly from user
                 elif cell_str_lower.startswith('chill'):
-                    tempC = command[len('chill'):].strip()
-                    this_plan.directives.append(Directive('chill', {'tempC': float(tempC)}))
+                    degrees = command[len('chill'):].strip()
+                    plan_actions.append(('chill', degrees))
                 elif cell_str_lower.startswith('quitat'):
-                    hhmm_utc = command[len('quitat'):].strip().replace(':', '')
-                    this_plan.directives.append(Directive('quitat', {'utc': hhmm_utc}))
+                    hhmm = command[len('quitat'):].strip().replace(':', '')
+                    plan_actions.append(('quitat', hhmm))
                 elif cell_str_lower.startswith('waituntil'):
                     value = command[len('waituntil'):].strip().replace(':', '')
-                    spec_dict = {'sun_degrees': None, 'utc': None}  # overwrite one of these, just below.
                     if float(value) < 0:
-                        spec_dict['sun_degrees'] = float(value)
+                        plan_actions.append(('waituntil', 'sun_degrees', value))
                     else:
-                        spec_dict['utc'] = value
-                    this_plan.directives.append(Directive('waituntil', spec_dict))
+                        plan_actions.append(('waituntil', 'hhmm', value))
                 elif cell_str_lower.startswith('skipfilter'):
                     value = command[len('skipfilter'):].strip()
                     if cell_str_lower.startswith('skipfilters'):
                         value = command[len('skipfilters'):].strip()  # deprecated SKIPFILTERS (plural) case
                     skipfilter_list = [item.strip() for item in value.split()]
-                    this_plan.directives.append(Directive('skipfilter', {'filters': skipfilter_list}))
+                    plan_actions.append(('skipfilter', skipfilter_list))
                 elif cell_str_lower.startswith('shutdown'):
-                    this_plan.directives.append(Directive('shutdown', {}))
+                        plan_actions.append(('shutdown',))
                 elif cell_str_lower.startswith('chain'):
                     next_plan_filename = 'plan_' + an_date_string + '_' + \
                                          command[len('chain'):].strip().upper()
                     if not next_plan_filename.endswith('.txt'):
                         next_plan_filename += '.txt'
-                    this_plan.directives.append(Directive('chain', {'filename': next_plan_filename}))
+                    plan_actions.append(('chain', next_plan_filename))
+                elif cell_str_lower.startswith('flats'):
+                    if this_plan_id[-2:].lower() != '_z':
+                        print('>>>>> WARNING: flats directive encountered but plan_id is' +
+                              this_plan_id + ', not the usual "_Z".')
+                    plan_actions.append(('flats',))
                 elif cell_str_lower.startswith('burn'):
                     value = command[len('burn'):].strip()
                     this_fov_name, ra_string, dec_string = tuple(value.rsplit(maxsplit=2))
-                    this_plan.directives.append(Directive('burn', {'fov_name': this_fov_name.strip(),
-                                                                   'ra': ra_string.strip(),
-                                                                   'dec': dec_string.strip()}))
+                    plan_actions.append(('burn', this_fov_name.strip(),
+                                         ra_string.strip(), dec_string.strip()))
                 elif cell_str_lower.startswith('stare'):
                     value = command[len('stare'):].strip()
-                    repeats, this_fov_name = tuple(value.split(maxsplit=1))
-                    this_plan.directives.append(Directive('stare', {'fov_name': this_fov_name.strip(),
-                                                                    'repeat_count': int(repeats)}))
+                    repeats_string, this_fov_name = tuple(value.split(maxsplit=1))
+                    plan_actions.append(('stare', repeats_string.strip(), this_fov_name.strip()))
                 elif cell_str_lower.startswith('image'):
                     value = command[len('image'):].strip()
                     subvalue, ra_string, dec_string = tuple(value.rsplit(maxsplit=2))
@@ -1184,615 +1069,412 @@ def parse_excel(excel_path, site_name='DSW'):
                         subvalue = subsubvalue
                     filter_entries.reverse()
                     if len(filter_entries) >= 1:
-                        this_plan.directives.append(Directive('image', {'target_name': target_name,
-                                                                        'filter_entries': filter_entries,
-                                                                        'ra': ra_string,
-                                                                        'dec': dec_string}))
+                        plan_actions.append(('image', target_name, filter_entries,
+                                             ra_string, dec_string))
                 else:
-                    # Anything else we treat as a fov_name:
+                    # Treat as a fov_name:
                     fov_name = cell_str_as_read.strip()
                     if len(fov_name) >= 2:
-                        this_plan.directives.append(Directive('fov', {'fov_name': fov_name}))
+                        plan_actions.append(('fov', fov_name))
+                # print(plan_actions[-1:])
 
-    plan_list.append(this_plan)  # Ensure we save the last plan.
-    return plan_list, an
+    parsed_list.append(plan_actions)  # Close out the last plan.
+    return parsed_list, an
 
 
-def reorder_directives(plan_list):
+def make_raw_plan_list(parsed_list, an):
+    # Construct raw master plan_list (with as-yet incomplete actions):
+    Plan = namedtuple('Plan', ['plan_id', 'action_list'])
+    Action = namedtuple('Action', ['action_type', 'parsed_action', 'an_priority',
+                                   'raw_duration', 'n_afinterval_autofocus',
+                                   'status', 'start_utc', 'altitude_deg',
+                                   'summary_lines', 'acp_plan_lines'])
+    raw_plan_list = []  # will be the master container (a list of Plan namedtuples)
+    for parsed_plan in parsed_list:
+        # print('\n***' + str(parsed_plan[0]))
+        # for plan_action in parsed_plan[1:]:
+        #     print(str(plan_action))
+
+        plan_id = (parsed_plan[0])[1]
+        action_list = []  # will be list of Action namedtuples for this plan only.
+        for parsed_action in parsed_plan:
+            # Get acp_plan, summary, and raw duration for this action, make an Action namedtuple:
+            # action_summary_lines, action_acp_plan_lines, action_raw_duration = \
+            #     make_lines_from_one_action(parsed_action, an, fov_dict, instrument)
+            this_action = Action(action_type=parsed_action[0],
+                                 parsed_action=parsed_action,  # store for later use
+                                 an_priority=0.0,  # overwrite later
+                                 raw_duration=0.0,  # overwrite later
+                                 n_afinterval_autofocus=0,  # possibly overwrite later
+                                 status='no status',  # overwrite later
+                                 start_utc=an.ts_dark.start,  # datetime, overwrite later
+                                 altitude_deg=0.0,  # overwrite this later
+                                 summary_lines=[],  # overwrite later
+                                 acp_plan_lines=[]  # [], overwrite later
+                                 )
+            action_list.append(this_action)
+        this_plan = Plan(plan_id=plan_id,
+                         action_list=action_list)  # NB: several action fields are still empty.
+        raw_plan_list.append(this_plan)
+    return raw_plan_list
+
+
+def reorder_actions(raw_plan_list):
     """
-    Puts directives within each Plan object in the desired order, returns the updated plan list.
-    :param plan_list: the plan list whose directives are to be reordered [list of Plan objects].
-    :return: the plan list with reordered directives [list of Plan objects].
+    Puts actions within each plan in the desired order, returns the updated plan list.
+    :param raw_plan_list: the plan list to reorder.
+    :return: the reordered plan list
     """
-    # Directives within each sublist retain user's given order.
-    ideal_directive_ordering = [['quitat'],
-                                ['afinterval'],
-                                ['sets'],
-                                ['waituntil', 'chill', 'stare', 'fov', 'burn',
-                                 'image', 'autofocus', 'comment', 'skipfilter'],
-                                ['shutdown'],
-                                ['chain']]
-    for plan in plan_list:
-        reordered_directive_list = []
-        for directive_order_sublist in ideal_directive_ordering:
-            for i_directive in range(len(plan.directives)):
-                this_directive = plan.directives[i_directive]
-                if this_directive.type.lower() in directive_order_sublist:
-                    reordered_directive_list.append(this_directive)
-        plan.directives = reordered_directive_list
-        num_omitted = len(plan.directives) - len(reordered_directive_list)
-        if num_omitted > 0:
-            print('>>>>> WARNING: ' + str(num_omitted) + ' actions in plan ' + plan.plan_id +
+    # 5/26/2017: try change: move waituntil and chill into General category of actions:
+    ideal_action_ordering = [['plan'],
+                             ['quitat'],
+                             ['afinterval'],
+                             ['waituntil', 'chill', 'stare', 'fov', 'burn',
+                              'image', 'autofocus', 'comment', 'skipfilter'],
+                             ['flats', 'darks'],
+                             ['shutdown'],
+                             ['chain']]  # actions within each sublist retain user's given order
+    reordered_plan_list = []
+    for plan in raw_plan_list:
+        reordered_action_list = []
+        for action_order_sublist in ideal_action_ordering:
+            for i_action in range(len(plan.action_list)):
+                if plan.action_list[i_action].action_type.lower() in action_order_sublist:
+                    this_action = plan.action_list[i_action]
+                    reordered_action_list.append(this_action)
+        num_omitted = len(plan.action_list) - len(reordered_action_list)
+        if num_omitted != 0:
+            print('*** WARNING: ' + str(num_omitted) + ' actions in plan ' + plan.plan_id +
                   'were omitted during ordering.')
-    # return plan_list
+        new_plan = plan._replace(action_list=reordered_action_list)
+        reordered_plan_list.append(new_plan)
+    return reordered_plan_list
 
 
-def make_events(plan_list, instrument, fov_dict, an, exp_time_factor):
-    """ Translate user's directives into executable events (to be repeated if more than one set).
-        For simplicity, handle all directives, even if not enough plan time to complete them all (common).
-        Compute event durations here, but postpone creation of full plan timeline to later function.
-    :param plan_list:
-    :param instrument:
-    :param fov_dict:
-    :param an:
-    :param exp_time_factor:
-    :return: [nothing--it modifies plan_list in place].
+def add_raw_durations_and_lines(plan_list, an, fov_dict, instrument, exp_time_factor=1):
+    skipfilter_list = []
+    for i_plan in range(len(plan_list)):  # a Plan namedtuple
+        this_plan = plan_list[i_plan]
+        for i_action in range(len(this_plan.action_list)):  # an Action namedtuple
+            action = this_plan.action_list[i_action]
+            this_type = action.action_type.lower()
+            parsed_action = action.parsed_action
+            if this_type == 'plan':
+                if parsed_action[2] is None:
+                    text = parsed_action[1]
+                else:
+                    text = parsed_action[1] + ' ; ' + parsed_action[2]
+                summary_lines = ['', 55 * '-', 'Begin Plan ' + text]
+                acp_plan_lines = an.acp_header_string().split('\n') + [';']
+                raw_duration = PLAN_START_DURATION
+            elif this_type == 'chill':
+                summary_lines = ['CHILL  ' + parsed_action[1]]
+                acp_plan_lines = ['#CHILL  ' + parsed_action[1]]
+                raw_duration = CHILL_DURATION
+            elif this_type == 'waituntil':
+                if parsed_action[1] == 'hhmm':
+                    time_string = ('0' + parsed_action[2])[-4:]
+                    dt = an.datetime_utc_from_hhmm(time_string)
+                    formatted_time = '{:%m/%d/%Y %H:%M}'.format(dt)
+                    hhmm = hhmm_from_datetime_utc(dt)  # to let user verify correct parsing
+                    summary_lines = ['WAITUNTIL ' + hhmm + ' utc']
+                    acp_plan_lines = ['#WAITUNTIL 1, ' + formatted_time + ' ; utc']
+                elif parsed_action[1] == 'sun_degrees':
+                    summary_lines = ['WAITUNTIL sun reaches ' +
+                                     parsed_action[2] + u'\N{DEGREE SIGN}' + ' alt']
+                    acp_plan_lines = ['#WAITUNTIL 1, ' + parsed_action[2] + ' ; deg sun alt']
+                else:
+                    print("***** ERROR: WAITUNTIL action" + str(parsed_action) +
+                          ' is not understood.')
+                    summary_lines, acp_plan_lines = [], []
+                raw_duration = 0  # special case: no duration but executes a delay
+            elif this_type == 'quitat':
+                dt = an.datetime_utc_from_hhmm(parsed_action[1])
+                formatted_time = '{:%m/%d/%Y %H:%M}'.format(dt)
+                hhmm = hhmm_from_datetime_utc(dt)  # to let user verify correct parsing
+                summary_lines = ['QUITAT ' + hhmm + ' utc']
+                acp_plan_lines = ['#QUITAT ' + formatted_time + ' ; utc']
+                raw_duration = QUITAT_DURATION  # special case: no duration but may end the plan
+            elif this_type == 'afinterval':
+                summary_lines = ['AFINTERVAL ' + parsed_action[1]]
+                acp_plan_lines = [';', '#AFINTERVAL  ' + parsed_action[1]]
+                raw_duration = AFINTERVAL_DURATION  # but may invoke AUTOFOCUS which have duration
+            elif this_type == 'autofocus':
+                summary_lines = ['AUTOFOCUS']
+                acp_plan_lines = [';', '#AUTOFOCUS']
+                raw_duration = AUTOFOCUS_DURATION
+            elif this_type == 'skipfilter':
+                summary_lines = ['SKIPFILTER ' + ' '.join(parsed_action[1])]
+                if len(parsed_action[1]) == 0:
+                    summary_lines[0] += '(none)'
+                acp_plan_lines = [';', ';' + summary_lines[0]]
+                skipfilter_list = parsed_action[1]
+                raw_duration = 0
+            elif this_type == 'comment':
+                summary_lines = [';' + parsed_action[1]]
+                acp_plan_lines = [';' + parsed_action[1]]
+                raw_duration = 0
+            elif this_type == 'burn':
+                summary_lines = ['BURN ' + parsed_action[1] + '  ' +
+                                 parsed_action[2] + '  ' + parsed_action[3]]
+                acp_plan_lines = [';', '#DITHER 0 ;', '#FILTER V,I ;', '#BINNING 1,1 ;',
+                                  '#COUNT 1,1 ;', '#INTERVAL ' +
+                                  str(BURN_EXPOSURE) + ',' + str(BURN_EXPOSURE) +
+                                  ' ;----> BURN for new FOV file.',
+                                  parsed_action[1] + '\t' +
+                                  parsed_action[2] + '\t' + parsed_action[3] + ' ;']
+                raw_duration = sum(tabulate_target_durations(filters=['V', 'I'], counts=[1, 1],
+                                                             exp_times=[BURN_EXPOSURE, BURN_EXPOSURE]))
+            elif this_type == 'fov':
+                fov_name = parsed_action[1]
+                summary_lines = ['fov ' + fov_name]
+                filters, counts, exp_times, target_overhead, repeat_duration = \
+                    make_fov_exposure_data(fov_name, an, fov_dict, instrument,
+                                           exp_time_factor=exp_time_factor,
+                                           skipfilter_list=skipfilter_list)
+                raw_duration = target_overhead + 1 * repeat_duration
+                duration_comment = ' --> ' + str(round(raw_duration / 60.0, 1)) + ' min'
+                this_fov = fov_dict[fov_name]
+                acp_plan_lines = [';', '#DITHER 0 ;',
+                                  '#FILTER ' + ','.join(filters) + ' ;',
+                                  '#BINNING ' + ','.join(len(filters)*['1']) + ' ;',
+                                  '#COUNT ' + ','.join([str(c) for c in counts]) + ' ;',
+                                  '#INTERVAL ' + ','.join([str(e).split('.0')[0]
+                                                           for e in exp_times]) +
+                                  ' ; ' + duration_comment,
+                                  ';----' + this_fov.acp_comments, fov_name + '\t' +
+                                  ra_as_hours(this_fov.ra) + '\t' + dec_as_hex(this_fov.dec)]
+            elif this_type == 'image':
+                target_name = parsed_action[1]
+                summary_lines = ['Image target ' + target_name]
+                filters, counts, exp_times, target_overhead, repeat_duration = \
+                    make_image_exposure_data(parsed_action[2], instrument,
+                                             exp_time_factor=exp_time_factor)
+                raw_duration = target_overhead + 1 * repeat_duration
+                duration_comment = ' --> ' + str(round(raw_duration / 60.0, 1)) + ' min'
+                acp_plan_lines = [';', '#DITHER 0 ;',
+                                  '#FILTER ' + ','.join(filters) + ' ;',
+                                  '#BINNING ' + ','.join(len(filters)*['1']) + ' ;',
+                                  '#COUNT ' + ','.join([str(c) for c in counts]) + ' ;',
+                                  '#INTERVAL ' + ','.join([str(e).split('.0')[0]
+                                                           for e in exp_times]) +
+                                  ' ; ' + duration_comment,
+                                  ';---- User target from IMAGE directive -----',
+                                  target_name + '\t' +
+                                  parsed_action[3] + '\t' +
+                                  parsed_action[4]]
+            elif this_type == 'stare':
+                n_repeats, fov_name = int(parsed_action[1]), parsed_action[2]
+                summary_lines = ['Stare ' + str(n_repeats) + ' repeats at ' + fov_name]
+                filters, counts, exp_times, target_overhead, repeat_duration = \
+                    make_fov_exposure_data(fov_name, an, fov_dict, instrument,
+                                           exp_time_factor=exp_time_factor,
+                                           skipfilter_list=[])
+                raw_duration = target_overhead + n_repeats * repeat_duration
+                duration_comment = str(round(repeat_duration / 60.0, 1)) + ' min/repeat --> ' + \
+                                   str(round(raw_duration / 60.0, 1)) + ' min (nominal)'
+                this_fov = fov_dict[fov_name]
+                acp_plan_lines = [';', '#REPEAT ' + str(n_repeats) + ';',
+                                  '#DITHER 0 ;',
+                                  '#FILTER ' + ','.join(filters) + ' ;',
+                                  '#BINNING ' + ','.join(len(filters)*['1']) + ' ;',
+                                  '#COUNT ' + ','.join([str(c) for c in counts]) + ' ;',
+                                  '#INTERVAL ' + ','.join([str(e).split('.0')[0]
+                                                           for e in exp_times]) +
+                                  ' ; ' + duration_comment,
+                                  ';----' + this_fov.acp_comments, fov_name + '\t' +
+                                  ra_as_hours(this_fov.ra) + '\t' + dec_as_hex(this_fov.dec)]
+            elif this_type == 'flats':
+                # TODO: flats_filename needs to be specified by the action string.
+                # TODO: add raw duration and a warning to be printed.
+                flats_filename = 'flats_VBRI_16.txt'
+                summary_lines = ['Flats: ' + flats_filename]
+                acp_plan_lines = [';', '#SCREENFLATS ' + flats_filename + ' ;']
+                raw_duration = 777  # <--------- CODE THIS !!!
+            elif this_type == 'darks':
+                # TODO: code for 'darks' action. Compute raw_duration.
+                summary_lines = ['dummy']
+                acp_plan_lines = ['dummy']
+                raw_duration = 888
+            elif this_type == 'chain':
+                summary_lines = ['Chain to \'' + parsed_action[1] + '\'']
+                acp_plan_lines = [';', '#CHAIN ' + parsed_action[1]]
+                raw_duration = CHAIN_DURATION  # though the plan chained to will have a duration
+            elif this_type == 'shutdown':
+                summary_lines = ['SHUTDOWN']
+                acp_plan_lines = [';', '#SHUTDOWN']
+                raw_duration = SHUTDOWN_DURATION
+            else:
+                print('*** WARNING: insert_raw_duration() cannot understand action \'' +
+                      action.action_type + 'in plan \'' + this_plan.plan_id + '\'')
+                summary_lines, acp_plan_lines, raw_duration = [], [], None
+
+            # Add warning if plan's last action is not chain (except last plan):
+            this_plan_is_not_last = (i_plan < len(plan_list)-1)
+            this_action_is_last = (i_action == len(this_plan.action_list)-1)
+            this_action_should_be_chain = this_plan_is_not_last and this_action_is_last
+            if this_action_should_be_chain and this_type != 'chain':
+                summary_lines += \
+                    ['***** WARNING: this plan does not end on #CHAIN.']
+            new_action = action._replace(summary_lines=summary_lines,
+                                         acp_plan_lines=acp_plan_lines,
+                                         raw_duration=raw_duration)
+            this_plan.action_list[i_action] = new_action
+    return plan_list
+
+
+def add_timetable(plan_list, an, an_start_hhmm):
     """
+    Takes naive "raw durations" for Actions, and calculates and inserts realistic timetable data.
+    Also inserts imputed Autofocus actions as required by #AFINTERVAL directives.
+    :param plan_list: input list of Plan namedtuples
+    :param an:
+    :param an_start_hhmm: HHMM string denoting desired UTC start time, or None for dusk twilight.
+    :return: list of Plan namedtuples with 'status', 'start_utc', and 'altitude_deg' filled in.
+    """
+    # TODO: Correct starting time for first plan, especially if starting before dark (e.g., #CHILL).
+    # Calculate timeline and action status, add to each action in each plan:
+    # Develop projected timeline (starting time for each action in entire night):
+    if an_start_hhmm is None:
+        an_start_dt = an.ts_dark.start
+    else:
+        an_start_dt = an.datetime_utc_from_hhmm(an_start_hhmm)
+    running_dt = an_start_dt
+    for i_plan in range(len(plan_list)):
+        this_plan = plan_list[i_plan]  # a Plan namedtuple
 
-    for plan in plan_list:
-        skipfilter_list = []  # default
-
-        # For each directive: make event and add it to plan's event list:
-        for directive in plan.directives:
-
-            if directive.type == 'waituntil':  # NB there may be >1 waituntil, but only 1 active quitat.
-                if directive.spec['sun_degrees'] is not None:
-                    sun_degrees = directive.spec['sun_degrees']
+        # Scan this plan for #WAITUNTIL or #QUITAT, which alter timelines directly,
+        #    and for #AFINTERVAL, which is likely to insert AUTOFOCUS actions:
+        quitat_dt = None  # datetime utc
+        waituntil_dt = None  # datetime utc
+        afinterval_is_active = False
+        previous_autofocus_dt = None
+        for this_action in this_plan.action_list:  # an Action namedtuple
+            if this_action.action_type == 'waituntil':
+                if this_action.parsed_action[1] == 'hhmm':
+                    time_string = ('0' + this_action.parsed_action[2])[-4:]
+                    waituntil_dt = an.datetime_utc_from_hhmm(time_string)
+                elif this_action.parsed_action[1] == 'sun_degrees':
+                    sun_degrees = this_action.parsed_action[2]
                     site_obs = ephem.Observer()
                     site_obs.lat, site_obs.lon = str(an.site.latitude), str(an.site.longitude)
                     site_obs.elevation = an.site.elevation
                     sun = ephem.Sun(site_obs)
                     site_obs.horizon = str(sun_degrees)
-                    utc_end = site_obs.previous_setting(sun, an.local_middark_utc) \
+                    waituntil_dt = site_obs.previous_setting(sun, an.local_middark_utc) \
                         .datetime().replace(tzinfo=timezone.utc)
-                    this_summary_text = 'WAITUNTIL sun reaches ' + \
-                                        '{0:g}'.format(sun_degrees) + u'\N{DEGREE SIGN}' + ' alt'
-                    this_acp_entry = ['#WAITUNTIL 1, ' + '{0:g}'.format(sun_degrees) + ' ; deg sun alt']
-                else:
-                    hhmm = ('0' + directive.spec['utc'])[-4:]
-                    utc_end = an.datetime_utc_from_hhmm(hhmm)
-                    formatted_time = '{:%m/%d/%Y %H:%M}'.format(utc_end)
-                    this_summary_text = 'WAITUNTIL ' + hhmm + ' utc'
-                    this_acp_entry = ['#WAITUNTIL 1, ' + formatted_time + ' ; utc']
-                this_event = Event('waituntil', this_summary_text, this_acp_entry)
-                this_event.utc_end = utc_end
-                plan.events.append(this_event)
+            elif this_action.action_type == 'quitat':
+                quitat_dt = an.datetime_utc_from_hhmm(this_action.parsed_action[1])
+            elif this_action.action_type == 'afinterval':
+                afinterval_is_active = True
+                afinterval_timedelta = timedelta(seconds=float(this_action.parsed_action[1]) * 60)
 
-            elif directive.type == 'chill':
-                this_summary_text = 'CHILL  ' + '{0:g}'.format(directive.spec['tempC'])
-                this_acp_entry = ['#CHILL  ' + '{0:g}'.format(directive.spec['tempC'])]
-                this_event = Event('chill', this_summary_text, this_acp_entry, CHILL_DURATION)
-                plan.events.append(this_event)
+        # Set starting time for this plan:
+        if waituntil_dt is not None:
+            if waituntil_dt > running_dt:
+                running_dt = waituntil_dt
 
-            elif directive.type == 'stare':
-                n_repeats = directive.spec['repeat_count']
-                fov_name = directive.spec['fov_name']
-                this_summary_text = 'Stare ' + str(n_repeats) + ' repeats at ' + fov_name
-                filters, counts, exp_times, target_overhead, repeat_duration = \
-                    make_fov_exposure_data(fov_name, an, fov_dict, instrument,
-                                           exp_time_factor=exp_time_factor,
-                                           skipfilter_list=skipfilter_list)
-                event_duration = target_overhead + n_repeats * repeat_duration
-                duration_comment = str(round(repeat_duration / 60.0, 1)) + ' min/repeat --> ' + \
-                                   str(round(event_duration / 60.0, 1)) + ' min (nominal)'
-                this_fov = fov_dict[fov_name]
-                this_acp_entry = [';', '#REPEAT ' + str(n_repeats) + ';',
-                                  '#DITHER 0 ;',
-                                  '#FILTER ' + ','.join(filters) + ' ;',
-                                  '#BINNING ' + ','.join(len(filters) * ['1']) + ' ;',
-                                  '#COUNT ' + ','.join([str(c) for c in counts]) + ' ;',
-                                  '#INTERVAL ' + ','.join([str(e).split('.0')[0]
-                                                           for e in exp_times]) +
-                                  ' ; ' + duration_comment,
-                                  ';----' + this_fov.acp_comments, fov_name + '\t' +
-                                  ra_as_hours(this_fov.ra) + '\t' + dec_as_hex(this_fov.dec)]
-                duration_dict = {'target_overhead': target_overhead,
-                                 'repeat_count': n_repeats,
-                                 'counts': counts,
-                                 'exp_times': exp_times}
-                this_event = Event('stare', this_summary_text, this_acp_entry,
-                                   event_duration, duration_dict,
-                                   ra=ra_as_hours(this_fov.ra), dec=dec_as_hex(this_fov.dec))
-                this_event.target_name = fov_name
-                plan.events.append(this_event)
+        # Now construct starting time and completion status for each action in this plan:
+        observation_is_first_in_plan = True
+        for i_action in range(len(this_plan.action_list)):
+            this_action = this_plan.action_list[i_action]  # an Action namedtuple
+            action_start_dt = running_dt
+            action_timedelta = timedelta(seconds=this_action.raw_duration)
+            action_expected_end_dt = running_dt + action_timedelta
+            n_afinterval_autofocus = 0  # default
 
-            elif directive.type == 'fov':
-                fov_name = directive.spec['fov_name']
-                this_summary_text = fov_name
-                filters, counts, exp_times, target_overhead, repeat_duration = \
-                    make_fov_exposure_data(fov_name, an, fov_dict, instrument,
-                                           exp_time_factor=exp_time_factor,
-                                           skipfilter_list=skipfilter_list)
-                event_duration = target_overhead + 1 * repeat_duration
-                duration_comment = ' --> ' + str(round(event_duration / 60.0, 1)) + ' min'
-                this_fov = fov_dict[fov_name]
-                this_acp_entry = [';', '#DITHER 0 ;',
-                                  '#FILTER ' + ','.join(filters) + ' ;',
-                                  '#BINNING ' + ','.join(len(filters) * ['1']) + ' ;',
-                                  '#COUNT ' + ','.join([str(c) for c in counts]) + ' ;',
-                                  '#INTERVAL ' + ','.join([str(e).split('.0')[0]
-                                                           for e in exp_times]) +
-                                  ' ; ' + duration_comment,
-                                  ';----' + this_fov.acp_comments, fov_name + '\t' +
-                                  ra_as_hours(this_fov.ra) + '\t' + dec_as_hex(this_fov.dec)]
-                duration_dict = {'target_overhead': target_overhead,
-                                 'repeat_count': 1,
-                                 'counts': counts,
-                                 'exp_times': exp_times}
-                this_event = Event('fov', this_summary_text, this_acp_entry,
-                                   event_duration, duration_dict,
-                                   ra=ra_as_hours(this_fov.ra), dec=dec_as_hex(this_fov.dec))
-                this_event.target_name = fov_name
-                plan.events.append(this_event)
-
-            elif directive.type == 'burn':
-                future_fov_name = directive.spec['fov_name']
-                ra = directive.spec['ra']
-                dec = directive.spec['dec']
-                this_summary_text = 'BURN ' + future_fov_name + '  ' + ra + '  ' + dec
-                this_acp_entry = [';', '#DITHER 0 ;', '#FILTER V,I ;', '#BINNING 1,1 ;',
-                                  '#COUNT 1,1 ;', '#INTERVAL ' +
-                                  str(BURN_EXPOSURE) + ',' + str(BURN_EXPOSURE) +
-                                  ' ;----> BURN for new FOV file.',
-                                  future_fov_name + '\t' + ra + '\t' + dec + ' ;']
-                event_duration = sum(tabulate_target_durations(filters=['V', 'I'], counts=[1, 1],
-                                                               exp_times=[BURN_EXPOSURE, BURN_EXPOSURE]))
-                duration_dict = {'target_overhead': event_duration - 2 * BURN_EXPOSURE,
-                                 'repeat_count': 1,
-                                 'counts': [1, 1],
-                                 'exp_times': 2 * [BURN_EXPOSURE]}
-                this_event = Event('burn', this_summary_text, this_acp_entry,
-                                   event_duration, duration_dict,
-                                   ra=ra, dec=dec)
-                this_event.target_name = future_fov_name
-                plan.events.append(this_event)
-
-            elif directive.type == 'image':
-                target_name = directive.spec['target_name']
-                filter_entries = directive.spec['filter_entries']
-                ra = directive.spec['ra']
-                dec = directive.spec['dec']
-                filters, counts, exp_times, target_overhead, repeat_duration = \
-                    make_image_exposure_data(filter_entries, instrument, exp_time_factor=exp_time_factor)
-                event_duration = target_overhead + 1 * repeat_duration
-                this_summary_text = 'Image ' + target_name + '  ' + ra + '  ' + dec +\
-                                    '  ' + ''.join([f + '=' + '{0:g}'.format(e) + 's(' +
-                                                    str(c) + ') '
-                                                    for (f, e, c) in zip(filters, exp_times, counts)])
-                duration_comment = ' --> ' + str(round(event_duration / 60.0, 1)) + ' min'
-                this_acp_entry = [';', '#DITHER 0 ;',
-                                  '#FILTER ' + ','.join(filters) + ' ;',
-                                  '#BINNING ' + ','.join(len(filters) * ['1']) + ' ;',
-                                  '#COUNT ' + ','.join([str(c) for c in counts]) + ' ;',
-                                  '#INTERVAL ' + ','.join([str(e).split('.0')[0]
-                                                           for e in exp_times]) +
-                                  ' ; ' + duration_comment,
-                                  ';---- from IMAGE directive -----',
-                                  target_name + '\t' + ra + '\t' + dec]
-                duration_dict = {'target_overhead': target_overhead,
-                                 'repeat_count': 1,
-                                 'counts': counts,
-                                 'exp_times': exp_times}
-                this_event = Event('image', this_summary_text, this_acp_entry,
-                                   event_duration, duration_dict,
-                                   ra=ra, dec=dec)
-                this_event.target_name = target_name
-                plan.events.append(this_event)
-
-            elif directive.type == 'autofocus':
-                this_summary_text = 'AUTOFOCUS'
-                this_acp_entry = [';', '#AUTOFOCUS']
-                event_duration = AUTOFOCUS_DURATION
-                this_event = Event('autofocus', this_summary_text, this_acp_entry, event_duration)
-                plan.events.append(this_event)
-
-            elif directive.type == 'comment':
-                comment_text = directive.spec['text']
-                this_summary_text = ';' + comment_text
-                this_acp_entry = [';' + comment_text]
-                event_duration = 0
-                this_event = Event('comment', this_summary_text, this_acp_entry, event_duration)
-                plan.events.append(this_event)
-
-            elif directive.type == 'skipfilter':
-                new_skipfilter_list = directive.spec['filters']
-                if len(new_skipfilter_list) == 0:
-                    skipfilter_list_text = 'none'
-                else:
-                    skipfilter_list_text = ' '.join(new_skipfilter_list)
-                this_summary_text = 'SKIPFILTER ' + skipfilter_list_text
-                this_acp_entry = [';', '; (skipfilter: ' + skipfilter_list_text + ')']
-                skipfilter_list = new_skipfilter_list  # changing this state variable
-                event_duration = 0
-                this_event = Event('skipfilter', this_summary_text, this_acp_entry, event_duration)
-                plan.events.append(this_event)
-
-            elif directive.type == 'shutdown':
-                this_summary_text = 'SHUTDOWN'
-                this_acp_entry = [';', '#SHUTDOWN']
-                event_duration = SHUTDOWN_DURATION
-                this_event = Event('shutdown', this_summary_text, this_acp_entry, event_duration)
-                plan.events.append(this_event)
-
-            elif directive.type == 'quitat':
-                plan.utc_quitat = an.datetime_utc_from_hhmm(directive.spec['utc'])
-
-            elif directive.type == 'afinterval':
-                plan.afinterval = float(directive.spec['minutes'])
-
-            elif directive.type == 'sets':
-                plan.sets_requested = int(directive.spec['count'])
-
-            elif directive.type == 'chain':
-                plan.chain_destination = directive.spec['filename']
-
-            else:
-                print(">>>>> ERROR: in plan", plan.plan_id,
-                      ', directive', directive.type, 'not understood.')
-
-
-def make_timeline(plan_list, an, earliest_hhmm):
-    # TODO: SHUTDOWN needs repair, to make it function & stop (1) in mid-plan, (2) even with SETS.
-    # For now, SHUTDOWN must go in it's own (last) plan.
-
-    # Initialize times & intervals to state before first plan:
-    utc_running = None
-    if earliest_hhmm is not None:
-        utc_running = an.datetime_utc_from_hhmm(earliest_hhmm)
-    else:
-        utc_running = an.datetime_utc_from_hhmm('0000') + timedelta(hours=AN_START_REL_UTC_0000)
-        if utc_running > an.ts_dark.start:
-            utc_running -= timedelta(hours=24)
-    utc_most_recent_autofocus = utc_running - timedelta(days=1000)  # keep python happy with a prev value.
-    shutdown_performed = False
-
-    for plan in plan_list:
-        plan.utc_start = utc_running
-        no_plan_exposures_yet_encountered = True
-
-        for i_set in range(1, plan.sets_requested + 1):  # i_set = 1 to sets_requested, inclusive.
-            skipfilter_list = []  # reset at beginning of set execution.
-            for event in plan.events:
-                # First, do autofocus if AFINTERVAL since latest autofocus has passed or at plan startup:
-                if plan.afinterval is not None:
-                    minutes_since_last_autofocus = \
-                        (utc_running - utc_most_recent_autofocus).total_seconds() / 60.0
-                    if event.type in ['burn', 'stare', 'fov', 'image']:
-                        if minutes_since_last_autofocus > plan.afinterval or \
-                            no_plan_exposures_yet_encountered:
-                            # Perform AFINTERVAL autofocus:
-                            utc_running += timedelta(seconds=AUTOFOCUS_DURATION)
-                            utc_most_recent_autofocus = utc_running
-                            plan.afinterval_autofocus_count += 1
-                    if plan.quitat_reached_at(utc_running):
-                        break  # if quitat time reached during afinterval autofocus, do not run event.
-
-                utc_start_event = utc_running
-
-                # Store event's actual end time (incl quitat if active):
-                if event.type == 'waituntil':
-                    # WAITUNTIL only works in first set (set 1):
-                    if i_set == 1:
-                        if plan.utc_quitat is not None:
-                            utc_end_event = min(event.utc_end, plan.utc_quitat)  # not later than QUITAT.
-                        else:
-                            utc_end_event = event.utc_end
-                        # But definitely not before utc_running (time goes not backward):
-                        utc_end_event_actual = max(utc_end_event, utc_running)
-                elif event.type in ['comment', 'skipfilter']:
-                    utc_end_event_actual = utc_start_event  # zero duration
-                elif event.type in ['chill', 'shutdown', 'autofocus']:
-                    utc_end_event_actual = utc_start_event + timedelta(seconds=event.duration_total)
-                elif event.type in ['burn', 'stare', 'fov', 'image']:
-                    actual_duration = event.calc_actual_duration(utc_start_event, plan.utc_quitat)
-                    utc_end_event_actual = utc_start_event + timedelta(seconds=actual_duration)
-                    no_plan_exposures_yet_encountered = False
-                else:
-                    print('make_timeline() doesn\'t recognize event type"" ' + event.type)
-
-                # Store event's summary display time (hhmm on summary line, usually for set 1):
-                if i_set == 1:
-                    event.utc_summary_display = utc_start_event
-
-                # Update event's minimum altitude (all sets, target event types only):
-                if event.type in ['burn', 'stare', 'fov', 'image']:
-                    this_lower_alt = event.calc_lower_altitude(an, utc_start_event, utc_end_event_actual)
-                    if event.min_altitude is None:
-                        event.min_altitude = this_lower_alt
+            # If AFINTERVAL in play, then make an Afinterval_autofocus namedtuple & advance time.
+            if afinterval_is_active:
+                if this_action.action_type in ['fov', 'stare', 'burn', 'image']:
+                    if observation_is_first_in_plan:
+                        action_needs_pre_afinterval_autofocus = True
+                        n_afinterval_autofocus_during_action = floor(action_timedelta /
+                                                           (afinterval_timedelta -
+                                                            timedelta(seconds=AUTOFOCUS_DURATION)))
+                        n_afinterval_autofocus = 1 + n_afinterval_autofocus_during_action
+                        action_timedelta += timedelta(seconds=
+                                                      n_afinterval_autofocus *
+                                                      AUTOFOCUS_DURATION)  # overwrite
+                        action_expected_end_dt = running_dt + action_timedelta  # overwrite
+                        previous_autofocus_dt = action_start_dt + \
+                                                n_afinterval_autofocus_during_action *\
+                                                timedelta(seconds=AUTOFOCUS_DURATION)
+                        observation_is_first_in_plan = False
                     else:
-                        event.min_altitude = min(event.min_altitude, this_lower_alt)
+                        n_afinterval_autofocus_during_action = floor((action_expected_end_dt -
+                                                        previous_autofocus_dt) /
+                                                        (afinterval_timedelta -
+                                                        timedelta(seconds=AUTOFOCUS_DURATION)))
+                        n_afinterval_autofocus = n_afinterval_autofocus_during_action
+                        action_timedelta += n_afinterval_autofocus * \
+                                            timedelta(seconds=AUTOFOCUS_DURATION)
+                        action_expected_end_dt = running_dt + action_timedelta  # overwrite
 
-                # Store event's status:
-                if event.type == 'chain':
-                    event.status = 'CHAIN'
-                elif plan.quitat_reached_at(utc_running):
-                    event.status = 'QUITAT'
-                elif utc_start_event < an.ts_dark.start or utc_end_event_actual > an.ts_dark.end:
-                    event.status = 'LIGHT'
-                elif event.type in ['burn', 'stare', 'fov', 'image', 'autofocus', 'chill']:
-                    event.status = str(i_set)  # default
-                elif event.type in ['shutdown', 'waituntil']:
-                    event.status = 'ok'
+                        # previous_autofocus_dt += n_afinterval_autofocus *\
+                        #                          timedelta(seconds=AUTOFOCUS_DURATION)
+
+                        previous_autofocus_dt += n_afinterval_autofocus * \
+                                                 (afinterval_timedelta +
+                                                  timedelta(seconds=AUTOFOCUS_DURATION))
+
+            if quitat_dt is None:
+                running_dt = action_expected_end_dt
+                if action_expected_end_dt > an.ts_nosun.end:
+                    action_new_status = 'SUN UP!'
+                elif action_expected_end_dt > an.ts_dark.end:
+                    action_new_status = 'twilight'
                 else:
-                    event.status = ''
-
-                # Finally, update master clock at end of this event:
-                utc_running = utc_end_event_actual
-
-                # For SHUTDOWN, signal end of entire run:
-                if event.type == 'shutdown':
-                    shutdown_performed = True
-                    break  # out of event loop (to next set).
-
-                # Stop events if shutdown run or quitat reached:
-                if plan.quitat_reached_at(utc_running) or shutdown_performed:
-                    break  # out of event loop (to next set, which will also stop)
-
-            # Quit set if shutdown run or quitat reached:
-            if plan.quitat_reached_at(utc_running) or shutdown_performed:
-                break  # out of set loop (to next plan)
-
-            plan.sets_completed = i_set
-
-        # Finish any end-of-plan business (incl saving statistics):
-        plan.utc_end = utc_running
-
-        # Quit plan if shutdown run or quitat reached:
-        if shutdown_performed:
-            break  # out of plan loop to end of timeline.
-
-    # Finish end-of-night business (or could go outside this function, instead):
-    pass
-
-
-def make_acp_plan_files(plan_list, an, output_directory, exp_time_factor):
-    # First, delete old ACP plan files:
-    filenames = os.listdir(output_directory)
-    for filename in filenames:
-        if filename.startswith("plan_") and filename.endswith(".txt"):
-            fullpath = os.path.join(output_directory, filename)
-            os.remove(fullpath)
-
-    # Then, make an ACP-format plan file for each plan:
-    for plan in plan_list:
-        if plan.plan_comment is None:
-            plan_comment = ''
-        else:
-            plan_comment = '; ' + plan.plan_comment
-        # noinspection PyListCreation
-        plan_acp_lines = ['; ACP PLAN ' + plan.plan_id + plan_comment,
-                          ';     as generated by photrix at ' +
-                          '{:%Y-%m-%d %H:%M  UTC}'.format(datetime.now(timezone.utc)),
-                          ';     using exposure time factor = ' + '{:5.3f}'.format(exp_time_factor)]
-        plan_acp_lines.append(an.acp_header_string())
-
-        # Add SETS ACP directive if one exists:
-        if plan.sets_requested > 1:
-            plan_acp_lines.extend([';', '#SETS ' + str(int(plan.sets_requested))])
-
-        # Add QUITAT ACP directive if one exists:
-        if plan.utc_quitat is not None:
-            formatted_time = '{:%m/%d/%Y %H:%M}'.format(plan.utc_quitat)
-            plan_acp_lines.extend([';', '#QUITAT ' + formatted_time + ' ; utc'])
-
-        # Add AFINTERVAL ACP directive if one exists:
-        if plan.afinterval is not None:
-            if plan.afinterval > 0:
-                plan_acp_lines.append('#AFINTERVAL ' + '{0:g}'.format(plan.afinterval))
-
-        if plan.utc_quitat is not None or plan.afinterval is not None:
-            plan_acp_lines.append(';')
-
-        # Add event lines:
-        for event in plan.events:
-            plan_acp_lines.extend(event.acp_lines)
-
-        # Add CHAIN ACP directive if one exists:
-        if plan.chain_destination is not None:
-            plan_acp_lines.extend([';', '#CHAIN ' + plan.chain_destination])
-
-        # Write this ACP plan file:
-        filename = 'plan_' + plan.plan_id + '.txt'
-        output_fullpath = os.path.join(output_directory, filename)
-        print('PRINT plan ' + plan.plan_id)
-        with open(output_fullpath, 'w') as this_file:
-            this_file.write('\n'.join(plan_acp_lines))
-
-
-def make_summary_file(plan_list, fov_dict, an, output_directory, exp_time_factor):
-    # First, delete old summary files:
-    filenames = os.listdir(output_directory)
-    for filename in filenames:
-        if filename.startswith("Summary_") and filename.endswith(".txt"):
-            fullpath = os.path.join(output_directory, filename)
-            os.remove(fullpath)
-
-    # Unpack summary_lines:
-    an_year = int(an.an_date_string[0:4])
-    an_month = int(an.an_date_string[4:6])
-    an_day = int(an.an_date_string[6:8])
-    day_of_week = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'] \
-        [datetime(an_year, an_month, an_day).weekday()]
-    header_lines = ['SUMMARY for AN' + an.an_date_string + '   ' + day_of_week.upper(),
-                    '     as generated by photrix at ' +
-                    '{:%Y-%m-%d %H:%M  UTC}'.format(datetime.now(timezone.utc)),
-                    '     using exposure time factor = ' + '{:5.3f}'.format(exp_time_factor) +
-                    '     min.alt = ' + '{:.1f}'.format(an.site.min_altitude) + u'\N{DEGREE SIGN}',
-                    an.acp_header_string(), '\n']
-    moon_is_a_factor = an.moon_phase > MOON_PHASE_NO_FACTOR  # for this astronight
-
-    # Local function:
-    def make_summary_line(status_text, hhmm_text, utc_day_indicator, min_altitude, summary_text):
-        if status_text is None:
-            status_text = ''
-        if hhmm_text is None:
-            hhmm_text = 4 * ' '
-        if utc_day_indicator is None:
-            utc_day_indicator = ' '
-        if min_altitude is not None:
-            altitude_text = str(int(round(min_altitude)))
-        else:
-            altitude_text = '  '
-        if status_text == '1':
-            status_text = 'ok'
-        return ' '.join([status_text.rjust(8), hhmm_text + utc_day_indicator,
-                         altitude_text, summary_text])
-
-    # Construct summary_lines for every event:
-    for i_plan, plan in enumerate(plan_list):
-        # Add lines to top of plan summary:
-        plan.summary_pre_lines.append(
-            make_summary_line(None, None, None, None, 60 * '-'))
-        hhmm_start = hhmm_from_datetime_utc(plan.utc_start)
-        hhmm_end = hhmm_from_datetime_utc(plan.utc_end)
-        if i_plan == 0:
-            display_start = 'dusk to '
-        else:
-            display_start = hhmm_start + '-'
-        plan.summary_pre_lines.append(
-            make_summary_line(None, None, None, None,
-                              'Begin Plan ' + plan.plan_id + ' :: ' + display_start + hhmm_end + ' utc'))
-        if plan.plan_comment is not None:
-            if len(plan.plan_comment.strip()) > 0:
-                plan.summary_pre_lines.append(
-                    make_summary_line(None, None, None, None, plan.plan_comment))
-        if i_plan > 0:
-            plan.summary_pre_lines.append(
-                make_summary_line(None, hhmm_start, None, None, 'Plan entered.'))
-        if plan.sets_requested > 1:
-            plan.summary_pre_lines.append(
-                make_summary_line(None, None, None, None,
-                                  'SETS ' + '{0:g}'.format(plan.sets_requested)))
-        if plan.utc_quitat is not None:
-            plan.summary_pre_lines.append(
-                make_summary_line(None, None, None, None,
-                                  'QUITAT ' + hhmm_from_datetime_utc(plan.utc_quitat) + ' utc'))
-        if plan.afinterval is not None:
-            plan.summary_pre_lines.append(
-                make_summary_line(None, None, None, None,
-                                  'AFINTERVAL ' + '{0:g}'.format(plan.afinterval)))
-
-        # Add lines to end of plan summary:
-        if plan.chain_destination is not None:
-            plan.summary_post_lines.append(
-                make_summary_line('CHAIN', hhmm_end, ' ', None,
-                                  'Chain to \'' + plan.chain_destination + '\''))
-        if plan.afinterval is not None:
-            plan.summary_post_lines.append(
-                make_summary_line(None, None, None, None,
-                                  str(plan.afinterval_autofocus_count) + ' AFINTERVAL autofocuses done.'))
-        plan.summary_post_lines.append('\n')
-        for event in plan.events:
-            # Construct main summary text line for this event, write into its Event object:
-            if event.type in ['waituntil', 'comment', 'skipfilter']:
-                hhmm_text, utc_day_indicator = '    ', ' '
+                    action_new_status = 'ok'
             else:
-                if event.utc_summary_display is not None:
-                    hhmm_text = hhmm_from_datetime_utc(event.utc_summary_display)
-                    if event.utc_summary_display < an.datetime_utc_from_hhmm('0000'):
-                        utc_day_indicator = '-'
-                    elif event.utc_summary_display > an.datetime_utc_from_hhmm('0000') + timedelta(days=1):
-                        utc_day_indicator = '+'
+                if action_expected_end_dt > quitat_dt:
+                    if this_action.action_type.lower() == 'chain':
+                        action_new_status = 'CHAIN'
+                    elif running_dt >= quitat_dt:
+                        action_new_status = 'SKIPPED'
                     else:
-                        utc_day_indicator = ' '
+                        running_dt = quitat_dt
+                        action_new_status = 'QUITAT'
                 else:
-                    utc_day_indicator = ' '
-            if event.type in ['fov', 'stare', 'image', 'burn', 'autofocus', 'chill']:
-                if event.status is None:
-                    event.status = 'SKIPPED'
-                    hhmm_text = None
-                    utc_day_indicator = None
-                    event.min_altitude = None
-            summary_text_line = make_summary_line(event.status, hhmm_text, utc_day_indicator,
-                                                  event.min_altitude, event.summary_text)
-            event.summary_lines = [summary_text_line]
+                    running_dt = action_expected_end_dt
+                    action_new_status = 'ok'
+            new_action = this_action._replace(n_afinterval_autofocus=n_afinterval_autofocus,
+                                              status=action_new_status,
+                                              start_utc=action_start_dt)
+            this_plan.action_list[i_action] = new_action
+        new_plan = this_plan._replace(action_list=this_plan.action_list)
+        plan_list[i_plan] = new_plan
+    return plan_list
 
-            # Add warning line if moon is too close to this object:
-            if moon_is_a_factor:
-                if event.type in ['burn', 'image', 'fov', 'stare']:
-                    moon_dist = an.moon_radec.degrees_from(RaDec(event.ra, event.dec))  # in degrees
-                    if moon_dist < MIN_MOON_DEGREES_DEFAULT:
-                        event.summary_lines.append(
-                            make_summary_line(None, None, None, None,
-                                              '>>>>> WARNING: the above target\'s ' +
-                                              'MOON DISTANCE = ' +
-                                              str(int(round(moon_dist))) +
-                                              u'\N{DEGREE SIGN}' + ', should be >= ' +
-                                              str(MIN_MOON_DEGREES_DEFAULT) +
-                                              u'\N{DEGREE SIGN}'))
 
-            # Add warning line if fov target is estimated too faint in V:
-            if event.type == 'fov':
-                this_fov = fov_dict[event.target_name]
-                if this_fov.observing_style.lower() == 'lpv':
-                    mags = this_fov.estimate_lpv_mags(an.local_middark_jd)
-                    v_mag = mags.get('V', None)
-                    if v_mag is not None:
-                        if v_mag >= V_MAG_WARNING:
-                            event.summary_lines.append(
-                                make_summary_line(None, None, None, None,
-                                                  '>>>>> WARNING: above target estim. V Mag ~ ' +
-                                                  '{:.2f}'.format(v_mag) +
-                                                  ' very faint (>=' + '{0:g}'.format(V_MAG_WARNING) + ').'))
-
-            # Add warning line if autofocus and more than one sets requested (causing too many autofocuses):
-            if event.type == 'autofocus' and plan.sets_requested > 1:
-                event.summary_lines.append(
-                    make_summary_line(None, None, None, None,
-                                      '>>>>> WARNING: autofocus not recommended when sets > 1.'))
-
-        if plan.chain_destination is not None:
-            # Add plan warning line if plan chains to itself:
-            if plan.chain_destination.lower() == 'plan_' + plan.plan_id.lower() + '.txt':
-                plan.end_warning_lines.append(
-                    make_summary_line('ERROR', None, None, None,
-                                      '>>>>> ERROR: this plan attempts to chain to itself.'))
-            # Add plan warning line if chained-to plan does not exist:
-            elif i_plan != len(plan_list) - 1:
-                if plan.chain_destination.lower() != \
-                    ('plan_' + plan_list[i_plan + 1].plan_id + '.txt').lower():
-                    plan.end_warning_lines.append(
-                        make_summary_line('ERROR', None, None, None,
-                                          '>>>>> ERROR: this plan attempts to chain,'
-                                          ' but not to next plan.'))
-
-        # Add plan warning if no autofocus (or afinterval) given:
-        if plan.afinterval is None and all([e.type != 'autofocus' for e in plan.events]):
-            if any([e.type in ['burn', 'image', 'fov', 'stare'] for e in plan.events]):
-                plan.end_warning_lines.append(
-                    make_summary_line('WARNING', None, None, None,
-                                      '>>>>> WARNING: this plan has no autofocus or afinterval.'))
-        # Add plan warning if autofocus and afinterval) both in same plan:
-        if plan.afinterval is not None and any([e.type == 'autofocus' for e in plan.events]):
-            if any([e.type in ['burn', 'image', 'fov', 'stare'] for e in plan.events]):
-                plan.end_warning_lines.append(
-                    make_summary_line('WARNING', None, None, None,
-                                      '>>>>> WARNING: this plan has both autofocus and afinterval.'))
-
-    # Construct file contents by appending all required text lines:
-    all_summary_lines = header_lines
-    for plan in plan_list:
-        all_summary_lines.extend(plan.summary_pre_lines)
-        for event in plan.events:
-            all_summary_lines.extend(event.summary_lines)
-        all_summary_lines.extend(plan.end_warning_lines)
-        all_summary_lines.extend(plan.summary_post_lines)
-
-    # Write Summary file:
-    output_fullpath = os.path.join(output_directory, 'Summary_' + an.an_date_string + '.txt')
-    print('PRINT summary to ', output_fullpath)
-    with open(output_fullpath, 'w') as this_file:
-        this_file.write('\n'.join(all_summary_lines))
+def add_altitudes(plan_list, an, fov_dict):
+    for i_plan in range(len(plan_list)):
+        this_plan = plan_list[i_plan]
+        for i_action in range(len(this_plan.action_list)):
+            this_action = this_plan.action_list[i_action]
+            if this_action.action_type.lower() in ['fov', 'stare', 'burn', 'image']:
+                longitude, latitude = an.site.longitude, an.site.latitude
+                if this_action.action_type.lower() == 'stare':
+                    fov_name = this_action.parsed_action[2]
+                else:
+                    fov_name = this_action.parsed_action[1]
+                longitude_hex, latitude_hex = degrees_as_hex(longitude), degrees_as_hex(latitude)
+                if this_action.action_type.lower() == 'burn':
+                    target_radec = RaDec(this_action.parsed_action[2],
+                                         this_action.parsed_action[3])
+                elif this_action.action_type.lower() == 'image':
+                    target_radec = RaDec(this_action.parsed_action[3],
+                                         this_action.parsed_action[4])
+                else:
+                    this_fov = fov_dict[fov_name]
+                    target_radec = RaDec(this_fov.ra, this_fov.dec)
+                datetime_utc = this_action.start_utc
+                az_deg, alt_deg = az_alt_at_datetime_utc(longitude_hex, latitude_hex,
+                                                         target_radec, datetime_utc)
+                new_action = this_action._replace(altitude_deg=alt_deg)
+                this_plan.action_list[i_action] = new_action
+        new_plan = this_plan._replace(action_list=this_plan.action_list)
+        plan_list[i_plan] = new_plan
+    return plan_list
 
 
 def make_fov_exposure_data(fov_name, an, fov_dict=None, instrument=None, exp_time_factor=1,
@@ -1866,7 +1548,7 @@ def make_image_exposure_data(filter_entries, instrument, exp_time_factor=1):
         bits = mag_string.split("(")
         if len(bits) == 1:  # case e.g. "V=13.2"
             this_count = 1
-        elif len(bits) == 2:  # case e.g. "V=13.2(1)"
+        elif len(bits) == 2:               # case e.g. "V=13.2(1)"
             this_count = int(bits[1].replace(")", ""))
         if 's' in bits[0].lower():
             this_exp_time = float(bits[0].lower().split('s')[0])
@@ -1902,22 +1584,169 @@ def repeat_short_exp_times(counts, exp_times):
     return counts, exp_times
 
 
+def write_acp_plans(plan_list, output_directory, exp_time_factor):
+    # First, delete old ACP plan files:
+    filenames = os.listdir(output_directory)
+    for filename in filenames:
+        if filename.startswith("plan_") and filename.endswith(".txt"):
+            fullpath = os.path.join(output_directory, filename)
+            os.remove(fullpath)
+
+    for this_plan in plan_list:
+        # Unpack acp_plan_lines:
+        plan_comment_string = this_plan.action_list[0].parsed_action[2]
+        if plan_comment_string is None:
+            plan_comment_string = ''
+        else:
+            plan_comment_string = ' ; ' + plan_comment_string
+        acp_plan_lines = ['; ACP PLAN ' + this_plan.plan_id + plan_comment_string,
+                          ';     as generated by photrix at ' +
+                          '{:%Y-%m-%d %H:%M  UTC}'.format(datetime.now(timezone.utc)),
+                          ';     using exposure time factor = ' + '{:5.3f}'.format(exp_time_factor)]
+        for this_action in this_plan.action_list:
+            acp_plan_lines.extend(this_action.acp_plan_lines)
+
+        # Write this ACP plan file:
+        filename = 'plan_' + this_plan.plan_id + '.txt'
+        output_fullpath = os.path.join(output_directory, filename)
+        print('PRINT lines for plan ' + this_plan.plan_id + ' to ', output_fullpath)
+        with open(output_fullpath, 'w') as this_file:
+            this_file.write('\n'.join(acp_plan_lines))
+
+
+def write_summary(plan_list, an, fov_dict, output_directory, exp_time_factor):
+    # Unpack summary_lines:
+    an_year = int(an.an_date_string[0:4])
+    an_month = int(an.an_date_string[4:6])
+    an_day = int(an.an_date_string[6:8])
+    day_of_week = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']\
+        [datetime(an_year, an_month, an_day).weekday()]
+    all_summary_lines = ['SUMMARY for AN' + an.an_date_string + '   ' + day_of_week.upper(),
+                         '     as generated by photrix at ' +
+                         '{:%Y-%m-%d %H:%M  UTC}'.format(datetime.now(timezone.utc)),
+                         '     using exposure time factor = ' + '{:5.3f}'.format(exp_time_factor) +
+                         '     min.alt = ' + '{:.1f}'.format(an.site.min_altitude) + u'\N{DEGREE SIGN}',
+                         an.acp_header_string()]
+    moon_is_a_factor = an.moon_phase > MOON_PHASE_NO_FACTOR  # for this astronight
+
+    for i_plan in range(len(plan_list)):
+        this_plan = plan_list[i_plan]
+        for i_action in range(len(this_plan.action_list)):
+            this_action = this_plan.action_list[i_action]
+            action_summary_lines = this_action.summary_lines.copy()  # modify copy, later replace.
+
+            # Make summary line prefix parts:
+            status_str = this_action.status.rjust(8)
+            start_hhmm_str = hhmm_from_datetime_utc(this_action.start_utc)
+            if this_action.status == 'SKIPPED':
+                start_hhmm_str = len(start_hhmm_str) * ' '
+
+            # Add '+' to hhmm if it refers to next UTC day.
+            next_day_string = ' '  # default
+            if i_action >= 1:
+                prev_start_utc = this_plan.action_list[i_action - 1].start_utc
+            elif i_action == 0 and i_plan >= 1:
+                prev_plan = plan_list[i_plan-1]
+                prev_start_utc = prev_plan.action_list[len(prev_plan.action_list)-1].start_utc
+            else:
+                prev_start_utc = None
+            if prev_start_utc is not None:
+                if this_action.start_utc.date() > prev_start_utc.date():
+                    next_day_string = '+'
+
+            # Make degrees altitude prefix part:
+            if this_action.action_type.lower() in ['fov', 'stare', 'burn', 'image']:
+                alt_string = '{:2d}'.format(int(round(this_action.altitude_deg)))
+            else:
+                alt_string = '  '
+
+            # Insert warning line if moon is closer to this object than it should be.
+            if moon_is_a_factor:
+                act = this_action.action_type.lower()
+                if act in ['burn', 'image', 'fov', 'stare']:
+                    if act == 'burn':
+                        ra, dec = this_action.parsed_action[2], this_action.parsed_action[3]
+                    elif act == 'image':
+                        ra, dec = this_action.parsed_action[3], this_action.parsed_action[4]
+                    else:
+                        if act == 'fov':
+                            fov_name = this_action.parsed_action[1]  # non-stare FOV incl standards
+                        else:
+                            fov_name = this_action.parsed_action[2]  # stare
+                        this_fov = fov_dict[fov_name]
+                        ra, dec = this_fov.ra, this_fov.dec
+
+                    moon_dist = an.moon_radec.degrees_from(RaDec(ra, dec))  # in degrees
+                    if moon_dist < MIN_MOON_DEGREES_DEFAULT:
+                        action_summary_lines.append('***** WARNING: the above target\'s ' +
+                                                    'MOON DISTANCE = ' +
+                                                    str(int(round(moon_dist))) +
+                                                    u'\N{DEGREE SIGN}' + ', should be >= ' +
+                                                    str(MIN_MOON_DEGREES_DEFAULT) +
+                                                    u'\N{DEGREE SIGN}')
+
+            # Insert warning line if FOV target estimated to be too faint in V:
+            act = this_action.action_type.lower()
+            if act == 'fov':
+                fov_name = this_action.parsed_action[1]
+                this_fov = fov_dict[fov_name]
+                if this_fov.observing_style.lower() == 'lpv':
+                    mags = this_fov.estimate_lpv_mags(an.local_middark_jd)
+                    v_mag = mags.get('V', None)
+                    if v_mag is not None:
+                        if v_mag >= V_MAG_WARNING:
+                            action_summary_lines.append(
+                                '***** WARNING: above target estim. V Mag ~ ' +
+                                '{:.2f}'.format(v_mag) +
+                                ' very faint (>' + str(V_MAG_WARNING) + ').')
+
+            # Error if plan chains to itself, or if chained-to plan file does not exist:
+            if this_action.action_type.lower() == 'chain':
+                chain_target_filename = this_action.parsed_action[1].lower()
+                if chain_target_filename == 'plan_' + this_plan.plan_id.lower() + '.txt':
+                    action_summary_lines += ['*** ERROR: Plan attempts to chain to itself.']
+                else:
+                    target_plan_exists = False
+                    for plan in plan_list:
+                        this_plan_filename = 'plan_' + plan.plan_id.lower() + '.txt'
+                        if this_plan_filename == chain_target_filename:
+                            target_plan_exists = True
+                    if not target_plan_exists:
+                        action_summary_lines += ['*** ERROR: Chain-to plan does not exist.']
+
+            # Construct and add prefix, add to summary lines:
+            prefix = status_str + ' ' + start_hhmm_str + next_day_string + ' ' + alt_string + ' '
+            lines_without_prefixes = len(action_summary_lines) - 1
+            if this_action.action_type.lower() == 'plan':
+                line_prefixes = lines_without_prefixes * [len(prefix) * ' '] + [prefix]  # last line
+            else:
+                line_prefixes = [prefix] + lines_without_prefixes * [len(prefix) * ' ']  # 1st line
+            prefixed_summary_lines = [line_prefixes[i] + action_summary_lines[i]
+                                      for i in range(len(action_summary_lines))]
+            all_summary_lines.extend(prefixed_summary_lines)
+    # Write Summary file:
+    output_fullpath = os.path.join(output_directory, 'Summary_' + an.an_date_string + '.txt')
+    print('PRINT all summary lines to ', output_fullpath)
+    with open(output_fullpath, 'w') as this_file:
+        this_file.write('\n'.join(all_summary_lines))
+
+
 def calc_exp_time(mag, filter, instrument, max_exp_time, exp_time_factor=1):
     # Raw exposure time from mag + properties of instrument (camera & filters).
-    exp_time_from_mag = instrument.filter_data[filter]['reference_exposure_mag10'] * \
+    exp_time_from_mag = instrument.filter_data[filter]['reference_exposure_mag10'] *\
                         10.0 ** ((mag - 10.0) / 2.5)
 
     # Apply exposure time factor (from user, for this night) (before asymptotes and limits):
     exp_time = exp_time_factor * exp_time_from_mag
 
     # Apply absolute maximum as soft asymptote:
-    exp_time = sqrt(1.0 / (1.0 / exp_time ** 2 + 1.0 / ABSOLUTE_MAX_EXPOSURE_TIME ** 2))
+    exp_time = sqrt(1.0 / (1.0 / exp_time**2 + 1.0 / ABSOLUTE_MAX_EXPOSURE_TIME**2))
 
     # Apply absolute minimum as soft asymptote:
     # as of 20170406, absolute minimum is from this module, not necessarily from instrument object.
     # i.e., use more stringent of the two minima.
     effective_minimum = max(ABSOLUTE_MIN_EXPOSURE_TIME, instrument.camera['shortest_exposure'])
-    exp_time = sqrt(exp_time ** 2 + effective_minimum ** 2)
+    exp_time = sqrt(exp_time**2 + effective_minimum**2)
 
     # Apply rounding (at least 2 significant digits):
     if exp_time >= 10.0:

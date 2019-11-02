@@ -455,6 +455,10 @@ class Astronight:
         diff_hour = int(diff_seconds/3600)
         diff_minute = round((diff_seconds - (diff_hour*3600)) / 60)
         lst_vs_utc_string = '{0:02d}'.format(diff_hour) + '{0:02d}'.format(diff_minute)
+        diff_seconds = (24 * 3600) - diff_seconds
+        diff_hour = int(diff_seconds/3600)
+        diff_minute = round((diff_seconds - (diff_hour*3600)) / 60)
+        utc_vs_lst_string = '{0:02d}'.format(diff_hour) + '{0:02d}'.format(diff_minute)
 
         # Construct ACP header string:
         header_string = '; sun --- down: ' + \
@@ -465,7 +469,8 @@ class Astronight:
                         dark_start_lst_string + '-' + dark_end_lst_string + ' LST\n'
         header_string += '; moon -- ' + moon_phase_string + ' ' + moon_radec_string + \
                          '   ' + dark_no_moon_string + '    ' + moon_transit_string + '\n'
-        header_string += '; LST = UTC + ' + lst_vs_utc_string + ' (middark)'
+        header_string += '; LST = UTC + ' + lst_vs_utc_string + 6 * ' '
+        header_string += '  UTC = LST + ' + utc_vs_lst_string + '     (both middark)'
         return header_string
 
 
