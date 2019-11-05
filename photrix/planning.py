@@ -189,10 +189,20 @@ def complete_df_fov_an(df_fov, user_update_tolerance_days=DEFAULT_UPDATE_TOLERAN
         if ts_obs.seconds > 0:
             df_fov.loc[ind, 'available'] = ' - '.join([hhmm_from_datetime_utc(ts_obs.start),
                                                        hhmm_from_datetime_utc(ts_obs.end)])
-    # Fill in night's priorities:
-    # fov_dict = make_fov_dict(fov_directory=)
+
+    # Remove targets that can't be observed this astronight, *before* getting data from AAVSO:
+    if remove_unobservables:
+        enough_dark_time = df_fov['seconds'] >= min_available_seconds
+        moon_dist_ok = df_fov['moon_deg'] >= min_moon_degrees
+        is_observable = enough_dark_time & moon_dist_ok
+        # print('Querying AAVSO for', str(sum(is_observable)), 'of', str(len(df_fov)), 'targets.')
+        df_fov = df_fov[is_observable]
+
+    # Update observations cache from AAVSO:
     loc = LocalObsCache()
     loc.update_fov_entries(df_fov, user_update_tolerance_days=user_update_tolerance_days)
+
+    # Compute each target's priority for this astronight:
     for ind in df_fov.index:
         this_fov = df_fov.loc[ind, 'fov']
         df_fov.loc[ind, 'an_priority'] = loc.calc_an_priority(this_fov, an,
@@ -204,12 +214,6 @@ def complete_df_fov_an(df_fov, user_update_tolerance_days=DEFAULT_UPDATE_TOLERAN
 
     if remove_zero_an_priority:
         df_fov = df_fov[df_fov['an_priority'] > 0.0]
-
-    if remove_unobservables:
-        enough_dark_time = df_fov['seconds'] >= min_available_seconds
-        moon_dist_ok = df_fov['moon_deg'] >= min_moon_degrees
-        is_observable = enough_dark_time & moon_dist_ok
-        df_fov = df_fov[is_observable]
 
     return df_fov.sort_values(by=['mid', 'an_priority'], ascending=[True, False])
 
@@ -684,6 +688,8 @@ def get_local_aavso_reports(report_dir=None, earliest_an=None):
 def make_an_roster(an_date_string, output_directory, site_name='DSW', instrument_name='Borea',
                    user_update_tolerance_days=DEFAULT_UPDATE_TOLERANCE_DAYS,
                    exp_time_factor=1, min_an_priority=6):
+    # TODO: recode download loop to only download those FOVs visible tonight & for which priority might
+    #  be high enough (read from csv: some might already be known to have been recently observed).
     """
     Generates new .csv file containing info on each fov available this astronight.
        Typical usage: pl.make_an_roster("20170127", "C:/Astro/ACP/AN20170127/",
@@ -958,13 +964,13 @@ class Event:
         self.utc_summary_display = None  # stored only for first SET.
         self.min_altitude = None  # in degrees, for ALL sets in this plan.
 
-    def calc_actual_duration(self, utc_start, utc_quitat):
-        if utc_quitat is None:
-            return self.duration_total
+    def calc_actual_duration(self, utc_start, utc_quitat, afinterval, utc_most_recent_autofocus):
+        # if utc_quitat is None:
+        #     return self.duration_total
         if utc_start >= utc_quitat:
-            return 0
-        if timedelta(seconds=self.duration_total) < utc_quitat - utc_start:
-            return self.duration_total
+            return 0, 0, utc_most_recent_autofocus
+        # if timedelta(seconds=self.duration_total) < utc_quitat - utc_start:
+        #     return self.duration_total
         if self.duration_dict is None:
             return None
         total_exp_time = self.duration_dict['repeat_count'] * sum([c * e for (c, e) in
@@ -974,13 +980,25 @@ class Event:
         overhead_per_exposure = (self.duration_total - total_exp_time -
                                  self.duration_dict['target_overhead']) / exposure_count
         utc_running = utc_start + timedelta(seconds=self.duration_dict['target_overhead'])
+        event_autofocus_count = 0  # accumulator for this event.
         for i_repeat in range(self.duration_dict['repeat_count']):
             for c, e in zip(self.duration_dict['counts'], self.duration_dict['exp_times']):
                 for i_exp in range(c):
+                    # Update clock for any AFINTERVAL-triggered autofocus:
+                    if afinterval is not None:
+                        minutes_since_last_autofocus = \
+                            (utc_running - utc_most_recent_autofocus).total_seconds() / 60.0
+                        if minutes_since_last_autofocus > afinterval:
+                            utc_running += timedelta(seconds=AUTOFOCUS_DURATION)
+                            utc_most_recent_autofocus = utc_running
+                            event_autofocus_count += 1
+                    # Update clock for exposure itself:
                     utc_running += timedelta(seconds=overhead_per_exposure + e)
+                    # Terminate event if QUITAT time has passed:
                     if utc_running >= utc_quitat:
-                        return (utc_running - utc_start).total_seconds()
-        return (utc_running - utc_start).total_seconds()
+                        return (utc_running - utc_start).total_seconds(), \
+                               event_autofocus_count, utc_most_recent_autofocus
+        return (utc_running - utc_start).total_seconds(), event_autofocus_count, utc_most_recent_autofocus
 
     def calc_lower_altitude(self, an, utc1, utc2):
         longitude, latitude = an.site.longitude, an.site.latitude
@@ -1464,6 +1482,7 @@ def make_timeline(plan_list, an, earliest_hhmm):
             skipfilter_list = []  # reset at beginning of set execution.
             for event in plan.events:
                 # First, do autofocus if AFINTERVAL since latest autofocus has passed or at plan startup:
+                # TODO: rewrite (move?) this, so that long Stare & Image events can have > 1 autofocus.
                 if plan.afinterval is not None:
                     minutes_since_last_autofocus = \
                         (utc_running - utc_most_recent_autofocus).total_seconds() / 60.0
@@ -1474,6 +1493,8 @@ def make_timeline(plan_list, an, earliest_hhmm):
                             utc_running += timedelta(seconds=AUTOFOCUS_DURATION)
                             utc_most_recent_autofocus = utc_running
                             plan.afinterval_autofocus_count += 1
+                            if plan.sets_requested == 1:
+                                event.summary_text += ' (af)'
                     if plan.quitat_reached_at(utc_running):
                         break  # if quitat time reached during afinterval autofocus, do not run event.
 
@@ -1494,7 +1515,12 @@ def make_timeline(plan_list, an, earliest_hhmm):
                 elif event.type in ['chill', 'shutdown', 'autofocus']:
                     utc_end_event_actual = utc_start_event + timedelta(seconds=event.duration_total)
                 elif event.type in ['burn', 'stare', 'fov', 'image']:
-                    actual_duration = event.calc_actual_duration(utc_start_event, plan.utc_quitat)
+                    actual_duration, event_autofocus_count, utc_most_recent_autofocus = \
+                        event.calc_actual_duration(utc_start_event, plan.utc_quitat,
+                                                   plan.afinterval, utc_most_recent_autofocus)
+                    if event_autofocus_count >= 1:
+                        event.summary_text += ' (' + str(event_autofocus_count) + ' af)'
+                        plan.afinterval_autofocus_count += event_autofocus_count
                     utc_end_event_actual = utc_start_event + timedelta(seconds=actual_duration)
                     no_plan_exposures_yet_encountered = False
                 else:
@@ -1724,10 +1750,10 @@ def make_summary_file(plan_list, fov_dict, an, output_directory, exp_time_factor
                     if moon_dist < MIN_MOON_DEGREES_DEFAULT:
                         event.summary_lines.append(
                             make_summary_line(None, None, None, None,
-                                              '>>>>> WARNING: the above target\'s ' +
-                                              'MOON DISTANCE = ' +
+                                              '>>>>> WARNING: ' + event.target_name +
+                                              ' MOON DISTANCE = ' +
                                               str(int(round(moon_dist))) +
-                                              u'\N{DEGREE SIGN}' + ', should be >= ' +
+                                              u'\N{DEGREE SIGN}' + ', vs. max ' +
                                               str(MIN_MOON_DEGREES_DEFAULT) +
                                               u'\N{DEGREE SIGN}'))
 
