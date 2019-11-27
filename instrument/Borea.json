@@ -1,14 +1,14 @@
 {
   "name": "Borea",
-  "description": "C14 on MX+ with Atlas & SBIG 6303E, first light Sept 2015",
-  "min_distance_full_moon": 50,
+  "description": "C14 on PlaneWave L-500 with Atlas & SBIG 6303E, first light this config Aug 2019",
+  "min_distance_full_moon": 45,
 
   "mount": {
-    "model": "Paramount MX+ on tripod",
-    "slew_rate_ra": 4,
-    "slew_rate_dec": 4,
-    "sec_to_speed_ra": 3,
-    "sec_to_speed_dec": 3
+    "model": "PlaneWave L-500 on pier",
+    "slew_rate_ra": 20,
+    "slew_rate_dec": 20,
+    "sec_to_speed_ra": 1,
+    "sec_to_speed_dec": 1
   },
 
   "ota": {
@@ -36,24 +36,27 @@
     },
     "V": {
       "reference_exposure_mag10": 22,
+      "transform_set": "from AN20191118",
       "transform": [
-        {"V-I": -0.0149},
+        {"V-I": -0.027},
         {"B-V": null},
         {"V-R": null}
       ]
     },
     "R": {
       "reference_exposure_mag10": 20,
+      "transform_set": "from AN20191118",
       "transform": [
-        {"V-I": 0.0513},
+        {"V-I": 0.038},
         {"B-V": null},
         {"V-R": null}
       ]
     },
     "I": {
       "reference_exposure_mag10": 70,
+      "transform_set": "from AN20191118",
       "transform": [
-        {"V-I": 0.0494},
+        {"V-I": 0.037},
         {"B-V": null},
         {"V-R": null}
       ]
@@ -61,7 +64,7 @@
     "Clear": {
       "reference_exposure_mag10": 10,
       "transform": [
-        {"V-I": null},
+        {"V-I": 0.263},
         {"B-V": null},
         {"V-R": null}
       ]

@@ -694,7 +694,7 @@ def make_an_roster(an_date_string, output_directory, site_name='DSW', instrument
     Generates new .csv file containing info on each fov available this astronight.
        Typical usage: pl.make_an_roster("20170127", "C:/Astro/ACP/AN20170127/",
        user_update_tolerance_days=0.1, exp_time_factor=0.8)
-    :param an_date_string: as '20170127. Date of the evening to plan for [string]
+    :param an_date_string: as '20170127'. Date of the evening to plan for [string]
     :param output_directory: directory in which to write Roster csv file [string]
     :param site_name: [string]
     :param instrument_name: [string]
@@ -965,8 +965,8 @@ class Event:
         self.min_altitude = None  # in degrees, for ALL sets in this plan.
 
     def calc_actual_duration(self, utc_start, utc_quitat, afinterval, utc_most_recent_autofocus):
-        # if utc_quitat is None:
-        #     return self.duration_total
+        if utc_quitat is None:
+            return self.duration_total
         if utc_start >= utc_quitat:
             return 0, 0, utc_most_recent_autofocus
         # if timedelta(seconds=self.duration_total) < utc_quitat - utc_start:
