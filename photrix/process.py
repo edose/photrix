@@ -16,7 +16,7 @@ from .fov import Fov, FOV_DIRECTORY
 
 __author__ = "Eric Dose :: New Mexico Mira Project, Albuquerque"
 
-THIS_SOFTWARE_VERSION = '2.0.0'  # as of 20170716
+THIS_SOFTWARE_VERSION = '2.0.1'  # as of 20101210
 # AN_TOP_DIRECTORY = 'J:/Astro/Images/Borea Photrix'
 AN_TOP_DIRECTORY = 'C:/Astro/Borea Photrix'
 DF_MASTER_FILENAME = 'df_master.csv'
@@ -765,7 +765,9 @@ class SkyModel:
         # Build df_image (from Mixed Model random effect), 1 row per FITS file,
         #    index = FITSfile, columns = FITSfile, JD_mid, Value:
         df = self.mm_fit.df_random_effects.copy()
-        df = df.rename(columns={'GroupName': 'FITSfile', 'GroupValue': 'Value'})
+        # df = df.rename(columns={'GroupName': 'FITSfile', 'GroupValue': 'Value'})  # old statsmodel ver.
+        # Next line accommodates statsmodels package's STUPID BREAKING CHANGE of/before their version 0.10.
+        df = df.rename(columns={'GroupName': 'FITSfile', 'Group': 'Value'})  # for new statsmodels ver 0.10.
         df_xref = self.df_model[['FITSfile', 'JD_mid']].drop_duplicates()
         df = pd.merge(df, df_xref, on='FITSfile', how='left', sort=False).sort_values(by='JD_mid')
         self.df_image = df.copy()
@@ -1269,9 +1271,13 @@ class PredictionSet:
         df_estimates_checks_targets['UseInEnsemble'] = None
 
         # CIRRUS CORRECTION: Apply per-image cirrus-effect to checks and targets (for all filters):
-        df_predictions_checks_targets = pd.merge(left=df_estimates_checks_targets,
+        # df_predictions_checks_targets = pd.merge(left=df_estimates_checks_targets,
+        #                                          right=self.df_cirrus_effect,
+        #                                          how='left', left_on='FITSfile', right_on='Image')
+        # Next line accommodates pandas package's STUPID BREAKING CHANGE in versions 0.23-0.24:
+        df_predictions_checks_targets = pd.merge(left=df_estimates_checks_targets,  # ok per pandas 0.25.
                                                  right=self.df_cirrus_effect,
-                                                 how='left', left_on='FITSfile', right_on='Image')
+                                                 how='left', left_on='FITSfile', right_index=True)
         # df_predictions_checks_targets.sort_values(by=['FOV', 'ModelStarID', 'Serial'],
         #                                           inplace=True)
         df_predictions_checks_targets.index = df_predictions_checks_targets['Serial']
@@ -1342,22 +1348,13 @@ class PredictionSet:
                                              axis=1)  # remove columns as a bit of cleanup
         df_columns_to_join = self.df_all_curated_obs[['Serial', 'FOV', 'MaxADU_Ur', 'FWHM',
                                                       'SkyADU', 'SkySigma']]  # for markup report
-        df_transformed = pd.merge(left=df_transformed, right=df_columns_to_join, on='Serial')
-        df_transformed.index = df_transformed['Serial']
+        # df_transformed = pd.merge(left=df_transformed, right=df_columns_to_join, on='Serial')
+        # Next line accommodates pandas package's STUPID BREAKING CHANGE of their version 0.21.
+        df_transformed = pd.merge(left=df_transformed, right=df_columns_to_join,
+                                  left_index=True, right_index=True,
+                                  suffixes=('', 'dupe'))  # suffixes retain exactly 1 column 'Serial'.
+        df_transformed.index = df_transformed['Serial']  # explicitly ensure 2018 behavior is retained.
         df_transformed = df_transformed.sort_values(by=['ModelStarID', 'JD_mid'])
-
-        # ############# Start temporary code block: mimic R df:
-        # r_columns = ['Serial', 'ModelStarID', 'FITSfile', 'StarID', 'Chart',
-        #              'Xcentroid', 'Ycentroid',
-        #              'InstMag', 'InstMagSigma', 'StarType', 'CatMag', 'CatMagError',
-        #              'Exposure', 'JD_mid', 'Filter', 'Airmass', 'CI', 'SkyBias', 'Vignette',
-        #              'LogADU', 'CirrusEffect', 'CirrusSigma', 'NumCompsUsed',
-        #              'CompIDsUsed', 'NumCompsRemoved', 'JD_num', 'TransformedMag', 'ModelSigma',
-        #              'TotalSigma', 'FOV', 'MaxADU_Ur', 'FWHM', 'SkyADU', 'SkySigma']
-        # df_r = (df_transformed.copy())[r_columns]
-        # df_r.to_csv(r'C:/24hrs/df_r.txt', sep=';', quotechar='"')  # '.txt', else Excel misbehaves
-        # ############# End temporary code to mimic R df.
-
         return df_transformed
 
     def _write_summary_to_console(self):

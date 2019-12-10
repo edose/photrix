@@ -1,6 +1,6 @@
 import os
 import os.path
-from collections import namedtuple
+from collections import OrderedDict
 from datetime import datetime, timezone, timedelta
 from math import floor, sqrt, ceil
 
@@ -243,13 +243,14 @@ class LocalObsCache:
             need_to_create_empty_cache = True
         if need_to_create_empty_cache:
             #  Create *empty* dataframe with dtypes (incl. utc datetimes), write to cache file:
-            self.df_cache = pd.DataFrame.from_items([('fov_name', ['dummy']),
-                                                     ('main_target', ['dummy']),
-                                                     ('obs_style', ['dummy']),
-                                                     ('cache_datetime', [datetime.now(timezone.utc)]),
-                                                     ('obs_datetime', [datetime.now(timezone.utc)]),
-                                                     ('obs_mag', [0.0]),
-                                                     ('obs_mag_filter', ['dummy'])])[:0]
+            self.df_cache = pd.DataFrame.from_dict(OrderedDict([
+                ('fov_name', ['dummy']),
+                ('main_target', ['dummy']),
+                ('obs_style', ['dummy']),
+                ('cache_datetime', [datetime.now(timezone.utc)]),
+                ('obs_datetime', [datetime.now(timezone.utc)]),
+                ('obs_mag', [0.0]),
+                ('obs_mag_filter', ['dummy'])]))[:0]
             self.df_cache.index.name = 'row_index'
             csv_fullpath = self._write_cache_to_csv()  # empty cache to csv
             print('LocalObsCache: wrote new, empty cache file to ' + csv_fullpath)
@@ -339,7 +340,7 @@ class LocalObsCache:
         else:
             #  This else-block is kludge for pandas' mis-handling of append to empty DataFrame.
             if len(self.df_cache) >= 1:
-                self.df_cache = self.df_cache.append(latest_obs_df)
+                self.df_cache = self.df_cache.append(latest_obs_df, sort=True)
             else:
                 self.df_cache = latest_obs_df.copy()
         if write_csv:
@@ -372,26 +373,26 @@ class LocalObsCache:
         if latest_obs is None:
             #  If no qualified observation found within webobs query,
             #  construct placeholder row in df_cache, to prevent repeating query needlessly.
-            latest_obs_df = pd.DataFrame.from_items([
+            latest_obs_df = pd.DataFrame.from_dict(OrderedDict([
                 ('fov_name', fov.fov_name),
                 ('main_target', fov.main_target),
                 ('obs_style', fov.observing_style),
                 ('cache_datetime', [datetime.now(timezone.utc)]),
                 ('obs_datetime', [None]),
                 ('obs_mag', [None]),
-                ('obs_mag_filter', [None])])
+                ('obs_mag_filter', [None])]))
             for column_name in ['cache_datetime']:
                 latest_obs_df[column_name] = [x.to_pydatetime()
                                               for x in latest_obs_df[column_name]]
         else:
-            latest_obs_df = pd.DataFrame.from_items([
+            latest_obs_df = pd.DataFrame.from_dict(OrderedDict([
                 ('fov_name', fov.fov_name),
                 ('main_target', fov.main_target),
                 ('obs_style', fov.observing_style),
                 ('cache_datetime', [datetime.now(timezone.utc)]),
                 ('obs_datetime', [datetime_utc_from_jd(latest_obs.jd)]),
                 ('obs_mag', [latest_obs.mag]),
-                ('obs_mag_filter', [latest_obs.loc['filter']])])
+                ('obs_mag_filter', [latest_obs.loc['filter']])]))
             for column_name in ['cache_datetime', 'obs_datetime']:
                 latest_obs_df[column_name] = [x.to_pydatetime()
                                               for x in latest_obs_df[column_name]]
@@ -442,14 +443,14 @@ class LocalObsCache:
 
                             if need_to_replace:
                                 latest_stare_obs = table_this_filter.iloc[first_test_irow]
-                                latest_stare_obs_df = pd.DataFrame.from_items([
+                                latest_stare_obs_df = pd.DataFrame.from_dict(OrderedDict([
                                     ('fov_name', fov.fov_name),
                                     ('main_target', fov.main_target),
                                     ('obs_style', fov.observing_style),
                                     ('cache_datetime', [datetime.now(timezone.utc)]),
                                     ('obs_datetime', [datetime_utc_from_jd(latest_stare_obs.jd)]),
                                     ('obs_mag', [latest_stare_obs.mag]),
-                                    ('obs_mag_filter', [latest_stare_obs.loc['filter']])])
+                                    ('obs_mag_filter', [latest_stare_obs.loc['filter']])]))
                                 for column_name in ['cache_datetime', 'obs_datetime']:
                                     latest_stare_obs_df[column_name] = \
                                         [x.to_pydatetime()
@@ -460,14 +461,14 @@ class LocalObsCache:
         if latest_stare_obs_df is None:
             #  If no qualified stare observation found within webobs query,
             #  construct placeholder row in df_cache, to prevent repeating query needlessly.
-            latest_stare_obs_df = pd.DataFrame.from_items([
+            latest_stare_obs_df = pd.DataFrame.from_dict(OrderedDict([
                 ('fov_name', fov.fov_name),
                 ('main_target', fov.main_target),
                 ('obs_style', fov.observing_style),
                 ('cache_datetime', [datetime.now(timezone.utc)]),
                 ('obs_datetime', [None]),
                 ('obs_mag', [None]),
-                ('obs_mag_filter', [None])])
+                ('obs_mag_filter', [None])]))
             for column_name in ['cache_datetime']:
                 latest_stare_obs_df[column_name] = [x.to_pydatetime()
                                                     for x in latest_stare_obs_df[column_name]]
@@ -579,36 +580,6 @@ class LocalObsCache:
 
     def __repr__(self):
         return 'planning.LocalObsCache()'
-
-
-# def go(fov_name):
-#     from photrix.user import Astronight
-#     an = Astronight('20170127', 'DSW')
-#     loc = LocalObsCache()
-#     return loc.calc_an_priority(fov_name=fov_name, an=an)
-
-
-# def stares():
-#     an = Astronight('20170211', 'DSW')
-#     loc = LocalObsCache()
-#     stare_fov_names = [fov.fov_name for fov in loc.fov_dict.values()
-#                        if fov.observing_style.lower() == 'stare']
-#     stare_fov_names.sort(key=str.lower)  # in place; sort is mostly for debugging reproducibility.
-#     fov_name_list = []
-#     priority_list = []
-#     bar_list = []
-#     for fov_name in stare_fov_names:
-#         fov_name_list.append(fov_name)
-#         an_priority = loc.calc_an_priority(fov_name=fov_name, an=an)
-#         int_an_priority = int(round(an_priority))
-#         priority_list.append(int_an_priority)
-#         bar_list.append(int_an_priority * '#')
-#     df_stares = pd.DataFrame.from_items([('fov', fov_name_list),
-#                                          ('an_priority', priority_list),
-#                                          ('bars', bar_list)])
-#     df_stares = df_stares.sort_values(by='fov')
-#     # print(df_stares)
-#     return df_stares
 
 
 class AavsoWebobs:
@@ -782,9 +753,9 @@ def make_an_roster(an_date_string, output_directory, site_name='DSW', instrument
         do_maxima = event_type_string.lower().startswith("max")
 
         #  Start with an *empty* dataframe of events, with correct dtypes:
-        df_events = pd.DataFrame.from_items([('event_type', 'dummy_type'),
-                                             ('utc', [datetime.now(timezone.utc)])
-                                             ])[:0]
+        df_events = pd.DataFrame.from_dict(OrderedDict(
+            [('event_type', 'dummy_type'),
+             ('utc', [datetime.now(timezone.utc)])]))[:0]
         if do_minima:
             list_primary_mins = event_utcs_in_timespan(this_fov.JD_faint, this_fov.period, row_ts)
             if list_primary_mins is None:
@@ -792,9 +763,9 @@ def make_an_roster(an_date_string, output_directory, site_name='DSW', instrument
             else:
                 primaries_exist = len(list_primary_mins) >= 1
             if primaries_exist:
-                df_primary_mins = pd.DataFrame.from_items([('utc', list_primary_mins,)])
+                df_primary_mins = pd.DataFrame.from_dict(dict([('utc', list_primary_mins,)]))
                 df_primary_mins['event_type'] = "1'"
-                df_events = df_events.append(df_primary_mins)
+                df_events = df_events.append(df_primary_mins, sort=True)
 
             list_secondary_mins = event_utcs_in_timespan(this_fov.JD_second, this_fov.period,
                                                          row_ts)
@@ -803,9 +774,9 @@ def make_an_roster(an_date_string, output_directory, site_name='DSW', instrument
             else:
                 secondaries_exist = len(list_secondary_mins) >= 1
             if secondaries_exist:
-                df_secondary_mins = pd.DataFrame.from_items([('utc', list_secondary_mins,)])
+                df_secondary_mins = pd.DataFrame.from_dict(dict([('utc', list_secondary_mins,)]))
                 df_secondary_mins['event_type'] = "2'"
-                df_events = df_events.append(df_secondary_mins)
+                df_events = df_events.append(df_secondary_mins, sort=True)
 
         if do_maxima:
             list_maxima = event_utcs_in_timespan(this_fov.JD_bright, this_fov.period, row_ts)
@@ -814,9 +785,9 @@ def make_an_roster(an_date_string, output_directory, site_name='DSW', instrument
             else:
                 maxima_exist = len(list_maxima) >= 1
             if maxima_exist:
-                df_maxima = pd.DataFrame.from_items([('utc', list_maxima,)])
+                df_maxima = pd.DataFrame.from_dict(dict([('utc', list_maxima,)]))
                 df_maxima['event_type'] = "max"
-                df_events = df_events.append(df_maxima)
+                df_events = df_events.append(df_maxima, sort=True)
 
         if len(df_events) >= 1:
             motive = this_fov.motive
