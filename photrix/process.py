@@ -1,14 +1,17 @@
+# Python system imports:
 import os
 from math import floor, sqrt, log10, log
 from datetime import datetime, timezone
 import shutil
 
+# External library imports:
 import numpy as np
 import pandas as pd
 from scipy.interpolate import UnivariateSpline
 import statsmodels.formula.api as smf
 import matplotlib.pyplot as plt
 
+# Internal (photrix) imports:
 from .image import FITS, Image, R_DISC, Aperture
 from .user import Instrument, Site
 from .util import MixedModelFit, weighted_mean, jd_from_datetime_utc, RaDec
@@ -123,7 +126,7 @@ def start(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
     print('    3. Run assess().')
 
 
-def assess(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
+def assess(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None, auto_delete_src_files=True):
     """
     Rigorously assess FITS files and directory structure for readiness to construct df_master.
     Collect and print all warnings and summary stats. Makes no changes to data.
@@ -131,6 +134,7 @@ def assess(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
     Typical usage: pr.assess(an_rel_directory='20180811')
     :param an_top_directory: [string]
     :param an_rel_directory: [string]
+    :param auto_delete_src_files: True iff automatically delete .src (plate-solution) files [boolean]
     :return: [None]
     """
     # TODO: Add checks for guide exposure time. (?)
@@ -148,12 +152,17 @@ def assess(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
     # Offer to delete any .src source files found (by-product of TheSkyX plate solutions).
     src_files = df.loc[df['Extensions'] == '.src', 'Filename']
     if len(src_files) >= 1:
-        answer = input(' ..... ' + str(len(src_files)) +
-                       ' .src files found. Delete them? (y/n, recommend y):')
+        if auto_delete_src_files is False:
+            answer = input(' ..... ' + str(len(src_files)) +
+                           ' .src files found. Delete them? (y/n, recommend y):')
+        else:
+            answer = 'yes'
         if answer.strip().lower()[0] == 'y':
             for filename in src_files:
                 fullpath = os.path.join(an_top_directory, an_rel_directory, "Calibrated", filename)
                 os.remove(fullpath)
+            if auto_delete_src_files is True:
+                print(str(len(src_files)), '.src files deleted.')
         df = df.loc[~(df['Extensions'] == '.src'), :]  # remove df rows for files just deleted.
 
     # Directories: should be none; report and remove them from df:
@@ -511,7 +520,7 @@ def make_df_master(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None,
         df_master_list.append(df_fov)
 
     # Make df_master by concatenating all fov dataframes:
-    df_master = pd.DataFrame(pd.concat(df_master_list, ignore_index=True))
+    df_master = pd.DataFrame(pd.concat(df_master_list, ignore_index=True, sort=True))
     df_master.sort_values(['JD_mid', 'StarType', 'Number'], inplace=True)
     df_master.drop(['Number', 'Object'], axis=1, inplace=True)
     df_master.insert(0, 'Serial', range(1, 1 + len(df_master)))  # inserts in place
@@ -1762,13 +1771,17 @@ class PredictionSet:
             df_new['Mag'] = df_combine['Mag'].mean()
             n_combine = len(df_combine)
             # Instrument Mag sigmas are independent.
+            # inst_mag_sigma = sqrt(df_combine['InstMagSigma'].
+            #                       clip_lower(0.001).pow(2).mean()) / sqrt(n_combine)
             inst_mag_sigma = sqrt(df_combine['InstMagSigma'].
-                                  clip_lower(0.001).pow(2).mean()) / sqrt(n_combine)
+                                  clip(lower=0.001).pow(2).mean()) / sqrt(n_combine)
             # Model sigma is uniform, but not independent and so not decreased by multiple images.
             model_sigma = df_combine['ModelSigma'].iloc[0]  # uniform across images to combine.
             # Cirrus_sigma ~ independent if no extreme outlier comp stars (which would correlate).
+            # cirrus_sigma = sqrt(df_combine['CirrusSigma'].
+            #                     clip_lower(0.001).pow(2).mean()) / sqrt(n_combine)
             cirrus_sigma = sqrt(df_combine['CirrusSigma'].
-                                clip_lower(0.001).pow(2).mean()) / sqrt(n_combine)
+                                clip(lower=0.001).pow(2).mean()) / sqrt(n_combine)
             df_new['InstMagSigma'] = inst_mag_sigma
             df_new['ModelSigma'] = model_sigma
             df_new['CirrusSigma'] = cirrus_sigma

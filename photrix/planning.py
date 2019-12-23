@@ -1,13 +1,16 @@
+# Python system imports:
 import os
 import os.path
 from collections import OrderedDict
 from datetime import datetime, timezone, timedelta
 from math import floor, sqrt, ceil
 
+# External library imports:
 import ephem
 import numpy as np
 import pandas as pd
 
+# Internal (photrix) imports:
 from .fov import make_fov_dict, FovError, Fov
 from .user import Astronight, Instrument, MOON_PHASE_NO_FACTOR
 from .util import RaDec, datetime_utc_from_jd, hhmm_from_datetime_utc, \

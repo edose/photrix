@@ -15,8 +15,10 @@ MAX_CONSECUTIVE_TIMEOUTS = 60
 SECONDS_BETWEEN_QUERIES = 60
 QUERIES_REQUIRED = 1
 TAG_TO_TEST = 'beta roof status'
-PATTERN_HAS_OPENED = 1 * ['closed'] + QUERIES_REQUIRED * ['open']
-PATTERN_HAS_CLOSED = 1 * ['open'] + QUERIES_REQUIRED * ['closed']
+CLOSED_TAGS = ['closing', 'closed']
+OPENED_TAGS = ['opening', 'open']
+# PATTERN_HAS_OPENED = 1 * ['closed'] + QUERIES_REQUIRED * ['open']
+# PATTERN_HAS_CLOSED = 1 * ['open'] + QUERIES_REQUIRED * ['closed']
 SOUND_HAS_OPENED = 'SystemAsterisk'
 SOUND_HAS_CLOSED = 'SystemHand'
 SOUND_REPETITIONS = 100
@@ -30,7 +32,7 @@ def trial():
     winsound.PlaySound(SOUND_HAS_CLOSED, winsound.SND_ALIAS)
     winsound.PlaySound(SOUND_HAS_CLOSED, winsound.SND_ALIAS)
 
-    status_list = (QUERIES_REQUIRED + 1) * ['']
+    status_list = (QUERIES_REQUIRED + 1) * ['-']
     n_timeouts = 0
     while True:
         r = None  # keep IDE happy
@@ -53,7 +55,7 @@ def trial():
         n_timeouts = 0
         soup = BeautifulSoup(r.text, 'html.parser')
         trs = soup.find_all('tr')
-        roof_status = ''
+        roof_status = '-'
         for tr in trs:
             tds = tr.find_all('td')
             if tds[0].text.lower() == TAG_TO_TEST:
@@ -61,24 +63,32 @@ def trial():
                 break
         status_list.append(roof_status)  # so that earliest status is first list item (time reads L->R).
         status_list = status_list[1:]
-        # print(status_list)
         hhmm = hhmm_from_datetime_utc(datetime.now(timezone.utc))
+        # print(hhmm + ': is', status_list[-1], ' >>> ', '.'.join(status_list))
         print(hhmm + ': is', status_list[-1])
-        if status_list == PATTERN_HAS_OPENED:
+        if has_opened(status_list):
             print(' >>>>> OPENED at', hhmm)
             for i in range(SOUND_REPETITIONS):
                 winsound.PlaySound(SOUND_HAS_OPENED, winsound.SND_ALIAS)
             return
-        elif status_list == PATTERN_HAS_CLOSED:
+        elif has_closed(status_list):
             print(' >>>>> CLOSED at', hhmm)
             for i in range(SOUND_REPETITIONS):
                 winsound.PlaySound(SOUND_HAS_CLOSED, winsound.SND_ALIAS)
             return
         else:
-            if any([status == '' for status in status_list]):
+            if any([status == '-' for status in status_list]):
                 sleep(5)  # only for starting up.
             else:
                 sleep(SECONDS_BETWEEN_QUERIES)
+
+
+def has_opened(status_list):
+    return (status_list[0] in CLOSED_TAGS) and (status_list[1] in OPENED_TAGS)
+
+
+def has_closed(status_list):
+    return (status_list[0] in OPENED_TAGS) and (status_list[1] in CLOSED_TAGS)
 
 
 if __name__ == '__main__':
