@@ -498,10 +498,10 @@ def fov_diag(fov_directory=FOV_DIRECTORY):
             if not color_min <= fov.color_VI_faint <= color_max:
                 error_dict[name].append("color_VI_faint '" + '{0:.3f}'.format(fov.color_VI_faint) +
                                         "' seems unreasonable.")
-            if f.color_VI_second is not None:
+            if fov.color_VI_second is not None:
                 if not color_min <= fov.color_VI_second <= color_max:
                     error_dict[name].append("color_VI_second '" +
-                                            '{0:.3f}'.format(f.color_VI_second) +
+                                            '{0:.3f}'.format(fov.color_VI_second) +
                                             "' seems unreasonable.")
 
     # Ensure main target is in star list, as a target (skip standard FOVs):
@@ -519,7 +519,7 @@ def fov_diag(fov_directory=FOV_DIRECTORY):
                                         "' in star list more than once.")
             if len(main_target_star_type) == 1:
                 if main_target_star_type[0] != "target":
-                    error_dict[name].append("main_target '" + f.main_target +
+                    error_dict[name].append("main_target '" + fov.main_target +
                                             "' is in star list once but not as type 'target'.")
 
     # Ensure Observing styles are valid:

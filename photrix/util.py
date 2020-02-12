@@ -490,7 +490,7 @@ class MixedModelFit:
 
         # Random-effect dataframe, index=GroupName, cols=GroupName, GroupValue:
         df = pd.DataFrame(fit.random_effects).transpose()  # DataFrame, 1 row/group
-        df = df.rename(columns={'groups': 'GroupValue'})
+        df = df.rename(columns={'groups': 'Group'})  # was 'GroupValue'
         df['GroupName'] = df.index
         self.df_random_effects = df.copy()
 
@@ -516,11 +516,11 @@ class MixedModelFit:
         # If requested, add RE contibs (that were not included in MixedModels object 'fit'):
         if include_random_effect:
             df_random_effect_inputs = pd.DataFrame(df_predict_input[self.group_var])
-            df_random_effect_values = self.df_random_effects[['GroupValue']]
+            df_random_effect_values = self.df_random_effects[['Group']]  # was ['GroupValue']
             predicted_on_random_only = pd.merge(df_random_effect_inputs, df_random_effect_values,
                                                 left_on=self.group_var,
                                                 right_index=True, how='left',
-                                                sort=False)['GroupValue']  # Series (left-join)
+                                                sort=False)['Group']  # was 'GroupValue'
             total_prediction = predicted_on_fixed_only + predicted_on_random_only
         else:
             total_prediction = predicted_on_fixed_only

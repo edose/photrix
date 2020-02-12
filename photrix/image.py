@@ -12,7 +12,7 @@ from photrix.util import RaDec, ra_as_degrees, dec_as_degrees
 
 __author__ = "Eric Dose :: New Mexico Mira Project, Albuquerque"
 
-TOP_DIRECTORY = 'J:/Astro/Images/Borea Photrix'
+TOP_DIRECTORY = 'C:/Astro/Images/Borea Photrix'
 FITS_REGEX_PATTERN = '^(.+)\.(f[A-Za-z]{2,3})$'
 FITS_EXTENSIONS = ['fts', 'fit', 'fits']  # allowed filename extensions
 ISO_8601_FORMAT = '%Y-%m-%dT%H:%M:%S'
@@ -238,7 +238,7 @@ class Aperture:
         this_net_flux = np.sum(disc_values) - estimated_background
         if this_net_flux > 0:
             self.net_flux = this_net_flux
-            gain = 1.57  # this probably should come from Instrument object.
+            gain = 1.57  # TODO: this should come from Instrument object.
             annulus_values = np.ravel(self.subimage[self.annulus_mask > 0])
             self.annulus_flux_sigma = np.std(annulus_values)
             # net_flux_sigma equation after APT paper, PASP 124, 737 (2012), but pi/2 in 3rd term

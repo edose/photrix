@@ -41,8 +41,8 @@ MIN_AVAILABLE_SECONDS_STARE = 5400
 MIN_MOON_DEGREES_DEFAULT = 45
 MIN_MOON_DEGREES_STARE = 60
 STARE_AN_PRIORITY_DIVIDER = 7.5  # >= this goes into the normal Roster list; < goes to low-pri list.
-FITS_DIRECTORY = "J:/Astro/Images"
-DEFAULT_PLAN_DIRECTORY = 'C:/Astro/Plans'
+FITS_DIRECTORY = "C:/Astro/Images"
+# DEFAULT_PLAN_DIRECTORY = 'C:/Astro/Plans'
 DT_FMT = '%Y-%m-%d %H:%M:%S.%f%z'  # kludge around py inconsistency in python's datetime formats
 
 PHOTRIX_ROOT_DIRECTORY = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -606,7 +606,7 @@ class AavsoWebobs:
 def get_local_aavso_reports(report_dir=None, earliest_an=None):
     pass
     #     report_dict = {}
-    #     for root, dirs, files in os.walk('J:/Astro/Images/Borea Photrix/'):
+    #     for root, dirs, files in os.walk('C:/Astro/Images/Borea Photrix/'):
     #         if root.endswith("Photometry"):
     #             report = [file for file in files if file.startswith("AAVSO")]
     #             if len(report) >= 1:
@@ -626,7 +626,7 @@ def get_local_aavso_reports(report_dir=None, earliest_an=None):
 #         # TODO: finish writing get_local_obs_age_dict()
 #         """
 #         report_dir: directory in which all relevant AAVSO reports reside, as
-#           "J:/Astro/2016/Photometry".
+#           "C:/Astro/2016/Photometry".
 #         target_an: target astronight from which to count days, as "20151216".
 #         limit_days: days into the past to look up old AAVSO reports.
 #         Returns dict of (fov_name, days_since_last_local_obs).

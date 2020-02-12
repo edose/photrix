@@ -1,0 +1,16 @@
+{
+  "name": "DSW",
+  "description": "Dark Sky New Mexico, west of Animas, New Mexico",
+  "longitude": "-108:53:54",
+  "latitude": "+31:56:48",
+  "elevation": 1347,
+  "min_altitude": 29,
+  "twilight_sun_alt": -9,
+  "extinctions_set": "estimate rel to DSW",
+  "extinction": {
+    "Clear": 0.14,
+    "V": 0.15,
+    "R": 0.110,
+    "I": 0.075
+  }
+}
