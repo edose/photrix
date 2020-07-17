@@ -362,6 +362,7 @@ def make_df_master(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None,
               '    ' + df_ask_user.loc[ind, 'FOV_file_exists_text'].ljust(6),
               df_ask_user.loc[ind, 'CheckStar'])
 
+    # TODO: Also verify that all charts exist, stop if not.
     all_fovs_exist = all(df_ask_user['FOV_exists'])
     if not all_fovs_exist:
         print(' >>>>> STOPPING: at least one FOV file is missing.')
@@ -942,6 +943,7 @@ class SkyModel:
         make_labels(ax, 'Image Cirrus Plot', xlabel_jd, 'mMag')
         ax.scatter(x=self.df_image['JD_mid']-jd_floor, y=self.df_image['Value'] * 1000.0,
                    alpha=0.6, color=image_point_colors)
+        ax.invert_yaxis()  # per custom of plotting magnitudes brighter=upward
 
         # Sky background vs JD_mid:
         ax = axes[0, 1]
@@ -2387,6 +2389,7 @@ def _write_report_map_stub(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=N
              ';',
              ';----- Add your directive lines:',
              ';']
+    lines.extend(20 * ['#COMBINE  '])
     lines = [line + '\n' for line in lines]
     fullpath = os.path.join(an_top_directory, an_rel_directory, 'Photometry', 'report_map.txt')
     if not os.path.exists(fullpath):
@@ -2560,6 +2563,7 @@ def _write_aavso_report_map_stub(an_top_directory, an_rel_directory):
              ";#COMBINE  80,128 ; to combine (average) these 2 Serial numbers within AAVSO report.",
              ";----- Add your directive lines:",
              ";"]
+    lines.extend(24 * ['#COMBINE  '])
     lines = [line + '\n' for line in lines]
     fullpath = os.path.join(an_top_directory, an_rel_directory, 'Photometry',
                             'report_map.txt')

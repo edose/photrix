@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 from scipy.stats import trim_mean
 import astropy.io.fits
+from dateutil.parser import parse
 
 from photrix.util import RaDec, ra_as_degrees, dec_as_degrees
 
@@ -16,6 +17,7 @@ TOP_DIRECTORY = 'C:/Astro/Images/Borea Photrix'
 FITS_REGEX_PATTERN = '^(.+)\.(f[A-Za-z]{2,3})$'
 FITS_EXTENSIONS = ['fts', 'fit', 'fits']  # allowed filename extensions
 ISO_8601_FORMAT = '%Y-%m-%dT%H:%M:%S'
+# ISO_8601_FORMAT = '%Y-%m-%dT%H:%M:%S.%f'
 FWHM_PER_SIGMA = 2.0 * sqrt(2.0 * log(2))
 SUBIMAGE_MARGIN = 1.5  # subimage pixels around outer annulus, for safety
 
@@ -504,7 +506,8 @@ class FITS:
 
     def _get_utc_start(self):
         utc_string = self.header_value('DATE-OBS')
-        utc_dt = datetime.strptime(utc_string, ISO_8601_FORMAT).replace(tzinfo=timezone.utc)
+        # dateutil.parse.parse handles MaxIm 6.21 inconsistent format; datetime.strptime() can fail.
+        utc_dt = parse(utc_string).replace(tzinfo=timezone.utc)
         return utc_dt
 
     def _get_plate_solution(self):

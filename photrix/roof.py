@@ -22,7 +22,7 @@ OPENED_TAGS = ['opening', 'open']
 # PATTERN_HAS_CLOSED = 1 * ['open'] + QUERIES_REQUIRED * ['closed']
 SOUND_HAS_OPENED = 'SystemAsterisk'  # = Win 10 Asterisk; use Sonata/Windows Error.wav
 SOUND_HAS_CLOSED = 'SystemHand'      # = Win 10 Critical Stop; use Sonata/Windows Critical Stop.wav
-SOUND_REPETITIONS = 100
+SOUND_REPETITIONS = 50
 
 
 def trial():
@@ -35,6 +35,7 @@ def trial():
 
     status_list = (QUERIES_REQUIRED + 1) * ['-']
     n_timeouts = 0
+    last_event_string = ''
     while True:
         r = None  # (initialize to keep IDE happy)
         try:
@@ -66,14 +67,16 @@ def trial():
         status_list = status_list[1:]
         hhmm = hhmm_from_datetime_utc(datetime.now(timezone.utc))
         # print(hhmm + ': is', status_list[-1], ' >>> ', '.'.join(status_list))
-        print(hhmm + ': is', status_list[-1])
+        print(hhmm + ': is', status_list[-1] + last_event_string)
         if has_opened(status_list):
-            print(' >>>>> OPENED at', hhmm)
+            print(32 * '*', '\n >>>>> OPENED at', hhmm)
+            last_event_string = ' (since ' + hhmm + ')'
             for i in range(SOUND_REPETITIONS):
                 winsound.PlaySound(SOUND_HAS_OPENED, winsound.SND_ALIAS)
             # return  # let's try leaving it running for further notifications (20200219).
         elif has_closed(status_list):
-            print(' >>>>> CLOSED at', hhmm)
+            print(32 * '*', '\n >>>>> CLOSED at', hhmm)
+            last_event_string = ' (since ' + hhmm + ')'
             for i in range(SOUND_REPETITIONS):
                 winsound.PlaySound(SOUND_HAS_CLOSED, winsound.SND_ALIAS)
             # return  # let's try leaving it running for further notifications (20200219).

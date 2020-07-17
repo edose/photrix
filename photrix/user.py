@@ -253,8 +253,8 @@ class Astronight:
         moon_transit_after = site_obs.next_transit(moon, start=self.local_middark_utc)
         seconds_before = abs((moon_transit_before.datetime().replace(tzinfo=timezone.utc) -
                               self.local_middark_utc).total_seconds())
-        seconds_after  = abs((moon_transit_after.datetime().replace(tzinfo=timezone.utc) -
-                              self.local_middark_utc).total_seconds())
+        seconds_after = abs((moon_transit_after.datetime().replace(tzinfo=timezone.utc) -
+                             self.local_middark_utc).total_seconds())
         # Store the moon transit closer to middark time.
         if seconds_before < seconds_after:
             self.moon_transit = moon_transit_before.datetime().replace(tzinfo=timezone.utc)
@@ -470,7 +470,8 @@ class Astronight:
         header_string += '; moon -- ' + moon_phase_string + ' ' + moon_radec_string + \
                          '   ' + dark_no_moon_string + '    ' + moon_transit_string + '\n'
         header_string += '; LST = UTC + ' + lst_vs_utc_string + 6 * ' '
-        header_string += '  UTC = LST + ' + utc_vs_lst_string + '     (both middark)'
+        header_string += '  UTC = LST + ' + utc_vs_lst_string + '     @ middark = ' + \
+                         self.local_middark_utc.strftime('%H%M') + ' UTC'
         return header_string
 
 

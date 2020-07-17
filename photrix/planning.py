@@ -58,11 +58,12 @@ AAVSO_WEBOBS_ROWS_TO_GET = 100
 MIN_ROWS_ONE_STARE = 10
 MAX_DAYS_ONE_STARE = 0.5
 DEFAULT_UPDATE_TOLERANCE_DAYS = 0.0416667  # 1 hour
+FORCE_AUTOGUIDE_TOKEN = 'AG+'
 
 # ********** ACP Timing:
 CHILL_DURATION = 360  # seconds
 PLAN_START_DURATION = 30  # seconds
-AUTOFOCUS_DURATION = 170  # seconds, includes slew & filter wheel changes
+AUTOFOCUS_DURATION = 180  # seconds, includes slew & filter wheel changes
 CHAIN_DURATION = 3  # seconds; a guess
 QUITAT_DURATION = 3  # seconds
 SHUTDOWN_DURATION = 480  # seconds; a guess
@@ -71,7 +72,7 @@ SHUTDOWN_DURATION = 480  # seconds; a guess
 NEW_TARGET_DURATION = 34.3  # seconds; slew + settle + ACP processing (no guider start etc)
 
 # ********** Camera & filter wheel (STXL-6303E) Timing:
-MAX_AGGREGATE_EXPOSURE_NO_GUIDING = 241  # seconds;
+MAX_AGGREGATE_EXPOSURE_NO_GUIDING = 119  # seconds;
 GUIDE_STAR_ACQUISITION = 14.2  # seconds (if needed)
 GUIDER_CHECK_DURATION = 4  # seconds (if needed)
 NEW_FILTER_DURATION = 5  # seconds; filter change and focuser change
@@ -680,6 +681,7 @@ def make_an_roster(an_date_string, output_directory, site_name='DSW', instrument
 
     an = Astronight(an_date_string=an_date_string, site_name=site_name)
     df_fov = make_df_fov(fov_directory=FOV_DIRECTORY, fov_names_selected=None)
+    print(str(len(df_fov)), 'FOVs read.')
     instrument = Instrument(instrument_name)
     an_year = int(an_date_string[0:4])
     an_month = int(an_date_string[4:6])
@@ -710,7 +712,8 @@ def make_an_roster(an_date_string, output_directory, site_name='DSW', instrument
         transit_hhmm = hhmm_from_datetime_utc(an.transit(RaDec(this_fov.ra, this_fov.dec)))
         _, _, _, target_overhead, repeat_duration = \
             make_fov_exposure_data(fov_name, an, fov_dict=None, instrument=instrument,
-                                   exp_time_factor=exp_time_factor)
+                                   exp_time_factor=exp_time_factor,
+                                   force_autoguide=False)  # assume autoguide only if exp-times warrant.
         minutes = (target_overhead + repeat_duration) / 60.0
         n_stars = len(this_fov.aavso_stars)
         this_fov_line = ',' + fov_name + ',' + fov_name + ', ' + available + ',' + \
@@ -741,7 +744,8 @@ def make_an_roster(an_date_string, output_directory, site_name='DSW', instrument
         transit_hhmm = hhmm_from_datetime_utc(an.transit(RaDec(this_fov.ra, this_fov.dec)))
         _, _, _, target_overhead, repeat_duration = \
             make_fov_exposure_data(fov_name, an, fov_dict=None, instrument=instrument,
-                                   exp_time_factor=exp_time_factor)
+                                   exp_time_factor=exp_time_factor,
+                                   force_autoguide=False)  # assume autoguide only if exp-times warrant.
         minutes = (target_overhead + repeat_duration) / 60.0
         an_priority = row.loc['an_priority']
         an_priority_bars = row.loc['an_priority_bars']
@@ -829,7 +833,8 @@ def make_an_roster(an_date_string, output_directory, site_name='DSW', instrument
             transit_hhmm = hhmm_from_datetime_utc(an.transit(RaDec(this_fov.ra, this_fov.dec)))
             _, _, _, target_overhead, repeat_duration = \
                 make_fov_exposure_data(fov_name, an, fov_dict=None, instrument=instrument,
-                                       exp_time_factor=exp_time_factor)
+                                       exp_time_factor=exp_time_factor,
+                                       force_autoguide=False)  # assume autoguide only if exp-times warrant.
             minutes = (target_overhead + repeat_duration) / 60.0
             an_priority_bars = df_fov_mon_lpv.loc[fov_index, 'an_priority_bars']
             motive = Fov(fov_name).motive
@@ -1147,14 +1152,17 @@ def parse_excel(excel_path, site_name='DSW'):
                     this_fov_name, ra_string, dec_string = tuple(value.rsplit(maxsplit=2))
                     this_plan.directives.append(Directive('burn', {'fov_name': this_fov_name.strip(),
                                                                    'ra': ra_string.strip(),
-                                                                   'dec': dec_string.strip()}))
+                                                                   'dec': dec_string.strip(),
+                                                                   'force_autoguide': True}))
                 elif cell_str_lower.startswith('stare'):
                     value = command[len('stare'):].strip()
                     repeats, this_fov_name = tuple(value.split(maxsplit=1))
                     this_plan.directives.append(Directive('stare', {'fov_name': this_fov_name.strip(),
-                                                                    'repeat_count': int(repeats)}))
+                                                                    'repeat_count': int(repeats),
+                                                                    'force_autoguide': True}))
                 elif cell_str_lower.startswith('image'):
                     value = command[len('image'):].strip()
+                    force_autoguide, value = get_and_remove_option(value, FORCE_AUTOGUIDE_TOKEN)
                     subvalue, ra_string, dec_string = tuple(value.rsplit(maxsplit=2))
                     filter_entries = []
                     target_name = "WARNING: NO TARGET NAME"
@@ -1176,18 +1184,45 @@ def parse_excel(excel_path, site_name='DSW'):
                         subvalue = subsubvalue
                     filter_entries.reverse()
                     if len(filter_entries) >= 1:
-                        this_plan.directives.append(Directive('image', {'target_name': target_name,
-                                                                        'filter_entries': filter_entries,
-                                                                        'ra': ra_string,
-                                                                        'dec': dec_string}))
+                        this_plan.directives.append(Directive('image',
+                                                              {'target_name': target_name,
+                                                               'filter_entries': filter_entries,
+                                                               'ra': ra_string,
+                                                               'dec': dec_string,
+                                                               'force_autoguide': force_autoguide}))
                 else:
                     # Anything else we treat as a fov_name:
-                    fov_name = cell_str_as_read.strip()
+                    value = command  # use the whole command string (before comment); no directive string.
+                    force_autoguide, value = get_and_remove_option(value, FORCE_AUTOGUIDE_TOKEN)
+                    fov_name = value.strip()
                     if len(fov_name) >= 2:
-                        this_plan.directives.append(Directive('fov', {'fov_name': fov_name}))
+                        this_plan.directives.append(Directive('fov', {'fov_name': fov_name,
+                                                                      'force_autoguide': force_autoguide}))
 
     plan_list.append(this_plan)  # Ensure we save the last plan.
     return plan_list, an
+
+
+def get_and_remove_option(string, option):
+    """ From a value string (e.g., 'IMAGE MP_191 AG+ Clear=200sec(1) 12:34:45 -06:34:21') and an
+    option string (e.g., 'AG+), determine whether option is in value, and return value string with
+    all instances of option token (space-bounded) removed, for further processing.
+    Used in parse_excel().
+    :param string: value string of directive. [string]
+    :param option: option string to locate. [string]
+    :return: (flag value, value string with option removed. [2-tuple of (boolean, string)]
+    """
+    p = ' ' + string + ' '
+    pu = p.upper()
+    pu_option = ' ' + option.upper() + ' '
+    flag = (pu.find(pu_option) >= 0)
+    while True:
+        i = pu.find(pu_option)
+        if i == -1:
+            break
+        pu = pu[:i + 1] + pu[i + len(pu_option):]
+        p = p[:i + 1] + p[i + len(pu_option):]
+    return flag, p.strip()
 
 
 def reorder_directives(plan_list):
@@ -1270,10 +1305,13 @@ def make_events(plan_list, instrument, fov_dict, an, exp_time_factor):
                 n_repeats = directive.spec['repeat_count']
                 fov_name = directive.spec['fov_name']
                 this_summary_text = 'Stare ' + str(n_repeats) + ' repeats at ' + fov_name
+                if directive.spec['force_autoguide'] is True:
+                    this_summary_text += ' AG+'
                 filters, counts, exp_times, target_overhead, repeat_duration = \
                     make_fov_exposure_data(fov_name, an, fov_dict, instrument,
                                            exp_time_factor=exp_time_factor,
-                                           skipfilter_list=skipfilter_list)
+                                           skipfilter_list=skipfilter_list,
+                                           force_autoguide=directive.spec['force_autoguide'])
                 event_duration = target_overhead + n_repeats * repeat_duration
                 duration_comment = str(round(repeat_duration / 60.0, 1)) + ' min/repeat --> ' + \
                                    str(round(event_duration / 60.0, 1)) + ' min (nominal)'
@@ -1288,6 +1326,8 @@ def make_events(plan_list, instrument, fov_dict, an, exp_time_factor):
                                   ' ; ' + duration_comment,
                                   ';----' + this_fov.acp_comments, fov_name + '\t' +
                                   ra_as_hours(this_fov.ra) + '\t' + dec_as_hex(this_fov.dec)]
+                if directive.spec['force_autoguide'] is True:
+                    this_acp_entry.insert(1, '#AUTOGUIDE  ;  Automatic for stare target')
                 duration_dict = {'target_overhead': target_overhead,
                                  'repeat_count': n_repeats,
                                  'counts': counts,
@@ -1301,10 +1341,13 @@ def make_events(plan_list, instrument, fov_dict, an, exp_time_factor):
             elif directive.type == 'fov':
                 fov_name = directive.spec['fov_name']
                 this_summary_text = fov_name
+                if directive.spec['force_autoguide'] is True:
+                    this_summary_text += ' AG+'
                 filters, counts, exp_times, target_overhead, repeat_duration = \
                     make_fov_exposure_data(fov_name, an, fov_dict, instrument,
                                            exp_time_factor=exp_time_factor,
-                                           skipfilter_list=skipfilter_list)
+                                           skipfilter_list=skipfilter_list,
+                                           force_autoguide=directive.spec['force_autoguide'])
                 event_duration = target_overhead + 1 * repeat_duration
                 duration_comment = ' --> ' + str(round(event_duration / 60.0, 1)) + ' min'
                 this_fov = fov_dict[fov_name]
@@ -1317,6 +1360,8 @@ def make_events(plan_list, instrument, fov_dict, an, exp_time_factor):
                                   ' ; ' + duration_comment,
                                   ';----' + this_fov.acp_comments, fov_name + '\t' +
                                   ra_as_hours(this_fov.ra) + '\t' + dec_as_hex(this_fov.dec)]
+                if directive.spec['force_autoguide'] is True:
+                    this_acp_entry.insert(1, '#AUTOGUIDE  ;  Forced')
                 duration_dict = {'target_overhead': target_overhead,
                                  'repeat_count': 1,
                                  'counts': counts,
@@ -1332,13 +1377,19 @@ def make_events(plan_list, instrument, fov_dict, an, exp_time_factor):
                 ra = directive.spec['ra']
                 dec = directive.spec['dec']
                 this_summary_text = 'BURN ' + future_fov_name + '  ' + ra + '  ' + dec
+                if directive.spec['force_autoguide'] is True:
+                    this_summary_text += ' AG+'
                 this_acp_entry = [';', '#DITHER 0 ;', '#FILTER V,I ;', '#BINNING 1,1 ;',
                                   '#COUNT 1,1 ;', '#INTERVAL ' +
                                   str(BURN_EXPOSURE) + ',' + str(BURN_EXPOSURE) +
                                   ' ;----> BURN for new FOV file.',
                                   future_fov_name + '\t' + ra + '\t' + dec + ' ;']
-                event_duration = sum(tabulate_target_durations(filters=['V', 'I'], counts=[1, 1],
-                                                               exp_times=[BURN_EXPOSURE, BURN_EXPOSURE]))
+                if directive.spec['force_autoguide'] is True:
+                    this_acp_entry.insert(1, '#AUTOGUIDE  ;  Automatic for burn target')
+                target_overhead, repeat_duration = tabulate_target_durations(
+                    filters=['V', 'I'], counts=[1, 1],
+                    exp_times=[BURN_EXPOSURE, BURN_EXPOSURE], force_autoguide=True)
+                event_duration = target_overhead + 1 * repeat_duration
                 duration_dict = {'target_overhead': event_duration - 2 * BURN_EXPOSURE,
                                  'repeat_count': 1,
                                  'counts': [1, 1],
@@ -1355,12 +1406,15 @@ def make_events(plan_list, instrument, fov_dict, an, exp_time_factor):
                 ra = directive.spec['ra']
                 dec = directive.spec['dec']
                 filters, counts, exp_times, target_overhead, repeat_duration = \
-                    make_image_exposure_data(filter_entries, instrument, exp_time_factor=exp_time_factor)
+                    make_image_exposure_data(filter_entries, instrument, exp_time_factor=exp_time_factor,
+                                             force_autoguide=directive.spec['force_autoguide'])
                 event_duration = target_overhead + 1 * repeat_duration
                 this_summary_text = 'Image ' + target_name + '  ' + ra + '  ' + dec +\
                                     '  ' + ''.join([f + '=' + '{0:g}'.format(e) + 's(' +
                                                     str(c) + ') '
                                                     for (f, e, c) in zip(filters, exp_times, counts)])
+                if directive.spec['force_autoguide'] is True:
+                    this_summary_text += ' AG+'
                 duration_comment = ' --> ' + str(round(event_duration / 60.0, 1)) + ' min'
                 this_acp_entry = [';', '#DITHER 0 ;',
                                   '#FILTER ' + ','.join(filters) + ' ;',
@@ -1371,6 +1425,8 @@ def make_events(plan_list, instrument, fov_dict, an, exp_time_factor):
                                   ' ; ' + duration_comment,
                                   ';---- from IMAGE directive -----',
                                   target_name + '\t' + ra + '\t' + dec]
+                if directive.spec['force_autoguide'] is True:
+                    this_acp_entry.insert(1, '#AUTOGUIDE  ;  Forced')
                 duration_dict = {'target_overhead': target_overhead,
                                  'repeat_count': 1,
                                  'counts': counts,
@@ -1630,6 +1686,7 @@ def make_summary_file(plan_list, fov_dict, an, output_directory, exp_time_factor
                     '     min.alt = ' + '{:.1f}'.format(an.site.min_altitude) + u'\N{DEGREE SIGN}',
                     an.acp_header_string(), '\n']
     moon_is_a_factor = an.moon_phase > MOON_PHASE_NO_FACTOR  # for this astronight
+    radec_dict = dict()  # collector to find and warn against Image events of same target w/ diff RA,Dec.
 
     # Local function:
     def make_summary_line(status_text, hhmm_text, utc_day_indicator, min_altitude, summary_text):
@@ -1693,6 +1750,14 @@ def make_summary_file(plan_list, fov_dict, an, output_directory, exp_time_factor
                                   str(plan.afinterval_autofocus_count) + ' AFINTERVAL autofocuses done.'))
         plan.summary_post_lines.append('\n')
         for event in plan.events:
+            # Add warning line if time wasted by waiting to start this plan (prev plan ended early).
+            if event.type == 'waituntil':
+                if i_plan > 0:
+                    gap_minutes = (event.utc_end - plan.utc_start).total_seconds() / 60.0
+                    if gap_minutes > 1.0:
+                        plan.summary_pre_lines.append(
+                            '      >>>>>>>>>> WARNING: WAITUNTIL gap = ' +
+                            str(int(gap_minutes)) + ' minutes.')
             # Construct main summary text line for this event, write into its Event object:
             if event.type in ['waituntil', 'comment', 'skipfilter']:
                 hhmm_text, utc_day_indicator = '    ', ' '
@@ -1717,19 +1782,34 @@ def make_summary_file(plan_list, fov_dict, an, output_directory, exp_time_factor
                                                   event.min_altitude, event.summary_text)
             event.summary_lines = [summary_text_line]
 
-            # Add warning line if moon is too close to this object:
+            # Add warning line if Image event whose RA,Dec differs from previous Image event of same target.
+            if event.type == 'image':
+                previous_list = radec_dict.get(event.target_name, None)
+                this_dict_value = (event.ra, event.dec)
+                if previous_list is None:
+                    radec_dict[event.target_name] = [this_dict_value]  # start list & skip warning.
+                else:
+                    if any([v != this_dict_value for v in previous_list]):
+                        event.summary_lines.append(
+                            '      >>>>>>>>>> WARNING: ' +
+                            ' Previous Image entry for ' + event.target_name + ' has different RA, Dec.')
+                    radec_dict[event.target_name].append(this_dict_value)  # add value to list.
+
+            # Add warning line if moon is too close to this object and moon is up:
             if moon_is_a_factor:
                 if event.type in ['burn', 'image', 'fov', 'stare']:
                     moon_dist = an.moon_radec.degrees_from(RaDec(event.ra, event.dec))  # in degrees
                     if moon_dist < MIN_MOON_DEGREES_DEFAULT:
-                        event.summary_lines.append(
-                            make_summary_line(None, None, None, None,
-                                              '>>>>> WARNING: ' + event.target_name +
-                                              ' MOON DISTANCE = ' +
-                                              str(int(round(moon_dist))) +
-                                              u'\N{DEGREE SIGN}' + ', vs. max ' +
-                                              str(MIN_MOON_DEGREES_DEFAULT) +
-                                              u'\N{DEGREE SIGN}'))
+                        if event.utc_summary_display is not None:
+                            if not (an.ts_dark_no_moon.start <= event.utc_summary_display
+                                    <= an.ts_dark_no_moon.end):
+                                event.summary_lines.append(
+                                    '      >>>>>>>>>> WARNING: ' + event.target_name +
+                                    ' MOON DISTANCE = ' +
+                                    str(int(round(moon_dist))) +
+                                    u'\N{DEGREE SIGN}' + ', vs. max ' +
+                                    str(MIN_MOON_DEGREES_DEFAULT) +
+                                    u'\N{DEGREE SIGN}')
 
             # Add warning line if fov target is estimated too faint in V:
             if event.type == 'fov':
@@ -1740,44 +1820,38 @@ def make_summary_file(plan_list, fov_dict, an, output_directory, exp_time_factor
                     if v_mag is not None:
                         if v_mag >= V_MAG_WARNING:
                             event.summary_lines.append(
-                                make_summary_line(None, None, None, None,
-                                                  '>>>>> WARNING: above target estim. V Mag ~ ' +
-                                                  '{:.2f}'.format(v_mag) +
-                                                  ' very faint (>=' + '{0:g}'.format(V_MAG_WARNING) + ').'))
+                                '      >>>>>>>>>> WARNING: above target estim. V Mag ~ ' +
+                                '{:.2f}'.format(v_mag) +
+                                ' very faint (>=' + '{0:g}'.format(V_MAG_WARNING) + ').')
 
             # Add warning line if autofocus and more than one sets requested (causing too many autofocuses):
             if event.type == 'autofocus' and plan.sets_requested > 1:
                 event.summary_lines.append(
-                    make_summary_line(None, None, None, None,
-                                      '>>>>> WARNING: autofocus not recommended when sets > 1.'))
+                    '      >>>>>>>>>> WARNING: autofocus not recommended when sets > 1.')
 
         if plan.chain_destination is not None:
             # Add plan warning line if plan chains to itself:
             if plan.chain_destination.lower() == 'plan_' + plan.plan_id.lower() + '.txt':
                 plan.end_warning_lines.append(
-                    make_summary_line('ERROR', None, None, None,
-                                      '>>>>> ERROR: this plan attempts to chain to itself.'))
+                    '      >>>>>>>>>> ERROR: this plan attempts to chain to itself.')
             # Add plan warning line if chained-to plan does not exist:
             elif i_plan != len(plan_list) - 1:
                 if plan.chain_destination.lower() != \
                     ('plan_' + plan_list[i_plan + 1].plan_id + '.txt').lower():
                     plan.end_warning_lines.append(
-                        make_summary_line('ERROR', None, None, None,
-                                          '>>>>> ERROR: this plan attempts to chain,'
-                                          ' but not to next plan.'))
+                        '      >>>>>>>>>> ERROR: this plan attempts to chain,'
+                        ' but not to next plan.')
 
         # Add plan warning if no autofocus (or afinterval) given:
         if plan.afinterval is None and all([e.type != 'autofocus' for e in plan.events]):
             if any([e.type in ['burn', 'image', 'fov', 'stare'] for e in plan.events]):
                 plan.end_warning_lines.append(
-                    make_summary_line('WARNING', None, None, None,
-                                      '>>>>> WARNING: this plan has no autofocus or afinterval.'))
+                    '      >>>>>>>>>> WARNING: this plan has no autofocus or afinterval.')
         # Add plan warning if autofocus and afinterval) both in same plan:
         if plan.afinterval is not None and any([e.type == 'autofocus' for e in plan.events]):
             if any([e.type in ['burn', 'image', 'fov', 'stare'] for e in plan.events]):
                 plan.end_warning_lines.append(
-                    make_summary_line('WARNING', None, None, None,
-                                      '>>>>> WARNING: this plan has both autofocus and afinterval.'))
+                    '      >>>>>>>>>> WARNING: this plan has both autofocus and afinterval.')
 
     # Construct file contents by appending all required text lines:
     all_summary_lines = header_lines
@@ -1796,7 +1870,7 @@ def make_summary_file(plan_list, fov_dict, an, output_directory, exp_time_factor
 
 
 def make_fov_exposure_data(fov_name, an, fov_dict=None, instrument=None, exp_time_factor=1,
-                           skipfilter_list=[]):
+                           skipfilter_list=[], force_autoguide=None):
     """
     Calculates exposure data for ONE REPEAT of one given fov.
     :param fov_name: [string]
@@ -1813,8 +1887,11 @@ def make_fov_exposure_data(fov_name, an, fov_dict=None, instrument=None, exp_tim
     else:
         this_fov = Fov(fov_name)
     if not isinstance(instrument, Instrument):
-        print("*** ERROR: make_fov_exposure_data() parm 'instrument' must be " +
+        print(" >>>>> ERROR: make_fov_exposure_data() parm 'instrument' must be " +
               "a valid Instrument object")
+        return None
+    if force_autoguide is None:
+        print(" >>>>> ERROR in make_fov_exposure_data(): force_autoguide is None but must be boolean.")
         return None
     obs_style = this_fov.observing_style
     filters = []
@@ -1842,20 +1919,25 @@ def make_fov_exposure_data(fov_name, an, fov_dict=None, instrument=None, exp_tim
             exp_times.append(exp_time)
     if obs_style.lower() != 'stare':
         counts, exp_times = repeat_short_exp_times(counts, exp_times)
-    target_overhead, repeat_duration = tabulate_target_durations(filters, counts, exp_times)
+    target_overhead, repeat_duration = tabulate_target_durations(filters, counts, exp_times,
+                                                                 force_autoguide=force_autoguide)
     # return types (3 lists, two floats): [str], [int], [float], float, float
     return filters, counts, exp_times, target_overhead, repeat_duration
 
 
-def make_image_exposure_data(filter_entries, instrument, exp_time_factor=1):
+def make_image_exposure_data(filter_entries, instrument, exp_time_factor=1, force_autoguide=None):
     """
     Calculates exposure data for given user-defined target ("IMAGE" directive).
-    :param exp_time_factor: 
+    :param exp_time_factor: user-supplied multiplier of exp time from nominal, usually 0.5-1. [float]
     :param filter_entries: list of exposure-defining strings, as ['I=12','V=13(3)'], where I and V
         are filter names, 12 and 13 are target magnitudes, and (3) is an image count (=1 if absent).
-    :param instrument: the instrument for which these exposures are wanted [Instrument object].
+    :param instrument: the instrument for which these exposures are wanted. [Instrument object]
+    :param force_autoguide: True iff user wants to force autoguiding for this target. [boolean]
     :return: tuple of equal-length lists: (filters [str], counts [int], exp_times [float])
     """
+    if force_autoguide is None:
+        print(" >>>>> ERROR in make_image_exposure_data(): force_autoguide is None but must be boolean.")
+        return None
     filters = []
     counts = []
     exp_times = []
@@ -1867,7 +1949,12 @@ def make_image_exposure_data(filter_entries, instrument, exp_time_factor=1):
         if len(bits) == 1:  # case e.g. "V=13.2"
             this_count = 1
         elif len(bits) == 2:  # case e.g. "V=13.2(1)"
-            this_count = int(bits[1].replace(")", ""))
+            try:
+                this_count = int(bits[1].replace(")", ""))
+            except ValueError:
+                print(' >>>> PARSING ERROR:', entry)
+                exit(0)
+        # TODO: I'm not crazy about the next if-statement's condition.
         if 's' in bits[0].lower():
             this_exp_time = float(bits[0].lower().split('s')[0])
         else:
@@ -1878,14 +1965,15 @@ def make_image_exposure_data(filter_entries, instrument, exp_time_factor=1):
         counts.append(this_count)
         exp_times.append(this_exp_time)
     counts, exp_times = repeat_short_exp_times(counts, exp_times)
-    target_overhead, repeat_duration = tabulate_target_durations(filters, counts, exp_times)
+    target_overhead, repeat_duration = tabulate_target_durations(filters, counts, exp_times,
+                                                                 force_autoguide=force_autoguide)
     # return types (3 lists, two floats): [str], [int], [float], float, float
     return filters, counts, exp_times, target_overhead, repeat_duration
 
 
-def tabulate_target_durations(filters, counts, exp_times):
+def tabulate_target_durations(filters, counts, exp_times, force_autoguide):
     aggregate_exposure = sum([counts[i] * exp_times[i] for i in range(len(counts))])
-    guiding_is_active = aggregate_exposure > MAX_AGGREGATE_EXPOSURE_NO_GUIDING
+    guiding_is_active = force_autoguide or aggregate_exposure > MAX_AGGREGATE_EXPOSURE_NO_GUIDING
     # TODO: get some of the next base values from instrument object.
     target_overhead = NEW_TARGET_DURATION + (GUIDE_STAR_ACQUISITION if guiding_is_active else 0)
     repeat_duration = aggregate_exposure + \

@@ -8,9 +8,9 @@
   "twilight_sun_alt": -9,
   "extinctions_set": "from AN 20191118",
   "extinction": {
-    "Clear": 0.12,
-    "V": 0.139,
-    "R": 0.100,
-    "I": 0.065
+    "Clear": 0.14,
+    "V": 0.210,
+    "R": 0.163,
+    "I": 0.115
   }
 }
