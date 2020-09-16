@@ -73,8 +73,8 @@ NEW_TARGET_DURATION = 34.3  # seconds; slew + settle + ACP processing (no guider
 
 # ********** Camera & filter wheel (STXL-6303E) Timing:
 MAX_AGGREGATE_EXPOSURE_NO_GUIDING = 119  # seconds;
-GUIDE_STAR_ACQUISITION = 14.2  # seconds (if needed)
-GUIDER_CHECK_DURATION = 4  # seconds (if needed)
+GUIDE_STAR_ACQUISITION = 17.2  # seconds (if needed) (was 14.2)
+GUIDER_CHECK_DURATION = 7  # seconds (if needed)  (was 4)
 NEW_FILTER_DURATION = 5  # seconds; filter change and focuser change
 NEW_EXPOSURE_DURATION_EX_GUIDER_CHECK = 19.3  # seconds; image download, plate solving (excl exposure)
 
@@ -88,9 +88,9 @@ MIN_TOTAL_EXP_TIME_PER_FILTER = 9  # seconds, thus 4 [was 3] exposures max per f
 
 def make_df_fov(fov_directory=FOV_DIRECTORY, fov_names_selected=None):
     """
-    Returns new, basic fov data frame, by reading FOV files (all or selected) in given directory.
-    :param fov_directory: the directory from which to read FOV files.
-    :param fov_names_selected: default = all FOV files within given directory.
+    Returns new, basic fov data frame, by reading FOV files (all or selected) in given directory_path.
+    :param fov_directory: the directory_path from which to read FOV files.
+    :param fov_names_selected: default = all FOV files within given directory_path.
     :return: basic data frame with columns: fov_name, main_target, fov_priority, obs_style,
          ra, dec. Index == fov_name.
     """
@@ -626,7 +626,7 @@ def get_local_aavso_reports(report_dir=None, earliest_an=None):
 # def get_local_obs_age_dict(fov_dict=None, report_dir=None, target_an=None, limit_days=366):
 #         # TODO: finish writing get_local_obs_age_dict()
 #         """
-#         report_dir: directory in which all relevant AAVSO reports reside, as
+#         report_dir: directory_path in which all relevant AAVSO reports reside, as
 #           "C:/Astro/2016/Photometry".
 #         target_an: target astronight from which to count days, as "20151216".
 #         limit_days: days into the past to look up old AAVSO reports.
@@ -670,7 +670,7 @@ def make_an_roster(an_date_string, output_directory, site_name='DSW', instrument
        Typical usage: pl.make_an_roster("20170127", "C:/Astro/ACP/AN20170127/",
        user_update_tolerance_days=0.1, exp_time_factor=0.8)
     :param an_date_string: as '20170127'. Date of the evening to plan for [string]
-    :param output_directory: directory in which to write Roster csv file [string]
+    :param output_directory: directory_path in which to write Roster csv file [string]
     :param site_name: [string]
     :param instrument_name: [string]
     :param user_update_tolerance_days: esp for user to force update [float]
@@ -906,7 +906,7 @@ class Plan:
 class Directive:
     """ Holds all initial data for one user-given directive (e.g., one cell in Excel spreadsheet).
     :param type: type of directive, from approved list, e.g., 'CHILL' or 'fov'  [string, case-insens.]
-    :param spec: dictionary of specification data to hold, depends on directive type [directory].
+    :param spec: dictionary of specification data to hold, depends on directive type [directory_path].
     """
 
     def __init__(self, type, spec_dict):

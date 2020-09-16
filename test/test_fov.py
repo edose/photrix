@@ -22,7 +22,7 @@ def test_fov_stare_and_star_list():
     assert fov1.fov_name == fovname1
     assert fov1.format_version == CURRENT_SCHEMA_VERSION
     assert fov1.ra == 2*15 + 42*15/60
-    assert fov1.dec == 35 + 43/60 + 31/3600
+    assert fov1.dec == 35 + 43/60 + 31/3600 
     assert fov1.chart == "X15646NP"
     assert fov1.fov_date == "12/21/2015"
     assert fov1.main_target == "ST Tri"

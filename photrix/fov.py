@@ -432,14 +432,14 @@ def fov_diag(fov_directory=FOV_DIRECTORY):
     """
     Comprehensive diagnostics for FOV files.
     This code is for FOV format 1.4.
-    :param fov_directory: all .txt files in this directory will be checked [string]
+    :param fov_directory: all .txt files in this directory_path will be checked [string]
     :return: Number of errors found [integer]
     """
     # Collect all FOVs into a dictionary:
     fd = make_fov_dict(fov_directory=fov_directory)
     fov_names = list(fd.keys())
     fov_names.sort()
-    print(len(fov_names), ' FOV files found to test in directory \'', fov_directory, "\'.")
+    print(len(fov_names), ' FOV files found to test in directory_path \'', fov_directory, "\'.")
 
     # Make empty error dictionary:
     error_dict = []  # key=fov_name, value=list of error messages
@@ -617,11 +617,11 @@ def delete_directive(fov_directory=FOV_DIRECTORY, out_fov_directory=None,
     :return: [None]
     """
     if out_fov_directory is None or directive_to_remove is None:
-        print('\n\nPlease give a new FOV directory and a directive to remove.\n\n')
+        print('\n\nPlease give a new FOV directory_path and a directive to remove.\n\n')
         return
     names = all_fov_names(fov_directory)
     print(str(len(names)) + ' FOVs to adjust.')
-    os.makedirs(out_fov_directory, exist_ok=True)  # make output directory if doesn't exist.
+    os.makedirs(out_fov_directory, exist_ok=True)  # make output directory_path if doesn't exist.
     for name in names:
         in_fullpath = os.path.join(fov_directory, name + ".txt")
         with open(in_fullpath) as fov_file:
@@ -647,12 +647,12 @@ def move_directive(fov_directory=FOV_DIRECTORY, out_fov_directory=None,
     """
     if out_fov_directory is None or directive_to_move is None or \
             directive_before_new_position is None:
-        print('\n\nPlease give a new FOV directory. directive to move, and '
+        print('\n\nPlease give a new FOV directory_path. directive to move, and '
               'directive to insert after.\n\n')
         return
     names = all_fov_names(fov_directory)
     print(str(len(names)) + ' FOVs to adjust.')
-    os.makedirs(out_fov_directory, exist_ok=True)  # make output directory if doesn't exist.
+    os.makedirs(out_fov_directory, exist_ok=True)  # make output directory_path if doesn't exist.
     for name in names:
         in_fullpath = os.path.join(fov_directory, name + ".txt")
         with open(in_fullpath) as fov_file:
@@ -682,8 +682,8 @@ def change_directive_value(fov_directory=FOV_DIRECTORY, out_fov_directory=None,
                            directive_to_change=None, new_value=None, new_comment=None):
     """
     May be used to update FORMAT_VERSION, especially.
-    :param fov_directory: source directory [string]
-    :param out_fov_directory: output directory, may be same as source directory [string]
+    :param fov_directory: source directory_path [string]
+    :param out_fov_directory: output directory_path, may be same as source directory_path [string]
     :param directive_to_change: e.g., '#FORMAT_VERSION'
     :param new_value: e.g., '1.5' [string]
     :param new_comment:  [string, or None]
@@ -691,11 +691,11 @@ def change_directive_value(fov_directory=FOV_DIRECTORY, out_fov_directory=None,
     """
     if fov_directory is None or directive_to_change is None or \
             new_value is None:
-        print('\n\nPlease give a new FOV directory. directive to change, and '
+        print('\n\nPlease give a new FOV directory_path. directive to change, and '
               'new directive value.\n\n')
         return
     names = all_fov_names(fov_directory)
-    os.makedirs(out_fov_directory, exist_ok=True)  # make output directory if doesn't exist.
+    os.makedirs(out_fov_directory, exist_ok=True)  # make output directory_path if doesn't exist.
     for name in names:
         new_lines = []
         in_fullpath = os.path.join(fov_directory, name + ".txt")
@@ -734,7 +734,7 @@ def insert_chart_data(fov_name, fov_directory=FOV_DIRECTORY):
         failing that downloads it from AAVSO and saves it.
     Handles only filters U,B,V,R,I as of 7/1/2017.
     :param fov_name: one FOV name [string]
-    :param fov_directory: input and output directory (same) [string]
+    :param fov_directory: input and output directory_path (same) [string]
     :return: list of warning lines [list of strings]
     """
     # global mag_error_string
@@ -761,7 +761,7 @@ def insert_chart_data(fov_name, fov_directory=FOV_DIRECTORY):
         return warning_lines
 
     # Read JSON chart file, or download from VSP (JSON format) and cache it:
-    os.makedirs(CHART_DIRECTORY, exist_ok=True)  # create directory if doesn't already exist.
+    os.makedirs(CHART_DIRECTORY, exist_ok=True)  # create directory_path if doesn't already exist.
     chart_id = None
     for line in top_lines:
         if line.startswith("#CHART"):
@@ -781,7 +781,7 @@ def insert_chart_data(fov_name, fov_directory=FOV_DIRECTORY):
         print('Downloading chart \'' + chart_id + '\' for FOV \'' + fov_name + '\'')
         if chart_json_text == '':
             error_line = '>>>>> No chart \'' + chart_id +\
-                         '\' in AAVSO VSP (or chart directory. No change made to fov \'' + \
+                         '\' in AAVSO VSP (or chart directory_path. No change made to fov \'' + \
                          fov_name + '\'.'
             print(error_line)
             warning_lines.append(error_line)
@@ -1068,16 +1068,16 @@ def add_one_punch(fov_name, star_id, star_ra_dec, punch_ra_dec, user_must_confir
 def change_directive_value2(fov_directory=FOV_DIRECTORY, out_fov_directory=None):
     """
     Updates Mira FOVs' longest GAP_SCORE_DAYS.
-    :param fov_directory: source directory [string]
-    :param out_fov_directory: output directory, may be same as source directory [string]
+    :param fov_directory: source directory_path [string]
+    :param out_fov_directory: output directory_path, may be same as source directory_path [string]
     :return: [nothing]
     """
     NEW_LONGEST_GSD = 4  # probably was 5% of period
     if out_fov_directory is None:
-        print('\n\nPlease give a new output FOV directory.\n\n')
+        print('\n\nPlease give a new output FOV directory_path.\n\n')
         return
     names = all_fov_names(fov_directory)
-    os.makedirs(out_fov_directory, exist_ok=True)  # make output directory if doesn't exist.
+    os.makedirs(out_fov_directory, exist_ok=True)  # make output directory_path if doesn't exist.
     for name in names:
         fov = Fov(fov_name=name)
         if fov.target_type.lower() == 'mira':

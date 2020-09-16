@@ -61,7 +61,7 @@ START_PROCESSING_HERE___________ = ''
 
 def start(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
     """First step in photrix processing pipeline.
-    Always starts with raw directory exactly as downloaded from telescope PC.
+    Always starts with raw directory_path exactly as downloaded from telescope PC.
     Typical usage: pr.start(an_rel_directory='20180804')
     :param an_top_directory:
     :param an_rel_directory:
@@ -128,7 +128,7 @@ def start(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
 
 def assess(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None, auto_delete_src_files=True):
     """
-    Rigorously assess FITS files and directory structure for readiness to construct df_master.
+    Rigorously assess FITS files and directory_path structure for readiness to construct df_master.
     Collect and print all warnings and summary stats. Makes no changes to data.
     May be run as many times as needed, after start() and before make_df_master().
     Typical usage: pr.assess(an_rel_directory='20180811')
@@ -139,7 +139,7 @@ def assess(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None, auto_delete
     """
     # TODO: Add checks for guide exposure time. (?)
     # TODO: Add checks for binning=(1,1), when binning fields become available in FITS objects.
-    # Make DataFrame of all files (& dirs) in directory, add some per-file info, and sort:
+    # Make DataFrame of all files (& dirs) in directory_path, add some per-file info, and sort:
     filenames, isdir, extensions = [], [], []
     fits_path = os.path.join(an_top_directory, an_rel_directory, 'Calibrated')
     for entry in os.scandir(fits_path):
@@ -684,7 +684,7 @@ class SkyModel:
     # def to_json_file(self):
     #     """
     #     Writes (most of) the current object to a JSON file.
-    #        Does NOT include df_master (which is huge, but can be found in the same directory).
+    #        Does NOT include df_master (which is huge, but can be found in the same directory_path).
     #        Also does not include the statsmodels::MixedModelLm which cannot be serialized.
     #     :return: True if file successfully written, else False.
     #     """
@@ -1392,7 +1392,7 @@ class PredictionSet:
         print('\n'.join(lines))
 
     def stare_plot(self, star_id):
-        # TODO: add this_filter parm and facility, default this-filter=None for all filters.
+        # TODO: add this_filter parm and facility, default this-filter=None to mean "all filters".
 
         # Setup data:
         df = (self.df_transformed.copy())
@@ -1519,7 +1519,7 @@ class PredictionSet:
     def aavso_report(self, write_file=True, return_df=False):
         """
         Construct AAVSO report (Enhanced Format) from this PredictionSet object.
-        Writes this report as a text file in current (PredictionSet's) directory.
+        Writes this report as a text file in current (PredictionSet's) directory_path.
         :param write_file: True to write text file to current dir, False to not write.
         :param return_df: True to return a DataFrame of results, False to return None.
         :return: table of results if requested [DataFrame], else None.
@@ -1539,7 +1539,7 @@ class PredictionSet:
                   "#OBSTYPE=CCD",
                   "#This report of " + str(len(df_report)) + " observations was generated " +
                   '{:%Y-%m-%d %H:%M:%S UTC}'.format(datetime.now(timezone.utc)) +
-                  " from raw data in directory " + self.an_rel_directory + ".",
+                  " from raw data in directory_path " + self.an_rel_directory + ".",
                   "#Eric Dose, New Mexico Mira Project, ABQ, NM",
                   "#",
                   "#NAME,DATE,MAG,MERR,FILT,TRANS,MTYPE,CNAME,CMAG,KNAME,KMAG,AMASS," +
@@ -1812,7 +1812,7 @@ class TransformModel:
                  fit_extinction=True, fit_log_adu=True):
         """
         Constructs a transform on filter against ci filter description ci_type,
-            given a df_master.csv in the given directory.
+            given a df_master.csv in the given directory_path.
         :param an_top_directory: e.g., 'C:\Astro\Images\Borea Photrix' [string]
         :param an_rel_directory: e.g., '20170504'. The dir 'Photometry' is subdir of this. [string]
         :param filter: name of filter to which this model applies [string, e.g., 'V' or 'R']
@@ -2025,7 +2025,7 @@ def get_df_master(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
     """
     Simple utility to read df_master.csv file and return the DataFrame.
     :param an_top_directory: path to an_rel_directory [str]
-    :param an_rel_directory: directory for this instrument on this Astronight [string] 
+    :param an_rel_directory: directory_path for this instrument on this Astronight [string] 
     :return: pandas DataFrame with all comp, check, and target star raw photometric data
          (which dataframe is generated and csv-written by R, as of May 2017).
          The DataFrame index is set to equal column Serial (which was already a kind of index).
@@ -2277,7 +2277,7 @@ def _write_omit_txt_stub(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=Non
     """
     Will NOT overwrite existing omit.txt.
     """
-    lines = [';----- This is omit.txt for AN directory ' + an_rel_directory,
+    lines = [';----- This is omit.txt for AN directory_path ' + an_rel_directory,
              ';----- Use this file to omit observations from input to SkyModel (all filters).',
              ';----- Example directive lines:',
              ';',
@@ -2353,7 +2353,7 @@ def _write_stare_comps_txt_stub(an_top_directory=AN_TOP_DIRECTORY, an_rel_direct
     """
     Will NOT overwrite existing stare_comps.txt file.
     """
-    lines = [';----- This is stare_comps.txt for AN directory ' + an_rel_directory,
+    lines = [';----- This is stare_comps.txt for AN directory_path ' + an_rel_directory,
              ';----- Select comp stars (by FOV, filter, StarID) from input to '
              'rerun of PredictionSet() ',
              ';----- Example directive line:',
@@ -2378,7 +2378,7 @@ def _write_report_map_stub(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=N
     """
     Will NOT overwrite existing report.map file.
     """
-    lines = [';----- This is report_map.txt for AN directory ' + an_rel_directory,
+    lines = [';----- This is report_map.txt for AN directory_path ' + an_rel_directory,
              ';----- Use this file to omit and/or combine target observations, for AAVSO report',
              ';----- Example directive line:',
              ';',

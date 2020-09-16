@@ -831,7 +831,7 @@ def test_predictionset_aavso_report():
 
 def _overwrite_omit_txt(an_top_directory, an_rel_directory, directive_lines=None):
     # No backup. Just write it:
-    header = [';----- This is omit.txt for AN directory ' + an_rel_directory,
+    header = [';----- This is omit.txt for AN directory_path ' + an_rel_directory,
               ';----- Use this file to omit observations from input to SkyModel (all filters).',
               ';----- Example directive lines:',
               ';',
@@ -865,7 +865,7 @@ def _overwrite_stare_comps_txt(an_top_directory, an_rel_directory, directive_lin
     #    (These ARE the comps originally kept in processing this AN. I think there are no
     #        comps removed (kept them all), but that's OK since a restrictive set was tested
     #        in test_stare_comps() above.)
-    header = [';----- This is stare_comps.txt for AN directory ' + an_rel_directory,
+    header = [';----- This is stare_comps.txt for AN directory_path ' + an_rel_directory,
               ';----- Select comp stars (by FOV, filter, & StarID) from input to _predict_fixed_only().',
               ';----- Example directive line:',
               ';',

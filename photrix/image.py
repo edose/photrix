@@ -1,7 +1,7 @@
 import os
 import re
 from datetime import datetime, timezone, timedelta
-from math import floor, ceil, cos, pi, sqrt, log
+from math import floor, ceil, cos, sin, pi, sqrt, log
 
 import numpy as np
 import pandas as pd
@@ -20,6 +20,7 @@ ISO_8601_FORMAT = '%Y-%m-%dT%H:%M:%S'
 # ISO_8601_FORMAT = '%Y-%m-%dT%H:%M:%S.%f'
 FWHM_PER_SIGMA = 2.0 * sqrt(2.0 * log(2))
 SUBIMAGE_MARGIN = 1.5  # subimage pixels around outer annulus, for safety
+RADIANS_PER_DEGREE = pi / 180.0
 
 # R_DISC altered 10 -> 9 Aug 16 2019 for new L-500 mount.
 R_DISC = 9  # for aperture photometry, likely to be adaptive (per image) later.
@@ -515,16 +516,35 @@ class FITS:
                                 'CRVAL1', 'CRVAL2', 'CRPIX1', 'CRPIX2']
         plate_solution_values = [np.float64(self.header_value(key))
                                  for key in plate_solution_index]
-        return pd.Series(plate_solution_values, index=plate_solution_index)
+        solution = pd.Series(plate_solution_values, index=plate_solution_index)
+        # If CD terms are absent, and if plate solution resides in other terms
+        # (e.g., in WCS from Astrometrica), then try to generate CD terms from other plate solution terms:
+        if np.isnan(solution['CD1_1']):
+            if self.header_value('CDELT1') is not None and self.header_value('CROTA2') is not None:
+                solution['CD1_1'] = self.header_value('CDELT1') * \
+                                    cos(self.header_value('CROTA2') * RADIANS_PER_DEGREE)
+        if np.isnan(solution['CD1_2']):
+            if self.header_value('CDELT2') is not None and self.header_value('CROTA2') is not None:
+                solution['CD1_2'] = - self.header_value('CDELT2') * \
+                                    sin(self.header_value('CROTA2') * RADIANS_PER_DEGREE)
+        if np.isnan(solution['CD2_1']):
+            if self.header_value('CDELT1') is not None and self.header_value('CROTA2') is not None:
+                solution['CD2_1'] = self.header_value('CDELT1') * \
+                                    sin(self.header_value('CROTA2') * RADIANS_PER_DEGREE)
+        if np.isnan(solution['CD2_2']):
+            if self.header_value('CDELT2') is not None and self.header_value('CROTA2') is not None:
+                solution['CD2_2'] = self.header_value('CDELT2') * \
+                                    cos(self.header_value('CROTA2') * RADIANS_PER_DEGREE)
+        return solution
 
 
 def all_fits_files(top_directory, rel_directory, validate_fits=False):
     """
-    Return list of all FITS files in given directory.
+    Return list of all FITS files in given directory_path.
     :param top_directory:
     :param rel_directory:
     :param validate_fits: If True, open FITS files and include only if valid.
         If False, include filename if it appears valid without opening the FITS file.
-    :return: List of all FITS files in given directory [list of strings]
+    :return: List of all FITS files in given directory_path [list of strings]
     """
     pass
