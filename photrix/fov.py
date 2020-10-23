@@ -27,7 +27,7 @@ class Fov:
     Observation types must be one of: "Stare", "Monitor", "LPV", or "Standard"
     Usage: fov = FOV("ST Tri") or fov = FOV("ST Tri", "C:/Dev/Photometry/FOV1_5/")
     """
-    def __init__(self, fov_name, fov_directory=FOV_DIRECTORY):
+    def __init__(self, fov_name, fov_directory=FOV_DIRECTORY, warn_on_no_fov_file=True):
         fov_fullpath = os.path.join(fov_directory, fov_name + ".txt")
         if os.path.exists(fov_fullpath) and os.path.isfile(fov_fullpath):
             with open(fov_fullpath) as fov_file:
@@ -36,7 +36,8 @@ class Fov:
         else:
             # TODO: replace error print stmts by a new field "reason_invalid",
             # TODO: and a new signature parameter 'print_errors=False.'
-            print('>>>>> FOV file \'' + fov_fullpath + '\' not found. FOV object invalid.')
+            if warn_on_no_fov_file:
+                print('>>>>> FOV file \'' + fov_fullpath + '\' not found. FOV object invalid.')
             self.is_valid = False
             return
         lines = [line.split(";")[0] for line in lines]  # remove all comments.

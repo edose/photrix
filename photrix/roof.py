@@ -19,6 +19,7 @@ SECONDS_BETWEEN_CONSECUTIVE_TIMEOUTS = 10  # retry cadence.
 SECONDS_BETWEEN_STARTUP_QUERIES = 5        # initial polling cadence.
 SECONDS_BETWEEN_ONGOING_QUERIES = 60       # normal polling cadence.
 SECONDS_WHEN_CHANGE_SENSED = 5            # fast cadence when roof status change has been sensed.
+SECONDS_WHEN_STATUS_BLANK = 5
 CONSISTENT_CHANGE_QUERIES_REQUIRED = 5     # number of uniform query results to confirm status change.
 TAG_TO_TEST = 'Roof Status:'
 
@@ -37,6 +38,7 @@ def monitor_roof(url=STATUS_URL):
 
     status_list = (CONSISTENT_CHANGE_QUERIES_REQUIRED + 1) * ['-']  # start without info (as dashes).
     last_event_string = ''
+    n_consecutive_status_blank = 0
     while True:
         status_text = get_status_text(url)
         if not status_text.startswith('OK'):
@@ -46,6 +48,17 @@ def monitor_roof(url=STATUS_URL):
         if immed_status == 'ERROR':
             print(' >>>>> ERROR=', immed_status, '--> STOPPING.')
             exit(0)
+        if immed_status == '':
+            n_consecutive_status_blank += 1
+            if n_consecutive_status_blank > MAX_CONSECUTIVE_TIMEOUTS:
+                print(' >>>>> ERROR: too many consecutive blank status returns.')
+                exit(0)
+            else:
+                print('(status blank #' + str(n_consecutive_status_blank) + ')')
+                sleep(SECONDS_WHEN_STATUS_BLANK)
+                continue
+        else:
+            n_consecutive_status_blank = 0
         status_list.append(immed_status)  # so that earliest status is first list item (time reads L->R).
         status_list = status_list[1:]     # pop earliest status off front of list.
         hhmm = hhmm_from_datetime_utc(datetime.now(timezone.utc))
@@ -103,6 +116,8 @@ def parse_immed_status(status_text):
         return 'open'
     elif core_text.startswith('CLOSE'):
         return 'closed'
+    elif core_text == '':
+        return ''
     print(' >>>>> ERROR: cannot parse status text >' + status_text + '<')
     return 'error'
 

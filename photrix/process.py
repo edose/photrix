@@ -126,7 +126,8 @@ def start(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
     print('    3. Run assess().')
 
 
-def assess(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None, auto_delete_src_files=True):
+def assess(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None, auto_delete_src_files=True,
+           warn_each_missing_fov_file=False):
     """
     Rigorously assess FITS files and directory_path structure for readiness to construct df_master.
     Collect and print all warnings and summary stats. Makes no changes to data.
@@ -135,6 +136,8 @@ def assess(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None, auto_delete
     :param an_top_directory: [string]
     :param an_rel_directory: [string]
     :param auto_delete_src_files: True iff automatically delete .src (plate-solution) files [boolean]
+    :param warn_each_missing_fov_file: True to give separate warning for each missing FOV file
+        (e.g., variable stars), False to give one summary line of missing count only. [boolean]
     :return: [None]
     """
     # TODO: Add checks for guide exposure time. (?)
@@ -199,7 +202,7 @@ def assess(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None, auto_delete
             if fits.object in fov_name_cache:
                 fov_proven_ready = True
             else:
-                fov = Fov(fits.object)
+                fov = Fov(fits.object, warn_on_no_fov_file=False)
                 if fov.is_valid:
                     if fov.fov_name == fits.object:
                         fov_proven_ready = True
@@ -251,13 +254,16 @@ def assess(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None, auto_delete
         print('All FITS objects match their filenames.')
 
     fov_file_not_ready = df.loc[~ df['FovFileReady'], 'Filename']
-    if len(fov_file_not_ready) >= 1:
-        print('\nFOV files ABSENT:')
-        for f in fov_file_not_ready:
-            fits_object = df.loc[f, 'Object']
-            # fits_object = FITS(an_top_directory, fits_subdir, f).object
-            print('    ' + f + ' is missing FOV file \'' + fits_object + '\'.')
-        print('\n')
+    n_missing_fov_files = len(fov_file_not_ready)
+    if n_missing_fov_files >= 1:
+        if warn_each_missing_fov_file:
+            print('\nFOV files ABSENT:')
+            for f in fov_file_not_ready:
+                fits_object = df.loc[f, 'Object']
+                # fits_object = FITS(an_top_directory, fits_subdir, f).object
+                print('    ' + f + ' is missing FOV file \'' + fits_object + '\'.')
+        else:
+            print('\n' + str(n_missing_fov_files), 'of', str(len(df)), 'FOV files missing.')
     else:
         print('All FOV files are ready.')
 
@@ -1798,6 +1804,14 @@ class PredictionSet:
             print('Combination of Serials ' +
                   ' '.join(df_combine['Serial'].astype(int).astype(str)) + ': done.')
         return df_report
+
+
+def delete_uncalibrated(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
+    import shutil
+    fullpath = os.path.join(an_top_directory, an_rel_directory, 'Uncalibrated')
+    if os.path.exists(fullpath) and os.path.isdir(fullpath):
+        shutil.rmtree(fullpath)
+        print('Done.')
 
 
 END_PROCESSING_HERE____________ = ''
