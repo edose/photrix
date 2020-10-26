@@ -1084,6 +1084,8 @@ def parse_excel(excel_path, site_name='DSW'):
 
     plan_list = []
     this_plan = None
+    macro_dict = dict()
+    macro_field_keys = ['^' + str(i + 1) for i in range(9)]
     for irow in range(1, nrow):
         for icol in range(ncol):
             cell = df.iloc[irow, icol]
@@ -1095,6 +1097,34 @@ def parse_excel(excel_path, site_name='DSW'):
                 # Extract and process substrings from this cell:
                 cell_str_as_read = str(cell).strip()
                 cell_str_lower = cell_str_as_read.lower()
+
+                # Add MACRO directive that stores text in a dict for later use; then continue loop:
+                if cell_str_lower.startswith('macro '):
+                    _, macro_key, macro_command = tuple(cell_str_as_read.split(maxsplit=2))
+                    macro_dict[macro_key] = macro_command
+                    continue
+
+                # If first word of command is in macro dict, substitute expanded macro for command.
+                words = cell_str_as_read.split()
+                macro_command = macro_dict.get(words[0], None)
+                if macro_command is not None:
+                    macro_misused = False
+                    insert_strings = words[1:]
+                    for i_key, macro_field_key in enumerate(macro_field_keys):
+                        iloc = macro_command.find(macro_field_key)
+                        if iloc >= 0:
+                            if i_key < len(insert_strings):
+                                insert_string = insert_strings[i_key]
+                            else:
+                                macro_misused = True
+                                insert_string = '???'
+                            macro_command = macro_command.replace(macro_field_key, insert_string)
+                    if macro_misused:
+                        print(' >>>>> ERROR: Macro misused in cell \'' + cell_str_as_read + '\'')
+                    cell_str_as_read = macro_command
+                    cell_str_lower = cell_str_as_read.lower()  # refresh this variable.
+
+                # Handle any comment after first semi-colon:
                 split_str = cell_str_as_read.split(';', maxsplit=1)
                 command = split_str[0].strip()
                 if len(split_str) > 1:
@@ -1103,7 +1133,6 @@ def parse_excel(excel_path, site_name='DSW'):
                     comment = None
 
                 # Determine action type and add action to directive_list:
-                # TODO: Add #AUTOGUIDE directive; later account as field in next exposure target's event.
                 if cell_str_lower.startswith('plan'):
                     if this_plan is not None:
                         plan_list.append(this_plan)  # save previous plan, if any
@@ -1883,7 +1912,11 @@ def make_fov_exposure_data(fov_name, an, fov_dict=None, instrument=None, exp_tim
         target_overhead [float], repeat_duration [float])
     """
     if fov_dict is not None:
-        this_fov = fov_dict[fov_name]
+        # this_fov = fov_dict[fov_name]
+        this_fov = fov_dict.get(fov_name, None)
+        if this_fov is None:
+            print(' >>>>> ERROR: FOV file not found for \'' + fov_name + '\'')
+            return
     else:
         this_fov = Fov(fov_name)
     if not isinstance(instrument, Instrument):
@@ -1953,7 +1986,7 @@ def make_image_exposure_data(filter_entries, instrument, exp_time_factor=1, forc
                 this_count = int(bits[1].replace(")", ""))
             except ValueError:
                 print(' >>>> PARSING ERROR:', entry)
-                exit(0)
+                return
         # TODO: I'm not crazy about the next if-statement's condition.
         if 's' in bits[0].lower():
             this_exp_time = float(bits[0].lower().split('s')[0])
