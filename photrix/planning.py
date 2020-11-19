@@ -85,6 +85,10 @@ ABSOLUTE_MAX_EXPOSURE_TIME = 600  # seconds
 ABSOLUTE_MIN_EXPOSURE_TIME = 2.5  # seconds [20190318, was 3 seconds]
 MIN_TOTAL_EXP_TIME_PER_FILTER = 9  # seconds, thus 4 [was 3] exposures max per filter for LPVs
 
+# ********** MP parameters:
+# defining MP color sequence as tuple of tuples: (filter, seconds exposure, repeats). Exps at V mag = 14.
+MP_COLOR_V14 = (('I', 240, 1), ('R', 160, 1), ('V', 160, 2), ('R', 160, 1), ('I', 240, 1))
+
 
 def make_df_fov(fov_directory=FOV_DIRECTORY, fov_names_selected=None):
     """
@@ -604,8 +608,8 @@ class AavsoWebobs:
             self.star_id = star_id
 
 
-def get_local_aavso_reports(report_dir=None, earliest_an=None):
-    pass
+# def get_local_aavso_reports(report_dir=None, earliest_an=None):
+#     pass
     #     report_dict = {}
     #     for root, dirs, files in os.walk('C:/Astro/Images/Borea Photrix/'):
     #         if root.endswith("Photometry"):
@@ -710,10 +714,12 @@ def make_an_roster(an_date_string, output_directory, site_name='DSW', instrument
         available = df_fov_std.loc[fov_index, 'available']
         this_fov = Fov(fov_name)
         transit_hhmm = hhmm_from_datetime_utc(an.transit(RaDec(this_fov.ra, this_fov.dec)))
-        _, _, _, target_overhead, repeat_duration = \
-            make_fov_exposure_data(fov_name, an, fov_dict=None, instrument=instrument,
-                                   exp_time_factor=exp_time_factor,
-                                   force_autoguide=False)  # assume autoguide only if exp-times warrant.
+        exp_data = make_fov_exposure_data(fov_name, an, fov_dict=None, instrument=instrument,
+                                          exp_time_factor=exp_time_factor,
+                                          force_autoguide=False)  # default=autoguide iff exp-times warrant.
+        if exp_data is None:
+            return  # fail
+        _, _, _, target_overhead, repeat_duration = exp_data
         minutes = (target_overhead + repeat_duration) / 60.0
         n_stars = len(this_fov.aavso_stars)
         this_fov_line = ',' + fov_name + ',' + fov_name + ', ' + available + ',' + \
@@ -742,10 +748,12 @@ def make_an_roster(an_date_string, output_directory, site_name='DSW', instrument
         available = row.loc['available']
         this_fov = Fov(fov_name)
         transit_hhmm = hhmm_from_datetime_utc(an.transit(RaDec(this_fov.ra, this_fov.dec)))
-        _, _, _, target_overhead, repeat_duration = \
-            make_fov_exposure_data(fov_name, an, fov_dict=None, instrument=instrument,
-                                   exp_time_factor=exp_time_factor,
-                                   force_autoguide=False)  # assume autoguide only if exp-times warrant.
+        exp_data = make_fov_exposure_data(fov_name, an, fov_dict=None, instrument=instrument,
+                                          exp_time_factor=exp_time_factor,
+                                          force_autoguide=False)  # default=autoguide iff exp-times warrant.
+        if exp_data is None:
+            return  # fail
+        _, _, _, target_overhead, repeat_duration = exp_data
         minutes = (target_overhead + repeat_duration) / 60.0
         an_priority = row.loc['an_priority']
         an_priority_bars = row.loc['an_priority_bars']
@@ -831,10 +839,12 @@ def make_an_roster(an_date_string, output_directory, site_name='DSW', instrument
             available = df_fov_mon_lpv.loc[fov_index, 'available']
             this_fov = Fov(fov_name)
             transit_hhmm = hhmm_from_datetime_utc(an.transit(RaDec(this_fov.ra, this_fov.dec)))
-            _, _, _, target_overhead, repeat_duration = \
-                make_fov_exposure_data(fov_name, an, fov_dict=None, instrument=instrument,
-                                       exp_time_factor=exp_time_factor,
-                                       force_autoguide=False)  # assume autoguide only if exp-times warrant.
+            exp_data = make_fov_exposure_data(fov_name, an, fov_dict=None, instrument=instrument,
+                                              exp_time_factor=exp_time_factor,
+                                              force_autoguide=False)  # so autoguide iff exp-times warrant.
+            if exp_data is None:
+                return  # fail
+            _, _, _, target_overhead, repeat_duration = exp_data
             minutes = (target_overhead + repeat_duration) / 60.0
             an_priority_bars = df_fov_mon_lpv.loc[fov_index, 'an_priority_bars']
             motive = Fov(fov_name).motive
@@ -1048,8 +1058,10 @@ def parse_excel(excel_path, site_name='DSW'):
            V filter (once) at 120 seconds, and B filter twice at 240 seconds (exposure times are NOT
            limited, so be careful!)
        All text between "IMAGE" and first word including a "=" character will make up the target name.
+    COLOR  target_name  multiplier  RA  Dec  :: for MP color imaging (mp_color.py),
+        e.g., "COLOR MP_1626 1.1x 21:55:08 +24:24:45. 'x' in multipler is optional but recommended.
 
-    ----- Additional legal directives:
+    ----- Legal directives:
     PLAN  plan_id  ::  starts a plan section and names it.
     ;   comment_text  :: semicolon at beginning of cell makes cell a comment only.
     AFINTERVAL nnn  ::  autofocus interval in minutes
@@ -1065,6 +1077,7 @@ def parse_excel(excel_path, site_name='DSW'):
     IMAGE target_id exp_specs RA Dec  ::  take images of target at RA, Dec; exp_specs define the
        filters and exposures, e.g., V=12.8 R=120sec(2) I=11(3) where 12.8 is a magnitude, 120sec
        is 120 seconds, and (2) specifies 2 exposures (and resulting images).
+    COLOR target_id multipler RA Dec :: take MP color sequence defined by MP_COLOR_V14.
     fov_name  ::  if line begins with none of the above, it's a FOV name and takes filters, exposures,
         RA, and Dec from its FOV file.
 
@@ -1219,6 +1232,21 @@ def parse_excel(excel_path, site_name='DSW'):
                                                                'ra': ra_string,
                                                                'dec': dec_string,
                                                                'force_autoguide': force_autoguide}))
+                elif cell_str_lower.startswith('color'):
+                    value = command[len('image'):].strip()
+                    force_autoguide, value = get_and_remove_option(value, FORCE_AUTOGUIDE_TOKEN)  # ignored.
+                    target_name, multiplier_string, ra_string, dec_string = tuple(value.rsplit(maxsplit=3))
+                    multiplier_string = multiplier_string.lower().split('x')[0]
+                    multiplier = float(multiplier_string)
+                    entries = tuple([(filt, multiplier * exp14, repeats)
+                                     for (filt, exp14, repeats) in MP_COLOR_V14])
+                    this_plan.directives.append(Directive('color',
+                                                          {'target_name': target_name,
+                                                           'entries': entries,
+                                                           'multiplier_string': multiplier_string,
+                                                           'ra': ra_string,
+                                                           'dec': dec_string,
+                                                           'force_autoguide': True}))  # always autoguide.
                 else:
                     # Anything else we treat as a fov_name:
                     value = command  # use the whole command string (before comment); no directive string.
@@ -1265,7 +1293,7 @@ def reorder_directives(plan_list):
                                 ['afinterval'],
                                 ['sets'],
                                 ['waituntil', 'chill', 'stare', 'fov', 'burn',
-                                 'image', 'autofocus', 'comment', 'skipfilter'],
+                                 'image', 'color', 'autofocus', 'comment', 'skipfilter'],
                                 ['shutdown'],
                                 ['chain']]
     for plan in plan_list:
@@ -1336,11 +1364,13 @@ def make_events(plan_list, instrument, fov_dict, an, exp_time_factor):
                 this_summary_text = 'Stare ' + str(n_repeats) + ' repeats at ' + fov_name
                 if directive.spec['force_autoguide'] is True:
                     this_summary_text += ' AG+'
-                filters, counts, exp_times, target_overhead, repeat_duration = \
-                    make_fov_exposure_data(fov_name, an, fov_dict, instrument,
-                                           exp_time_factor=exp_time_factor,
-                                           skipfilter_list=skipfilter_list,
-                                           force_autoguide=directive.spec['force_autoguide'])
+                exp_data = make_fov_exposure_data(fov_name, an, fov_dict, instrument,
+                                                  exp_time_factor=exp_time_factor,
+                                                  skipfilter_list=skipfilter_list,
+                                                  force_autoguide=directive.spec['force_autoguide'])
+                if exp_data is None:
+                    return  # fail
+                filters, counts, exp_times, target_overhead, repeat_duration = exp_data
                 event_duration = target_overhead + n_repeats * repeat_duration
                 duration_comment = str(round(repeat_duration / 60.0, 1)) + ' min/repeat --> ' + \
                                    str(round(event_duration / 60.0, 1)) + ' min (nominal)'
@@ -1372,11 +1402,13 @@ def make_events(plan_list, instrument, fov_dict, an, exp_time_factor):
                 this_summary_text = fov_name
                 if directive.spec['force_autoguide'] is True:
                     this_summary_text += ' AG+'
-                filters, counts, exp_times, target_overhead, repeat_duration = \
-                    make_fov_exposure_data(fov_name, an, fov_dict, instrument,
-                                           exp_time_factor=exp_time_factor,
-                                           skipfilter_list=skipfilter_list,
-                                           force_autoguide=directive.spec['force_autoguide'])
+                exp_data = make_fov_exposure_data(fov_name, an, fov_dict, instrument,
+                                                  exp_time_factor=exp_time_factor,
+                                                  skipfilter_list=skipfilter_list,
+                                                  force_autoguide=directive.spec['force_autoguide'])
+                if exp_data is None:
+                    return  # fail
+                filters, counts, exp_times, target_overhead, repeat_duration = exp_data
                 event_duration = target_overhead + 1 * repeat_duration
                 duration_comment = ' --> ' + str(round(event_duration / 60.0, 1)) + ' min'
                 this_fov = fov_dict[fov_name]
@@ -1466,6 +1498,42 @@ def make_events(plan_list, instrument, fov_dict, an, exp_time_factor):
                 this_event.target_name = target_name
                 plan.events.append(this_event)
 
+            elif directive.type == 'color':
+                target_name = directive.spec['target_name']
+                entries = directive.spec['entries']
+                ra = directive.spec['ra']
+                dec = directive.spec['dec']
+                filters, counts, exp_times, target_overhead, repeat_duration = \
+                    make_color_exposure_data(entries, force_autoguide=True)
+                event_duration = target_overhead + 1 * repeat_duration
+                this_summary_text = 'Color ' + target_name + '  ' + ra + '  ' + dec +\
+                                    '  ' + '.'.join(filters) +\
+                                    '  ' + directive.spec['multiplier_string'] +\
+                                    'x  ' + '{0:.1f}'.format(event_duration / 60.0) + ' min.'
+                if directive.spec['force_autoguide'] is True:
+                    this_summary_text += ' AG+'
+                duration_comment = ' --> ' + str(round(event_duration / 60.0, 1)) + ' min'
+                this_acp_entry = [';', '#DITHER 0 ;',
+                                  '#FILTER ' + ','.join(filters) + ' ;',
+                                  '#BINNING ' + ','.join(len(filters) * ['1']) + ' ;',
+                                  '#COUNT ' + ','.join([str(c) for c in counts]) + ' ;',
+                                  '#INTERVAL ' + ','.join([str(e).split('.0')[0]
+                                                           for e in exp_times]) +
+                                  ' ; ' + duration_comment,
+                                  ';---- from COLOR directive -----',
+                                  target_name + '\t' + ra + '\t' + dec]
+                if directive.spec['force_autoguide'] is True:
+                    this_acp_entry.insert(1, '#AUTOGUIDE  ;  Forced')
+                duration_dict = {'target_overhead': target_overhead,
+                                 'repeat_count': 1,
+                                 'counts': counts,
+                                 'exp_times': exp_times}
+                this_event = Event('color', this_summary_text, this_acp_entry,
+                                   event_duration, duration_dict,
+                                   ra=ra, dec=dec)
+                this_event.target_name = target_name
+                plan.events.append(this_event)
+
             elif directive.type == 'autofocus':
                 this_summary_text = 'AUTOFOCUS'
                 this_acp_entry = [';', '#AUTOFOCUS']
@@ -1545,7 +1613,7 @@ def make_timeline(plan_list, an, earliest_hhmm):
                 if plan.afinterval is not None:
                     minutes_since_last_autofocus = \
                         (utc_running - utc_most_recent_autofocus).total_seconds() / 60.0
-                    if event.type in ['burn', 'stare', 'fov', 'image']:
+                    if event.type in ['burn', 'stare', 'fov', 'image', 'color']:
                         if minutes_since_last_autofocus > plan.afinterval or \
                             no_plan_exposures_yet_encountered:
                             # Perform AFINTERVAL autofocus:
@@ -1573,7 +1641,7 @@ def make_timeline(plan_list, an, earliest_hhmm):
                     utc_end_event_actual = utc_start_event  # zero duration
                 elif event.type in ['chill', 'shutdown', 'autofocus']:
                     utc_end_event_actual = utc_start_event + timedelta(seconds=event.duration_total)
-                elif event.type in ['burn', 'stare', 'fov', 'image']:
+                elif event.type in ['burn', 'stare', 'fov', 'image', 'color']:
                     actual_duration, event_autofocus_count, utc_most_recent_autofocus = \
                         event.calc_actual_duration(utc_start_event, plan.utc_quitat,
                                                    plan.afinterval, utc_most_recent_autofocus)
@@ -1590,7 +1658,7 @@ def make_timeline(plan_list, an, earliest_hhmm):
                     event.utc_summary_display = utc_start_event
 
                 # Update event's minimum altitude (all sets, target event types only):
-                if event.type in ['burn', 'stare', 'fov', 'image']:
+                if event.type in ['burn', 'stare', 'fov', 'image', 'color']:
                     this_lower_alt = event.calc_lower_altitude(an, utc_start_event, utc_end_event_actual)
                     if event.min_altitude is None:
                         event.min_altitude = this_lower_alt
@@ -1604,7 +1672,7 @@ def make_timeline(plan_list, an, earliest_hhmm):
                     event.status = 'QUITAT'
                 elif utc_start_event < an.ts_dark.start or utc_end_event_actual > an.ts_dark.end:
                     event.status = 'LIGHT'
-                elif event.type in ['burn', 'stare', 'fov', 'image', 'autofocus', 'chill']:
+                elif event.type in ['burn', 'stare', 'fov', 'image', 'color', 'autofocus', 'chill']:
                     event.status = str(i_set)  # default
                 elif event.type in ['shutdown', 'waituntil']:
                     event.status = 'ok'
@@ -1801,7 +1869,7 @@ def make_summary_file(plan_list, fov_dict, an, output_directory, exp_time_factor
                         utc_day_indicator = ' '
                 else:
                     utc_day_indicator = ' '
-            if event.type in ['fov', 'stare', 'image', 'burn', 'autofocus', 'chill']:
+            if event.type in ['fov', 'stare', 'image', 'color', 'burn', 'autofocus', 'chill']:
                 if event.status is None:
                     event.status = 'SKIPPED'
                     hhmm_text = None
@@ -1826,7 +1894,7 @@ def make_summary_file(plan_list, fov_dict, an, output_directory, exp_time_factor
 
             # Add warning line if moon is too close to this object and moon is up:
             if moon_is_a_factor:
-                if event.type in ['burn', 'image', 'fov', 'stare']:
+                if event.type in ['burn', 'image', 'color', 'fov', 'stare']:
                     moon_dist = an.moon_radec.degrees_from(RaDec(event.ra, event.dec))  # in degrees
                     if moon_dist < MIN_MOON_DEGREES_DEFAULT:
                         if event.utc_summary_display is not None:
@@ -1873,12 +1941,12 @@ def make_summary_file(plan_list, fov_dict, an, output_directory, exp_time_factor
 
         # Add plan warning if no autofocus (or afinterval) given:
         if plan.afinterval is None and all([e.type != 'autofocus' for e in plan.events]):
-            if any([e.type in ['burn', 'image', 'fov', 'stare'] for e in plan.events]):
+            if any([e.type in ['burn', 'image', 'fov', 'stare', 'color'] for e in plan.events]):
                 plan.end_warning_lines.append(
                     '      >>>>>>>>>> WARNING: this plan has no autofocus or afinterval.')
         # Add plan warning if autofocus and afinterval) both in same plan:
         if plan.afinterval is not None and any([e.type == 'autofocus' for e in plan.events]):
-            if any([e.type in ['burn', 'image', 'fov', 'stare'] for e in plan.events]):
+            if any([e.type in ['burn', 'image', 'fov', 'stare', 'color'] for e in plan.events]):
                 plan.end_warning_lines.append(
                     '      >>>>>>>>>> WARNING: this plan has both autofocus and afinterval.')
 
@@ -2001,6 +2069,15 @@ def make_image_exposure_data(filter_entries, instrument, exp_time_factor=1, forc
     target_overhead, repeat_duration = tabulate_target_durations(filters, counts, exp_times,
                                                                  force_autoguide=force_autoguide)
     # return types (3 lists, two floats): [str], [int], [float], float, float
+    return filters, counts, exp_times, target_overhead, repeat_duration
+
+
+def make_color_exposure_data(entries, force_autoguide=True):
+    filters = [e[0] for e in entries]
+    exp_times = [e[1] for e in entries]
+    counts = [e[2] for e in entries]
+    target_overhead, repeat_duration = tabulate_target_durations(filters, counts, exp_times,
+                                                                 force_autoguide=force_autoguide)
     return filters, counts, exp_times, target_overhead, repeat_duration
 
 
