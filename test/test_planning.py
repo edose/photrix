@@ -222,4 +222,11 @@ def test_class_aavso_webobs():
     assert aw.star_id == df192['target_name'].iloc[0]
 
 
-
+def test_extract_ra_dec():
+    assert planning.extract_ra_dec('ARFARF 12:34:56 -31:44:52') == ('ARFARF', '12:34:56', '-31:44:52')
+    assert planning.extract_ra_dec('ARFARF 12:34:56 -31:44:52') != ('ARFARF', '12:34:56', '-31:44:32')
+    assert planning.extract_ra_dec('ARFARF 12:34:56.23 -31:44:52.042') == \
+           ('ARFARF', '12:34:56.23', '-31:44:52.042')
+    assert planning.extract_ra_dec('MEOW 06h 49m 40.531s  +63° 00\' 06.920\" ') == \
+           ('MEOW', '06:49:40.531', '+63:00:06.920')
+    assert planning.extract_ra_dec('INVALID 06h 49m   +63° 00\' 06.920\" ') is None

@@ -955,11 +955,9 @@ class Event:
 
     def calc_actual_duration(self, utc_start, utc_quitat, afinterval, utc_most_recent_autofocus):
         if utc_quitat is None:
-            return self.duration_total
+            return self.duration_total, 0, utc_most_recent_autofocus
         if utc_start >= utc_quitat:
             return 0, 0, utc_most_recent_autofocus
-        # if timedelta(seconds=self.duration_total) < utc_quitat - utc_start:
-        #     return self.duration_total
         if self.duration_dict is None:
             return None
         total_exp_time = self.duration_dict['repeat_count'] * sum([c * e for (c, e) in
@@ -1191,7 +1189,8 @@ def parse_excel(excel_path, site_name='DSW'):
                     this_plan.directives.append(Directive('chain', {'filename': next_plan_filename}))
                 elif cell_str_lower.startswith('burn'):
                     value = command[len('burn'):].strip()
-                    this_fov_name, ra_string, dec_string = tuple(value.rsplit(maxsplit=2))
+                    this_fov_name, ra_string, dec_string = extract_ra_dec(value)
+                    # this_fov_name, ra_string, dec_string = tuple(value.rsplit(maxsplit=2))
                     this_plan.directives.append(Directive('burn', {'fov_name': this_fov_name.strip(),
                                                                    'ra': ra_string.strip(),
                                                                    'dec': dec_string.strip(),
@@ -1205,7 +1204,8 @@ def parse_excel(excel_path, site_name='DSW'):
                 elif cell_str_lower.startswith('image'):
                     value = command[len('image'):].strip()
                     force_autoguide, value = get_and_remove_option(value, FORCE_AUTOGUIDE_TOKEN)
-                    subvalue, ra_string, dec_string = tuple(value.rsplit(maxsplit=2))
+                    subvalue, ra_string, dec_string = extract_ra_dec(value)
+                    # subvalue, ra_string, dec_string = tuple(value.rsplit(maxsplit=2))
                     filter_entries = []
                     target_name = "WARNING: NO TARGET NAME"
                     while True:
@@ -1235,7 +1235,10 @@ def parse_excel(excel_path, site_name='DSW'):
                 elif cell_str_lower.startswith('color'):
                     value = command[len('image'):].strip()
                     force_autoguide, value = get_and_remove_option(value, FORCE_AUTOGUIDE_TOKEN)  # ignored.
-                    target_name, multiplier_string, ra_string, dec_string = tuple(value.rsplit(maxsplit=3))
+                    subvalue, ra_string, dec_string = extract_ra_dec(value)
+                    target_name, multiplier_string = tuple(subvalue.rsplit(maxsplit=1))
+                    # target_name, multiplier_string, ra_string, dec_string =
+                    # tuple(value.rsplit(maxsplit=3))
                     multiplier_string = multiplier_string.lower().split('x')[0]
                     multiplier = float(multiplier_string)
                     entries = tuple([(filt, multiplier * exp14, repeats)
@@ -1470,10 +1473,10 @@ def make_events(plan_list, instrument, fov_dict, an, exp_time_factor):
                     make_image_exposure_data(filter_entries, instrument, exp_time_factor=exp_time_factor,
                                              force_autoguide=directive.spec['force_autoguide'])
                 event_duration = target_overhead + 1 * repeat_duration
-                this_summary_text = 'Image ' + target_name + '  ' + ra + '  ' + dec +\
-                                    '  ' + ''.join([f + '=' + '{0:g}'.format(e) + 's(' +
-                                                    str(c) + ') '
-                                                    for (f, e, c) in zip(filters, exp_times, counts)])
+                this_summary_text = 'Image ' + target_name +\
+                                    ' ' + ''.join([f + '=' + '{0:g}'.format(e) + 's(' + str(c) + ')'
+                                                   for (f, e, c) in zip(filters, exp_times, counts)]) +\
+                                    ' ' + ra + ' ' + dec
                 if directive.spec['force_autoguide'] is True:
                     this_summary_text += ' AG+'
                 duration_comment = ' --> ' + str(round(event_duration / 60.0, 1)) + ' min'
@@ -1506,10 +1509,11 @@ def make_events(plan_list, instrument, fov_dict, an, exp_time_factor):
                 filters, counts, exp_times, target_overhead, repeat_duration = \
                     make_color_exposure_data(entries, force_autoguide=True)
                 event_duration = target_overhead + 1 * repeat_duration
-                this_summary_text = 'Color ' + target_name + '  ' + ra + '  ' + dec +\
+                this_summary_text = 'Color ' + target_name +\
                                     '  ' + '.'.join(filters) +\
                                     '  ' + directive.spec['multiplier_string'] +\
-                                    'x  ' + '{0:.1f}'.format(event_duration / 60.0) + ' min.'
+                                    'x  ' + '{0:.1f}'.format(event_duration / 60.0) + ' min.' +\
+                                    '  ' + ra + '  ' + dec
                 if directive.spec['force_autoguide'] is True:
                     this_summary_text += ' AG+'
                 duration_comment = ' --> ' + str(round(event_duration / 60.0, 1)) + ' min'
@@ -2128,3 +2132,29 @@ def calc_exp_time(mag, filter, instrument, max_exp_time, exp_time_factor=1):
         exp_time = min(max_exp_time, exp_time)
 
     return exp_time
+
+
+def extract_ra_dec(value_string):
+    """ Split value string into subvalue, ra, dec, whether ra and dec are in standard hex format
+        (e.g., 12:34:56 -11:33:42) or in TheSkyX format (e.g., 06h 49m 40.531s  +63° 00' 06.920").
+    :param value_string: input string from parse_excel(), as above.
+    :return: 3-tuple: subvalue (= everything but RA and Dec), ra, dec. [3-tuple of strings].
+    """
+    split_string = tuple(value_string.rsplit(maxsplit=2))
+    if split_string[1].endswith('\'') and split_string[2].endswith('\"'):
+        # RA and Dec are in TheSkyX format, e.g., 06h 49m 40.531s  +63° 00' 06.920":
+        split_string = tuple(value_string.rsplit(maxsplit=6))
+        if len(split_string) != 7:
+            print(' >>>>> ERROR: cannot parse value string', value_string)
+            return None
+        subvalue = split_string[0]
+        ra_items = [s.replace('h', '').replace('m', '').replace('s', '').strip() 
+                    for s in split_string[1:4]]
+        ra = ':'.join(ra_items)        
+        dec_items = [s.replace('°', '').replace('\'', '').replace('"', '').strip() 
+                     for s in split_string[4:7]]
+        dec = ':'.join(dec_items)
+    else:
+        # RA and Dec are given directly in std hex:
+        subvalue, ra, dec = split_string
+    return subvalue, ra, dec

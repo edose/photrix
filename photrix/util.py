@@ -338,6 +338,7 @@ def get_phase(jd, jd_epoch, period):
     return phase
 
 
+
 def jd_from_datetime_utc(datetime_utc=None):
     if datetime_utc is None:
         return None

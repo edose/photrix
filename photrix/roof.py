@@ -111,7 +111,13 @@ def get_status_text(url):
 
 def parse_immed_status(status_text):
     """ Parses immediate status from text and returns (only) 'open', 'closed', or 'error'. [string] """
-    core_text = status_text.split(TAG_TO_TEST)[1].strip().upper()
+    try:
+        core_text = status_text.split(TAG_TO_TEST)[1].strip().upper()
+    except IndexError:
+        print(' >>>>> ERROR: cannot parse status text >' + status_text + '<')
+        winsound.PlaySound(SOUND_HAS_OPENED, winsound.SND_ALIAS)
+        winsound.PlaySound(SOUND_HAS_CLOSED, winsound.SND_ALIAS)
+        return 'error'
     if core_text.startswith('OPEN'):
         return 'open'
     elif core_text.startswith('CLOSE'):
