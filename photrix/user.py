@@ -473,6 +473,3 @@ class Astronight:
         header_string += '  UTC = LST + ' + utc_vs_lst_string + '     @ middark = ' + \
                          self.local_middark_utc.strftime('%H%M') + ' UTC'
         return header_string
-
-
-

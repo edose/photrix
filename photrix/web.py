@@ -1,13 +1,27 @@
+__author__ = "Eric Dose, Albuquerque"
+
+""" This module:  web.py
+    Various web-page  access routines.
+"""
+
+# Python core:
+import os
+
+# External packages:
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup
 
+# Author's packages:
 from .util import float_or_none
 
-__author__ = "Eric Dose :: New Mexico Mira Project, Albuquerque"
+THIS_PACKAGE_ROOT_DIRECTORY = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 HTTP_OK_CODE = 200  # "OK. The request has succeeded."
 MAX_WEBOBS_LINES = 200  # for safety (& as dictated in any case by webobs API (as of Jan 2017)).
+
+
+__________AAVSO_ACCESS______________________________________________________ = 0
 
 
 def get_aavso_webobs_raw_table(star_id, num_obs=100, jd_start=None, jd_end=None):
@@ -79,3 +93,5 @@ def go(starname):
         '&lastdays=200&v=on&iband=on&r=on&visual=on&grid=on&width=900&height=750'
     print('go() >' + url + '<')
     webbrowser.open(url)
+
+

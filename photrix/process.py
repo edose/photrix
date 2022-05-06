@@ -116,7 +116,8 @@ def start(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
 
     # Rename FITS files to photrix convention
     #     (within this rel_directory's /Uncalibrated subdirectory):
-    _rename_to_photrix(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=an_rel_directory)
+    _rename_to_photrix(an_top_directory=an_top_directory,
+                       an_rel_directory=an_rel_directory)
 
     print('.start() has moved', str(n_moved), 'FITS files to /Uncalibrated & has renamed them.')
     print('\n >>>>> Next:')
@@ -127,7 +128,7 @@ def start(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None):
 
 
 def assess(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None, auto_delete_src_files=True,
-           warn_each_missing_fov_file=False):
+           warn_each_missing_fov_file=False, warn_any_missing_fov_file=False):
     """
     Rigorously assess FITS files and directory_path structure for readiness to construct df_master.
     Collect and print all warnings and summary stats. Makes no changes to data.
@@ -137,7 +138,9 @@ def assess(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None, auto_delete
     :param an_rel_directory: [string]
     :param auto_delete_src_files: True iff automatically delete .src (plate-solution) files [boolean]
     :param warn_each_missing_fov_file: True to give separate warning for each missing FOV file
-        (e.g., variable stars), False to give one summary line of missing count only. [boolean]
+        (e.g., variable stars), False to suppress. [boolean]
+    :param warn_any_missing_fov_file: True to give warning for any missing FOV file and total count
+        (e.g., variable stars), False to suppress. [boolean]
     :return: [None]
     """
     # TODO: Add checks for guide exposure time. (?)
@@ -170,8 +173,9 @@ def assess(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None, auto_delete
 
     # Directories: should be none; report and remove them from df:
     dirs = df.loc[df['IsDir'], 'Filename']
+    # dirs = [dir for dir in dirs if not dir.lower() in ('exclude', 'excluded')]
     if len(dirs) >= 1:
-        print('Subdirectories found within /Calibrated (please remove them):')
+        print('Subdirectories found within /Calibrated (please remove them, except for /Exclude):')
         for this_dir in dirs:
             print('   ' + this_dir)
         df = df.loc[~df['IsDir'], :]  # remove rows referring to directories.
@@ -253,19 +257,23 @@ def assess(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None, auto_delete
     else:
         print('All FITS objects match their filenames.')
 
-    fov_file_not_ready = df.loc[~ df['FovFileReady'], 'Filename']
-    n_missing_fov_files = len(fov_file_not_ready)
-    if n_missing_fov_files >= 1:
-        if warn_each_missing_fov_file:
-            print('\nFOV files ABSENT:')
-            for f in fov_file_not_ready:
-                fits_object = df.loc[f, 'Object']
-                # fits_object = FITS(an_top_directory, fits_subdir, f).object
-                print('    ' + f + ' is missing FOV file \'' + fits_object + '\'.')
-        else:
+    n_missing_fov_files = 0
+    if warn_any_missing_fov_file:
+        fov_file_not_ready = df.loc[~ df['FovFileReady'], 'Filename']
+        n_missing_fov_files = len(fov_file_not_ready)
+        if n_missing_fov_files >= 1:
+            if warn_each_missing_fov_file:
+                print('\nFOV files ABSENT:')
+                for f in fov_file_not_ready:
+                    fits_object = df.loc[f, 'Object']
+                    # fits_object = FITS(an_top_directory, fits_subdir, f).object
+                    print('    ' + f + ' is missing FOV file \'' + fits_object + '\'.')
+            else:
+                print('All FOV files are ready.')
+
             print('\n' + str(n_missing_fov_files), 'of', str(len(df)), 'FOV files missing.')
     else:
-        print('All FOV files are ready.')
+        print('(FOV files excluded from assessment.)')
 
     odd_fwhm_list = []
     for f in df['Filename']:
@@ -301,7 +309,9 @@ def assess(an_top_directory=AN_TOP_DIRECTORY, an_rel_directory=None, auto_delete
 
     # Summarize and write instructions for next steps:
     n_warnings = len(not_calibrated) + len(not_platesolved) + len(object_nonmatch) +\
-        len(fov_file_not_ready) + len(odd_fwhm_list) + len(odd_fl_list) + len(invalid_fits)
+        len(odd_fwhm_list) + len(odd_fl_list) + len(invalid_fits)
+    if warn_any_missing_fov_file:
+        n_warnings += n_missing_fov_files
     if n_warnings == 0:
         print('\n >>>>> ALL ' + str(len(df)) + ' FITS FILES APPEAR OK.')
         print('Now...   1. Visually inspect all FITS files, if not already done.')

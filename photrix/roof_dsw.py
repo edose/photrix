@@ -25,7 +25,7 @@ TAG_TO_TEST = 'Roof Status:'
 
 SOUND_HAS_OPENED = 'SystemAsterisk'  # = Win 10 Asterisk; use Sonata/Windows Error.wav
 SOUND_HAS_CLOSED = 'SystemHand'      # = Win 10 Critical Stop; use Sonata/Windows Critical Stop.wav
-SOUND_REPETITIONS = 50
+SOUND_REPETITIONS = 40
 
 
 def monitor_roof(url=STATUS_URL):

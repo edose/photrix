@@ -23,9 +23,10 @@ SUBIMAGE_MARGIN = 1.5  # subimage pixels around outer annulus, for safety
 RADIANS_PER_DEGREE = pi / 180.0
 
 # R_DISC altered 10 -> 9 Aug 16 2019 for new L-500 mount.
-R_DISC = 9  # for aperture photometry, likely to be adaptive (per image) later.
-R_INNER = 15  # "
-R_OUTER = 20  # "
+# R_DISC and other radii increased to ca. mp2021 trial values, using nominal FWHM = 6.5 pixels.
+R_DISC = 11  # for aperture photometry, likely to be adaptive (per image) later.
+R_INNER = 18  # "
+R_OUTER = 26  # "
 
 
 class Image:

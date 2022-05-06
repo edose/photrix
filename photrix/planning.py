@@ -1,14 +1,23 @@
+"""photrix.planning.py"""
+
+__author__ = "Eric Dose :: New Mexico Mira Project, Albuquerque"
+
 # Python system imports:
 import os
 import os.path
 from collections import OrderedDict
 from datetime import datetime, timezone, timedelta
-from math import floor, sqrt, ceil
+from math import floor, sqrt, ceil, cos, sin, pi
+from random import seed, uniform, shuffle
 
 # External library imports:
 import ephem
 import numpy as np
 import pandas as pd
+from astropy.coordinates import SkyCoord, EarthLocation, AltAz, Angle
+from astropy.stats import circmean
+from astropy import units as u
+from astropy.time import Time
 
 # Internal (photrix) imports:
 from .fov import make_fov_dict, FovError, Fov
@@ -18,7 +27,8 @@ from .util import RaDec, datetime_utc_from_jd, hhmm_from_datetime_utc, \
     degrees_as_hex, jd_from_datetime_utc, Timespan, event_utcs_in_timespan
 from .web import get_aavso_webobs_raw_table
 
-__author__ = "Eric Dose :: New Mexico Mira Project, Albuquerque"
+DEGREES_PER_RADIAN = 180.0 / pi
+
 
 # USAGE: *******************************************************************
 # pl.make_an_roster('20170525', 'c:/Astro/ACP/AN20170525', user_update_tolerance_days=0.1,
@@ -49,9 +59,10 @@ PHOTRIX_ROOT_DIRECTORY = os.path.dirname(os.path.dirname(os.path.abspath(__file_
 LOCAL_OBS_CACHE_FULLPATH = os.path.join(PHOTRIX_ROOT_DIRECTORY, "local_obs_cache.csv")
 
 EARLIEST_AN_DATE = '20170101'
-LATEST_AN_DATE = '20221231'  # Update this later, I suppose.
+LATEST_AN_DATE = '20241231'  # Update this later, I suppose.
 AN_START_REL_UTC_0000 = 19  # timedelta(UTC of actual AN start - nominal AN @ 0000 hours UTC)
 #    (19 is good for North America)
+NO_COMMENT_STRING = '[no plan comment given]'
 
 # ********** Roster & cache parameters:
 AAVSO_WEBOBS_ROWS_TO_GET = 100
@@ -61,15 +72,21 @@ DEFAULT_UPDATE_TOLERANCE_DAYS = 0.0416667  # 1 hour
 FORCE_AUTOGUIDE_TOKEN = 'AG+'
 
 # ********** ACP Timing:
-CHILL_DURATION = 360  # seconds
+CHILL_DURATION = 240  # seconds.
 PLAN_START_DURATION = 30  # seconds
-AUTOFOCUS_DURATION = 180  # seconds, includes slew & filter wheel changes
+AUTOFOCUS_DURATION = 260  # seconds, includes slew & filter wheel changes
 CHAIN_DURATION = 3  # seconds; a guess
 QUITAT_DURATION = 3  # seconds
 SHUTDOWN_DURATION = 480  # seconds; a guess
 
 # ********** Mount (L-500) Timing:
 NEW_TARGET_DURATION = 34.3  # seconds; slew + settle + ACP processing (no guider start etc)
+
+# ********** Dome (generic azimuth-tracking) Timing:
+DOME_IS_ACTIVE = True
+DOME_AZ_SLEW_SPEED = 3  # degrees/second.
+DOME_OPEN_TIME = 270    # seconds.
+DOME_CLOSE_TIME = 270   # seconds.
 
 # ********** Camera & filter wheel (STXL-6303E) Timing:
 MAX_AGGREGATE_EXPOSURE_NO_GUIDING = 119  # seconds;
@@ -81,13 +98,17 @@ NEW_EXPOSURE_DURATION_EX_GUIDER_CHECK = 19.3  # seconds; image download, plate s
 # ********** EVD Preferences:
 BURN_EXPOSURE = 240  # seconds per exposure
 V_MAG_WARNING = 16.5  # a predicted V magnitude > this will trigger a warning line in Summary file.
-ABSOLUTE_MAX_EXPOSURE_TIME = 600  # seconds
+ABSOLUTE_MAX_EXPOSURE_TIME = 900  # seconds
 ABSOLUTE_MIN_EXPOSURE_TIME = 2.5  # seconds [20190318, was 3 seconds]
 MIN_TOTAL_EXP_TIME_PER_FILTER = 9  # seconds, thus 4 [was 3] exposures max per filter for LPVs
 
 # ********** MP parameters:
-# defining MP color sequence as tuple of tuples: (filter, seconds exposure, repeats). Exps at V mag = 14.
-MP_COLOR_V14 = (('I', 240, 1), ('R', 160, 1), ('V', 160, 2), ('R', 160, 1), ('I', 240, 1))
+# defining MP color sequence as tuple of tuples: (filter, seconds exposure, repeats).
+# Sloan-filter exposures at V mag = 14, intended to give S/N ~ 200.
+# Estimated from first Sloan images taken AN20220408, NMS.
+COLOR_SEQUENCE_AT_V14 = (('SR', 90, 1), ('SG', 200, 1), ('SI', 180, 1),
+                         ('SR', 90, 1), ('SI', 180, 1), ('SG', 200, 1), ('SR', 90, 1))
+COLOR_FORCE_AUTOGUIDE = True  # rather than cluttering Excel file with 'AG+'.
 
 
 def make_df_fov(fov_directory=FOV_DIRECTORY, fov_names_selected=None):
@@ -166,7 +187,7 @@ def filter_df_fov_by_fov_priority(df_fov, min_fov_priority=None, include_std_fov
 
 
 def complete_df_fov_an(df_fov, user_update_tolerance_days=DEFAULT_UPDATE_TOLERANCE_DAYS,
-                       an_string=None, site_name="DSW",
+                       an_string=None, site_name="NMS_Dome",
                        min_available_seconds=MIN_AVAILABLE_SECONDS_DEFAULT,
                        min_moon_degrees=MIN_MOON_DEGREES_DEFAULT,
                        remove_zero_an_priority=True,
@@ -664,7 +685,7 @@ class AavsoWebobs:
 
 # ---------------------------------------------
 
-def make_an_roster(an_date_string, output_directory, site_name='DSW', instrument_name='Borea',
+def make_an_roster(an_date_string, output_directory, site_name='NMS_Dome', instrument_name='Borea',
                    user_update_tolerance_days=DEFAULT_UPDATE_TOLERANCE_DAYS,
                    exp_time_factor=1, min_an_priority=6):
     # TODO: recode download loop to only download those FOVs visible tonight & for which priority might
@@ -999,7 +1020,7 @@ class Event:
         return 'Event object: ' + self.summary_text
 
 
-def make_an_plan(plan_excel_path='c:/24hrs/Planning.xlsx', site_name='DSW', instrument_name='Borea',
+def make_an_plan(plan_excel_path='c:/24hrs/Planning.xlsx', site_name='NMS_Dome', instrument_name='Borea',
                  fov_dict=None, earliest_an_start_hhmm=None, exp_time_factor=1):
     """  Main user fn to take sketch Excel file and generate Summary and ACP Plan files.
     :param plan_excel_path: full path to Excel file holding all info for one night's observations.
@@ -1032,7 +1053,7 @@ def make_an_plan(plan_excel_path='c:/24hrs/Planning.xlsx', site_name='DSW', inst
     make_summary_file(plan_list, fov_dict, an, output_directory, exp_time_factor)
 
 
-def parse_excel(excel_path, site_name='DSW'):
+def parse_excel(excel_path, site_name='NMS_Dome'):
     """
     Parses sketch Excel file, returns a list of Plan objects containing all directives and the
         relevant Astronight object.
@@ -1057,7 +1078,7 @@ def parse_excel(excel_path, site_name='DSW'):
            limited, so be careful!)
        All text between "IMAGE" and first word including a "=" character will make up the target name.
     COLOR  target_name  multiplier  RA  Dec  :: for MP color imaging (mp_color.py),
-        e.g., "COLOR MP_1626 1.1x 21:55:08 +24:24:45. 'x' in multipler is optional but recommended.
+        e.g., "COLOR MP_1626 1.1x 21:55:08 +24:24:45". 'x' in multipler is optional but recommended.
 
     ----- Legal directives:
     PLAN  plan_id  ::  starts a plan section and names it.
@@ -1069,13 +1090,15 @@ def parse_excel(excel_path, site_name='DSW'):
     QUITAT nn:nn  ::  quit plan at nn:nn UTC
     WAITUNTIL nn:nn  ::  wait to start plan (first Set) until nn:nn UTC
     SKIPFILTER filter_name  ::  skip filter for following targets; omit filter_name to restore all filters.
+    DOMEOPEN  :: open dome (or roll-off roof) now.
+    DOMECLOSE  :: close dome (or roll-off roof) now.
     SHUTDOWN  ::  perform ACP shutdown of camera and park scope
     CHAIN plan_id  ::  chain to next plan
     BURN target_id RA Dec  ::  shorthand for IMAGE target_id V=240sec(1) I=240sec(1) RA Dec
     IMAGE target_id exp_specs RA Dec  ::  take images of target at RA, Dec; exp_specs define the
        filters and exposures, e.g., V=12.8 R=120sec(2) I=11(3) where 12.8 is a magnitude, 120sec
        is 120 seconds, and (2) specifies 2 exposures (and resulting images).
-    COLOR target_id multipler RA Dec :: take MP color sequence defined by MP_COLOR_V14.
+    COLOR target_id multipler RA Dec :: take MP color sequence defined by COLOR_SEQUENCE_AT_V14.
     fov_name  ::  if line begins with none of the above, it's a FOV name and takes filters, exposures,
         RA, and Dec from its FOV file.
 
@@ -1141,7 +1164,7 @@ def parse_excel(excel_path, site_name='DSW'):
                 if len(split_str) > 1:
                     comment = split_str[1].rstrip()
                 else:
-                    comment = None
+                    comment = NO_COMMENT_STRING
 
                 # Determine action type and add action to directive_list:
                 if cell_str_lower.startswith('plan'):
@@ -1179,6 +1202,10 @@ def parse_excel(excel_path, site_name='DSW'):
                         value = command[len('skipfilters'):].strip()  # deprecated SKIPFILTERS (plural) case
                     skipfilter_list = [item.strip() for item in value.split()]
                     this_plan.directives.append(Directive('skipfilter', {'filters': skipfilter_list}))
+                elif cell_str_lower.startswith('domeopen'):
+                    this_plan.directives.append(Directive('domeopen', {}))
+                elif cell_str_lower.startswith('domeclose'):
+                    this_plan.directives.append(Directive('domeclose', {}))
                 elif cell_str_lower.startswith('shutdown'):
                     this_plan.directives.append(Directive('shutdown', {}))
                 elif cell_str_lower.startswith('chain'):
@@ -1233,23 +1260,23 @@ def parse_excel(excel_path, site_name='DSW'):
                                                                'dec': dec_string,
                                                                'force_autoguide': force_autoguide}))
                 elif cell_str_lower.startswith('color'):
-                    value = command[len('image'):].strip()
+                    value = command[len('color'):].strip()
                     force_autoguide, value = get_and_remove_option(value, FORCE_AUTOGUIDE_TOKEN)  # ignored.
                     subvalue, ra_string, dec_string = extract_ra_dec(value)
                     target_name, multiplier_string = tuple(subvalue.rsplit(maxsplit=1))
-                    # target_name, multiplier_string, ra_string, dec_string =
-                    # tuple(value.rsplit(maxsplit=3))
                     multiplier_string = multiplier_string.lower().split('x')[0]
                     multiplier = float(multiplier_string)
                     entries = tuple([(filt, multiplier * exp14, repeats)
-                                     for (filt, exp14, repeats) in MP_COLOR_V14])
+                                     for (filt, exp14, repeats) in COLOR_SEQUENCE_AT_V14])
                     this_plan.directives.append(Directive('color',
                                                           {'target_name': target_name,
                                                            'entries': entries,
                                                            'multiplier_string': multiplier_string,
                                                            'ra': ra_string,
                                                            'dec': dec_string,
-                                                           'force_autoguide': True}))  # always autoguide.
+                                                           'force_autoguide': COLOR_FORCE_AUTOGUIDE,
+                                                           'comment': comment}  # store comment for color.
+                                                          ))
                 else:
                     # Anything else we treat as a fov_name:
                     value = command  # use the whole command string (before comment); no directive string.
@@ -1296,7 +1323,8 @@ def reorder_directives(plan_list):
                                 ['afinterval'],
                                 ['sets'],
                                 ['waituntil', 'chill', 'stare', 'fov', 'burn',
-                                 'image', 'color', 'autofocus', 'comment', 'skipfilter'],
+                                 'image', 'color', 'autofocus', 'comment', 'skipfilter',
+                                 'domeopen', 'domeclose'],
                                 ['shutdown'],
                                 ['chain']]
     for plan in plan_list:
@@ -1359,6 +1387,7 @@ def make_events(plan_list, instrument, fov_dict, an, exp_time_factor):
                 this_summary_text = 'CHILL  ' + '{0:g}'.format(directive.spec['tempC'])
                 this_acp_entry = ['#CHILL  ' + '{0:g}'.format(directive.spec['tempC'])]
                 this_event = Event('chill', this_summary_text, this_acp_entry, CHILL_DURATION)
+                this_event.setpoint = directive.spec['tempC']
                 plan.events.append(this_event)
 
             elif directive.type == 'stare':
@@ -1474,7 +1503,7 @@ def make_events(plan_list, instrument, fov_dict, an, exp_time_factor):
                                              force_autoguide=directive.spec['force_autoguide'])
                 event_duration = target_overhead + 1 * repeat_duration
                 this_summary_text = 'Image ' + target_name +\
-                                    ' ' + ''.join([f + '=' + '{0:g}'.format(e) + 's(' + str(c) + ')'
+                                    ' ' + ' '.join([f + '=' + '{0:g}'.format(e) + 's(' + str(c) + ')'
                                                    for (f, e, c) in zip(filters, exp_times, counts)]) +\
                                     ' ' + ra + ' ' + dec
                 if directive.spec['force_autoguide'] is True:
@@ -1484,8 +1513,9 @@ def make_events(plan_list, instrument, fov_dict, an, exp_time_factor):
                                   '#FILTER ' + ','.join(filters) + ' ;',
                                   '#BINNING ' + ','.join(len(filters) * ['1']) + ' ;',
                                   '#COUNT ' + ','.join([str(c) for c in counts]) + ' ;',
-                                  '#INTERVAL ' + ','.join([str(e).split('.0')[0]
-                                                           for e in exp_times]) +
+                                  '#INTERVAL ' +
+                                  ','.join([str(round(e, 1)).split('.0')[0]
+                                            for e in exp_times]) +
                                   ' ; ' + duration_comment,
                                   ';---- from IMAGE directive -----',
                                   target_name + '\t' + ra + '\t' + dec]
@@ -1509,20 +1539,22 @@ def make_events(plan_list, instrument, fov_dict, an, exp_time_factor):
                 filters, counts, exp_times, target_overhead, repeat_duration = \
                     make_color_exposure_data(entries, force_autoguide=True)
                 event_duration = target_overhead + 1 * repeat_duration
-                this_summary_text = 'Color ' + target_name +\
-                                    '  ' + '.'.join(filters) +\
-                                    '  ' + directive.spec['multiplier_string'] +\
-                                    'x  ' + '{0:.1f}'.format(event_duration / 60.0) + ' min.' +\
-                                    '  ' + ra + '  ' + dec
+                this_summary_text = 'Color ' + target_name + \
+                                    ' ' + directive.spec['multiplier_string'] + \
+                                    'x ' + '{0:.1f}'.format(event_duration / 60.0) + ' min.' + \
+                                    ' ' + ra + ' ' + dec
                 if directive.spec['force_autoguide'] is True:
                     this_summary_text += ' AG+'
+                if directive.spec['comment'] != NO_COMMENT_STRING:
+                    this_summary_text += ' ; ' + directive.spec['comment']
                 duration_comment = ' --> ' + str(round(event_duration / 60.0, 1)) + ' min'
                 this_acp_entry = [';', '#DITHER 0 ;',
                                   '#FILTER ' + ','.join(filters) + ' ;',
                                   '#BINNING ' + ','.join(len(filters) * ['1']) + ' ;',
                                   '#COUNT ' + ','.join([str(c) for c in counts]) + ' ;',
-                                  '#INTERVAL ' + ','.join([str(e).split('.0')[0]
-                                                           for e in exp_times]) +
+                                  '#INTERVAL ' +
+                                  ','.join([str(round(e, 1)).split('.0')[0]
+                                            for e in exp_times]) +
                                   ' ; ' + duration_comment,
                                   ';---- from COLOR directive -----',
                                   target_name + '\t' + ra + '\t' + dec]
@@ -1566,6 +1598,20 @@ def make_events(plan_list, instrument, fov_dict, an, exp_time_factor):
                 this_event = Event('skipfilter', this_summary_text, this_acp_entry, event_duration)
                 plan.events.append(this_event)
 
+            elif directive.type == 'domeopen':
+                this_summary_text = 'DOMEOPEN'
+                this_acp_entry = [';', '#DOMEOPEN']
+                event_duration = DOME_OPEN_TIME
+                this_event = Event('domeopen', this_summary_text, this_acp_entry, event_duration)
+                plan.events.append(this_event)
+
+            elif directive.type == 'domeclose':
+                this_summary_text = 'DOMECLOSE'
+                this_acp_entry = [';', '#DOMECLOSE']
+                event_duration = DOME_CLOSE_TIME
+                this_event = Event('domeclose', this_summary_text, this_acp_entry, event_duration)
+                plan.events.append(this_event)
+
             elif directive.type == 'shutdown':
                 this_summary_text = 'SHUTDOWN'
                 this_acp_entry = [';', '#SHUTDOWN']
@@ -1592,7 +1638,7 @@ def make_events(plan_list, instrument, fov_dict, an, exp_time_factor):
 
 def make_timeline(plan_list, an, earliest_hhmm):
     # TODO: SHUTDOWN needs repair, to make it function & stop (1) in mid-plan, (2) even with SETS.
-    # For now, SHUTDOWN must go in it's own (last) plan.
+    # For now, put #SHUTDOWN in its own (last) plan.
 
     # Initialize times & intervals to state before first plan:
     utc_running = None
@@ -1604,13 +1650,14 @@ def make_timeline(plan_list, an, earliest_hhmm):
             utc_running -= timedelta(hours=24)
     utc_most_recent_autofocus = utc_running - timedelta(days=1000)  # keep python happy with a prev value.
     shutdown_performed = False
+    current_chill_setpoint = None
 
     for plan in plan_list:
         plan.utc_start = utc_running
         no_plan_exposures_yet_encountered = True
 
         for i_set in range(1, plan.sets_requested + 1):  # i_set = 1 to sets_requested, inclusive.
-            skipfilter_list = []  # reset at beginning of set execution.
+            # skipfilter_list = []  # reset at beginning of set execution.
             for event in plan.events:
                 # First, do autofocus if AFINTERVAL since latest autofocus has passed or at plan startup:
                 # TODO: rewrite (move?) this, so that long Stare & Image events can have > 1 autofocus.
@@ -1643,8 +1690,12 @@ def make_timeline(plan_list, an, earliest_hhmm):
                         utc_end_event_actual = max(utc_end_event, utc_running)
                 elif event.type in ['comment', 'skipfilter']:
                     utc_end_event_actual = utc_start_event  # zero duration
-                elif event.type in ['chill', 'shutdown', 'autofocus']:
+                elif event.type in ['shutdown', 'autofocus', 'domeopen', 'domeclose']:
                     utc_end_event_actual = utc_start_event + timedelta(seconds=event.duration_total)
+                elif event.type == 'chill':
+                    if event.setpoint != current_chill_setpoint:
+                        utc_end_event_actual = utc_start_event + timedelta(seconds=event.duration_total)
+                        current_chill_setpoint = event.setpoint
                 elif event.type in ['burn', 'stare', 'fov', 'image', 'color']:
                     actual_duration, event_autofocus_count, utc_most_recent_autofocus = \
                         event.calc_actual_duration(utc_start_event, plan.utc_quitat,
@@ -1678,7 +1729,7 @@ def make_timeline(plan_list, an, earliest_hhmm):
                     event.status = 'LIGHT'
                 elif event.type in ['burn', 'stare', 'fov', 'image', 'color', 'autofocus', 'chill']:
                     event.status = str(i_set)  # default
-                elif event.type in ['shutdown', 'waituntil']:
+                elif event.type in ['shutdown', 'waituntil', 'domeopen', 'domeclose']:
                     event.status = 'ok'
                 else:
                     event.status = ''
@@ -1778,9 +1829,10 @@ def make_summary_file(plan_list, fov_dict, an, output_directory, exp_time_factor
     an_year = int(an.an_date_string[0:4])
     an_month = int(an.an_date_string[4:6])
     an_day = int(an.an_date_string[6:8])
-    day_of_week = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'] \
+    day_of_week = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']\
         [datetime(an_year, an_month, an_day).weekday()]
-    header_lines = ['SUMMARY for AN' + an.an_date_string + '   ' + day_of_week.upper(),
+    header_lines = ['SUMMARY for AN' + an.an_date_string + '   ' + day_of_week.upper() +
+                    '     (site = ' + an.site.name + ')',
                     '     as generated by photrix at ' +
                     '{:%Y-%m-%d %H:%M  UTC}'.format(datetime.now(timezone.utc)),
                     '     using exposure time factor = ' + '{:5.3f}'.format(exp_time_factor) +
@@ -1805,6 +1857,7 @@ def make_summary_file(plan_list, fov_dict, an, output_directory, exp_time_factor
             status_text = 'ok'
         return ' '.join([status_text.rjust(8), hhmm_text + utc_day_indicator,
                          altitude_text, summary_text])
+    # END local function.
 
     # Construct summary_lines for every event:
     for i_plan, plan in enumerate(plan_list):
@@ -1908,7 +1961,7 @@ def make_summary_file(plan_list, fov_dict, an, output_directory, exp_time_factor
                                     '      >>>>>>>>>> WARNING: ' + event.target_name +
                                     ' MOON DISTANCE = ' +
                                     str(int(round(moon_dist))) +
-                                    u'\N{DEGREE SIGN}' + ', vs. max ' +
+                                    u'\N{DEGREE SIGN}' + ', vs. min ' +
                                     str(MIN_MOON_DEGREES_DEFAULT) +
                                     u'\N{DEGREE SIGN}')
 
@@ -2057,8 +2110,8 @@ def make_image_exposure_data(filter_entries, instrument, exp_time_factor=1, forc
             try:
                 this_count = int(bits[1].replace(")", ""))
             except ValueError:
-                print(' >>>> PARSING ERROR:', entry)
-                return
+                # print(' >>>> PARSING ERROR:', entry)
+                raise ValueError(' >>>> PARSING ERROR (probably the number of repeats): ' + entry)
         # TODO: I'm not crazy about the next if-statement's condition.
         if 's' in bits[0].lower():
             this_exp_time = float(bits[0].lower().split('s')[0])
@@ -2145,16 +2198,169 @@ def extract_ra_dec(value_string):
         # RA and Dec are in TheSkyX format, e.g., 06h 49m 40.531s  +63° 00' 06.920":
         split_string = tuple(value_string.rsplit(maxsplit=6))
         if len(split_string) != 7:
-            print(' >>>>> ERROR: cannot parse value string', value_string)
-            return None
+            raise SyntaxError('Cannot parse apparent TheSkyX-format RA-Dec string: ', value_string)
         subvalue = split_string[0]
-        ra_items = [s.replace('h', '').replace('m', '').replace('s', '').strip() 
+        ra_items = [s.replace('h', '').replace('m', '').replace('s', '').strip()
                     for s in split_string[1:4]]
-        ra = ':'.join(ra_items)        
+        ra = ':'.join(ra_items)
         dec_items = [s.replace('°', '').replace('\'', '').replace('"', '').strip() 
                      for s in split_string[4:7]]
         dec = ':'.join(dec_items)
     else:
         # RA and Dec are given directly in std hex:
+        if len(split_string) != 3:
+            raise SyntaxError('Cannot parse apparent hex-format RA-Dec string ' + split_string)
         subvalue, ra, dec = split_string
     return subvalue, ra, dec
+
+
+__________PLANEWAVE_MOUNT_POINT_LIST______________________________________________ = 0
+
+
+def make_planewave_point_list(n_pts, summer_winter, latitude=32.9, longitude=-105.5,
+                              fraction_extra_near_ecliptic=0.25):
+    """Make mount model point list for Planewave L-series mount, points being in rational order.
+       Minimizes dome movement. Begins near zenith, then makes one circuit North, East, South, West, North.
+       Each line is one point in degrees: az, alt.
+       May well return 10-12 points more than requested in n_pts.
+    :param n_pts: [int]
+    :param summer_winter: 'summer' or 'winter', to locate ecliptic. [string]
+    :param latitude: scope latitude in degrees. [float]
+    :param longitude: scope longitude in degrees, negative West. [float]
+    :param fraction_extra_near_ecliptic (limited to [0 to 0.5]). [float]
+    :return: None. Prints list of (az, alt) tuples, in degrees
+    """
+    min_pts = 70
+    if n_pts < min_pts:
+        raise ValueError('At least ' + str(min_pts) + ' points needed for proper mount model.')
+    if summer_winter.lower() not in ['winter', 'summer']:
+        raise ValueError('Parameter summer_winter must be \'summer\' or \'winter\'.')
+    seed(2022)
+
+    # Block_a: points around zenith, for stable start in case az polar alignment is off.
+    # Block_b1: points ringing 30-35 degrees alt.
+    # Block_b2: points between 35 and 70 degrees.
+    # Block_c: extra points around ecliptic (nb: winter vs summer cases).
+    n_pts_block_a = 10
+    n_pts_block_c = round(max(0.0, min(0.5, fraction_extra_near_ecliptic)) * n_pts)
+    n_pts_blocks_b = n_pts - n_pts_block_a - n_pts_block_c
+    n_pts_block_b1 = round(0.4 * n_pts_blocks_b)
+    n_pts_block_b2 = n_pts - n_pts_block_a - n_pts_block_b1 - n_pts_block_c
+    print('\nblock points =', str(n_pts_block_a),
+          '(' + str(n_pts_block_b1) + ', ' + str(n_pts_block_b2) + ')',
+          str(n_pts_block_c))
+
+    # Make block a (around zenith):
+    az_spacing = 360.0 / n_pts_block_a
+    block_az = [(az_spacing * (i + 0.5) + uniform(-5, 5)) % 360.0 for i in range(n_pts_block_a)]
+    block_alt = [75.0 + uniform(-3, 3) for i in range(n_pts_block_a)]
+    block_a_points = list(zip(block_az, block_alt))
+    block_a_points.sort(key=lambda x: x[0])  # sort by increasing azimuth (N,E,S,W).
+
+    # Make block b1 (30-35 alt):
+    az_spacing_b1 = 360.0 / n_pts_block_b1
+    az_b1 = [(az_spacing_b1 * (i + 0.5) + uniform(-5, 5)) % 360.0 for i in range(n_pts_block_b1)]
+    alt_b1 = [30.0 + uniform(0, 5) for i in range(n_pts_block_b1)]
+    block_b1_points = [(az, alt) for (az, alt) in zip(az_b1, alt_b1)]
+
+    # Make block b2 (35-70 alt):
+    az_spacing_b2 = 360.0 / n_pts_block_b2
+    az_b2 = [(az_spacing_b2 * (i + 0.5) + uniform(-5, 5)) % 360.0 for i in range(n_pts_block_b2)]
+    alt_b2 = [35.0 + uniform(0, 35.0) for i in range(n_pts_block_b2)]
+    block_b2_points = [(az, alt) for (az, alt) in zip(az_b2, alt_b2)]
+
+    # Block C: band around ecliptic:
+    if summer_winter.lower() == 'summer':
+        dec_center, dec_width = -10, 20  # center declination of ecliptic, total width of band to sample.
+    else:
+        dec_center, dec_width = 20, 30
+    location = EarthLocation(lon=longitude * u.degree, lat=latitude * u.degree)
+    time = Time.now()  # actual time is irrelevant so long as it's constant, as we search all RA values.
+    block_c_points = []
+    ra_deg = 0.0
+    while len(block_c_points) < n_pts_block_c:
+        # Space points in RA more or less evenly:
+        ra_deg = (ra_deg + uniform(12.0, 18.0)) % 360.0
+        dec_deg = dec_center + uniform(-dec_width / 2.0, dec_width / 2.0)
+        sc = SkyCoord(ra=ra_deg * u.degree, dec=dec_deg * u.degree, frame='icrs')
+        altaz = sc.transform_to(AltAz(obstime=time, location=location))
+        az, alt = altaz.az.degree % 360.0, altaz.alt.degree
+        if alt >= 30.0:
+            block_c_points.append(tuple([az, alt]))
+
+    # Remove block b and c points too low around celestial pole:
+    # TODO: move this process to astropy2022.
+    max_abs_hourangle_degrees = 6 * 15  # i.e., RA hours either side of meridian.
+    min_abs_cos_hourangle = cos(max_abs_hourangle_degrees / DEGREES_PER_RADIAN)
+    block_bc_points = block_b1_points + block_b2_points + block_c_points
+    # Formulae (1) and (2) from http://star-www.st-and.ac.uk/~fv/webnotes/chapter7.htm:
+    # phi=latitude, delta=declination, H=hourangle, A=target azimuth, a=target altitude.
+    cos_phi, sin_phi = cos(latitude / DEGREES_PER_RADIAN), sin(latitude / DEGREES_PER_RADIAN)
+    block_bc_points_to_keep = []
+    for (az, alt) in block_bc_points:
+        cos_a, sin_a = cos(alt / DEGREES_PER_RADIAN), sin(alt / DEGREES_PER_RADIAN)
+        cos_A = cos(az / DEGREES_PER_RADIAN)
+        # (1) sin(δ) = sin(a) sin(φ) + cos(a) cos(φ) cos(A)
+        sin_delta = (sin_a * sin_phi) + (cos_a * cos_phi * cos_A)
+        cos_delta = sqrt(1.0 - sin_delta ** 2)  # happily, cosine of declination is always non-negative.
+        # (2) cos(H) = { sin(a) - sin(δ) sin(φ) } / { cos(δ) cos(φ) }
+        cos_H = (sin_a - sin_delta * sin_phi) / (cos_delta * cos_phi)
+        if cos_H > min_abs_cos_hourangle:
+            block_bc_points_to_keep.append((az, alt))
+            print('point', '{0:.2f}, {1:.2f}'.format(az, alt), 'kept,'
+                  ' cos(hourangle) =', '{0:.2f}'.format(cos_H))
+        else:
+            print('point', '{0:.2f}, {1:.2f}'.format(az, alt), 'removed for hourangle.')
+    block_bc_points = block_bc_points_to_keep
+
+    # Sample block b and c points into two equal groups, sort each to make CW then CCW az circuits:
+    seed(2022)
+    shuffle(block_bc_points)  # in-place.
+    n_1 = floor(len(block_bc_points) / 2.0)
+    block_bc_1, block_bc_2 = block_bc_points[:n_1], block_bc_points[n_1:]
+    block_bc_1.sort(key=lambda x: +x[0])  # sort by increasing azimuth (N,E,S,W).
+    block_bc_2.sort(key=lambda x: -x[0])  # sort by decreasing azimuth (N,W,S,E).
+
+    # Construct all_points:
+    all_points = block_a_points + block_bc_1 + block_bc_2
+
+    # Last: add extra points whenever az slews are too long and camera might not keep up.
+    max_az_change_for_sync = 20  # degrees; the maximum dome slew for which dome can keep up.
+    az_change_per_extra_point = 36  # degrees; the dome slew expected for a wasted mount slew/image cycle.
+    alt_dither_per_extra_point = 5  # degrees
+    new_all_points = [all_points[0]]
+    for i in range(len(all_points) - 1):
+        d_az_raw = abs(all_points[i+1][0] - all_points[i][0])
+        d_az = min(d_az_raw, 360.0 - d_az_raw)
+        n_extra_points = ceil((d_az - max_az_change_for_sync) / az_change_per_extra_point)
+        extra_points = []
+        for i_pt in range(n_extra_points):
+            fraction = 0.5 + 0.5 * (float(i_pt) / float(n_extra_points))
+            az_extra = Angle(circmean(data=np.array([all_points[i][0], all_points[i + 1][0]]) * u.deg,
+                                      weights = np.array([1.0 - fraction, fraction]))).\
+                wrap_at(360 * u.deg).degree
+            # az_extra = (1.0 - fraction) * all_points[i][0] + fraction * all_points[i + 1][0]
+            alt_extra = (1.0 - fraction) * all_points[i][1] + fraction * all_points[i + 1][1]
+            extra_point = (az_extra, alt_extra)
+            print('\n   adding extra point', '{0:.2f}, {1:.2f}'.format(extra_point[0], extra_point[1]))
+            print('      between', '{0:.2f}, {1:.2f}'.format(all_points[i][0], all_points[i][1]),
+                  'and', '{0:.2f}, {1:.2f}'.format(all_points[i + 1][0], all_points[i + 1][1]))
+            extra_points.append(extra_point)
+        new_all_points.extend(extra_points)
+        new_all_points.append(all_points[i+1])
+
+    # Write points to file:
+    point_lines = ['{0:.2f}, {1:.2f}'.format(az, alt) for az, alt in new_all_points]
+    fullpath = os.path.join(PHOTRIX_ROOT_DIRECTORY, 'point_list_' + summer_winter.lower() + '.txt')
+    print(fullpath)
+    print(str(len(new_all_points)), 'points.')
+    if len(new_all_points) < 4 * n_pts:
+        with open(fullpath, 'w') as this_file:
+            this_file.write('\n'.join(point_lines))
+
+
+def test_make_pw_point_list():
+    n_pts = 70
+    summer_winter = 'summer'
+    make_planewave_point_list(n_pts, summer_winter, latitude=32.9, longitude=-105.5,
+                              fraction_extra_near_ecliptic=0.25)

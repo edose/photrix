@@ -1,0 +1,17 @@
+{
+  "name": "NMS_Dome",
+  "description": "New Mexico Skies Dome 12, west of Mayhill, New Mexico",
+  "longitude": "-105:31:44",
+  "latitude": "+32:54:11",
+  "elevation": 2228,
+  "min_altitude": 28.5,
+  "twilight_sun_alt": -9,
+  "extinctions_set": "adapted from AN 20191118",
+  "extinction": {
+    "Clear": 0.14,
+    "V": 0.210,
+    "R": 0.163,
+    "I": 0.115,
+    "BB": 0.15
+  }
+}
