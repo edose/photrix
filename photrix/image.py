@@ -487,7 +487,7 @@ class FITS:
     def _is_calibrated_by_maxim_5_6(self):
         hval = self.header_value('CALSTAT')
         if hval is not None:
-            if hval.strip().upper() == 'BDF':  # calib. by MaxIm DL v. 5 or 6
+            if hval.strip().upper() in ('BDF', 'DF'):  # calib. by MaxIm DL v. 5 or 6
                 return True
         return False
 

@@ -1103,6 +1103,8 @@ def parse_excel(excel_path, site_name='NMS_Dome'):
         RA, and Dec from its FOV file.
 
     """
+    # TODO: Add SCREENFLATS to list of recognized TARGET TYPES, in Excel.
+    # TODO: Retain comments after TARGET TYPE data, each Excel cell.
     df = pd.read_excel(excel_path, header=None).dropna(axis=0, how='all').dropna(axis=1, how='all')
     nrow = len(df)
     ncol = len(df.columns)
@@ -1112,9 +1114,11 @@ def parse_excel(excel_path, site_name='NMS_Dome'):
     if int(EARLIEST_AN_DATE) < int(an_date_string) < int(LATEST_AN_DATE):
         an = Astronight(an_date_string, site_name)
     else:
-        print('>>>>> STOPPING: an_date_string '" + an_date_string + "
-              ""' SEEMS UNREASONABLE (update LATEST_AN_DATE?).')
-        return
+        raise ValueError("an_date_string '" + an_date_string +
+                         "' SEEMS UNREASONABLE (need to update LATEST_AN_DATE?).")
+        # print('>>>>> STOPPING: an_date_string '" + an_date_string + "
+        #       ""' SEEMS UNREASONABLE (update LATEST_AN_DATE?).')
+        # return
 
     plan_list = []
     this_plan = None
@@ -2194,6 +2198,8 @@ def extract_ra_dec(value_string):
     :return: 3-tuple: subvalue (= everything but RA and Dec), ra, dec. [3-tuple of strings].
     """
     split_string = tuple(value_string.rsplit(maxsplit=2))
+    if len(split_string) <= 2:
+        raise SyntaxError('Malformed value string: ' + value_string)
     if split_string[1].endswith('\'') and split_string[2].endswith('\"'):
         # RA and Dec are in TheSkyX format, e.g., 06h 49m 40.531s  +63° 00' 06.920":
         split_string = tuple(value_string.rsplit(maxsplit=6))

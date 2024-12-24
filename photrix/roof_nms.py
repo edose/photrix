@@ -23,8 +23,8 @@ from imap import get_most_recent_relevant_email
 THIS_PACKAGE_ROOT_DIRECTORY = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 INI_DIRECTORY = os.path.join(THIS_PACKAGE_ROOT_DIRECTORY, 'ini')
 
-NMS_STATUS_URL = 'https://www.nmskies.com/weather.php'
-NMS_STATUS_DICT = defaultdict(lambda: 'unknown',  # default if given image name is unknown.
+NMS_STATUS_URL = 'https://nmskies.com/weather.php'
+NMS_STATUS_DICT = defaultdict(lambda: 'unknown',  # default if image name is unknown.
                               {'daylight.jpg': 'closed',
                                'clouds.jpg': 'closed',
                                'snow.jpg': 'closed',
@@ -132,7 +132,8 @@ def monitor_nms_status_via_html():
                 play_sound_alias(SOUND_ON_CLOSING, SOUND_REPETITIONS_ON_STATUS_CHANGE)
             elif status not in ['closed', 'open']:  # only get here if there is a problem.
                 play_sound_alias(SOUND_ON_CLOSING, 4)
-                print('STOPPING ON ERROR: status is >' + status + '<')
+                print('STOPPING ON ERROR: status is >' + status + '<' +
+                      ' //  status_image_name is >' + image_name + '<')
                 break
         previous_status = status
         sleep(SECONDS_BETWEEN_HTML_QUERIES)
